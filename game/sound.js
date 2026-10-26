@@ -121,6 +121,15 @@ window.BodySound = (() => {
       burst(c, o, t + 0.08, 'bandpass', 800, 1400, 0.6, 1.8, 0.16, 0.35);                               // the crowd's roar, rising
       burst(c, o, t + 0.1, 'bandpass', 2200, 2600, 0.8, 1.5, 0.05, 0.4);
     },
+    // into the toilet (the end of the body): a deep plunk, the water thrown up, then bubbles under the surface
+    splash: (c, o, t) => {
+      tone(c, o, t, 'sine', 190, 68, 0.2, 0.5, 0.002, 0.16);
+      tone(c, o, t + 0.005, 'sine', 460, 1350, 0.06, 0.22, 0.002, 0.05);
+      burst(c, o, t, 'bandpass', 1300, 520, 0.9, 0.38, 0.42, 0.004);
+      burst(c, o, t + 0.03, 'highpass', 4200, 3000, 0.7, 0.28, 0.16, 0.01);
+      const w = water(c, o, 1600);
+      [[0.16, 640], [0.24, 820], [0.31, 560], [0.4, 980], [0.5, 700], [0.62, 880]].forEach(([d, f]) => bubble(c, w, t + d, f, 0.1));
+    },
     bbOut: (c, o, t) => { [67, 63, 60].forEach((n, i) => tone(c, o, t + i * 0.16, 'triangle', NOTE(n), null, 0.24, 0.18, 0.01)); },
   };
 

@@ -1262,3 +1262,4 @@ from eye import T_retina, T_vitreous, T_lens, T_iris, T_cornea  # noqa: E402
 from variants import (T_renalart, T_carotid, T_vertebral, T_sma, T_efferent, T_pulmvein, T_ivc, T_pulmart,  # noqa: E402
                       T_latrium, T_lventricle, T_bronchiole, T_temporal, T_parietal, T_occipital, T_medulla, T_opticnerve,
                       T_duodenum, T_ileum, T_cecum, T_rectum, T_anus)
+from toilet import T_toilet  # noqa: E402  (stage 2)

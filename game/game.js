@@ -25,7 +25,9 @@
   const MAXY = GY - TOPY - PH;                  // ... as a height of the feet above the floor
   const FLOAT_BOTTOM = GY - 15.5, HANG_BOTTOM = GY - 15.5;     // under it a sliding player passes, a running one does not
   // the course: places (id, Korean name, English name, [look, length in units] ...). Every place has a look of its own
-  // (the pancreas and the efferent arteriole pass through two); its name shows once, on arrival. After the anus it starts again
+  // (the pancreas and the efferent arteriole pass through two); its name shows once, on arrival. Stage 1 is the body;
+  // at the anus a cut scene takes you out into the toilet: stage 2, down the drains (after its last place, for now, the
+  // body again)
   const PLACES = [
     ['esophagus', '식도', 'Esophagus', ['eso', 1500]], ['stomach', '위', 'Stomach', ['stomach', 1900]],
     ['duodenum', '십이지장', 'Duodenum', ['duodenum', 2200]],
@@ -61,13 +63,18 @@
     ['cecum', '맹장', 'Cecum', ['cecum', 1100]], ['colon', '대장', 'Large intestine', ['colon', 5700]],
     ['rectum', '직장', 'Rectum', ['rectum', 1100]], ['anus', '항문', 'Anus', ['anus', 900]],
   ];
+  const STAGE2 = PLACES.length;                     // the first place of stage 2
+  PLACES.push(['toiletBowl', '변기 물속', 'Toilet bowl', ['toilet', 1500]]);
   // the course as stretches of one look: id, Korean name, English name, look, length, place number
   const COURSE = [];
   PLACES.forEach((p, k) => { for (const [look, len] of p.slice(3)) COURSE.push([p[0], p[1], p[2], look, len, k]); });
   const STARTS = []; let LAP = 0;
   for (const s of COURSE) { STARTS.push(LAP); LAP += s[4]; }
+  const S2_I = COURSE.findIndex((st) => st[5] === STAGE2), S2_X = STARTS[S2_I];       // where stage 2 starts in the lap
+  const stageOf = (lx) => (lx >= S2_X ? 2 : 1);
+  const stageSpan = (st) => (st === 2 ? [S2_X, LAP] : [0, S2_X]);
   const CHAR_NAMES = { tardigrade: '물곰', lacto: '유산균', paramecium: '짚신벌레', amoeba: '아메바', daphnia: '물벼룩', pillbug: '공벌레', ladybug: '무당벌레', jelly: '아기 해파리', sub: '초소형 잠수정', phage: '박테리오파지' };
-  const PTS = { vitC: 10, o2: 10, iron: 30, omega: 30, fiber: 30, atp: 50, multi: 100, heal: 0 };
+  const PTS = { vitC: 10, o2: 10, iron: 30, omega: 30, fiber: 30, atp: 50, multi: 100, heal: 0, drop: 10, soap: 30 };
   const mod = (a, n) => ((a % n) + n) % n;
   const PILOT_HUGE = 0.58;
   // the booster: every 100 things eaten (anything but a heal), 5 seconds at three times the speed, untouchable (a second's grace after)
@@ -127,9 +134,11 @@
     const jx = STARTS[COURSE.findIndex((st) => st[5] === JEJ)], dj = ((jx - s.lx) % LAP + LAP) % LAP;
     const nearBB = G.bb || dj < Math.max(2500, G.v * 8);
     if (nearBB) { files.add('bb_field.webp'); files.add('bb.webp'); files.add(`bat_${G.char}.webp`); }
+    const dc = ((S2_X - s.lx) % LAP + LAP) % LAP;            // the flush cut scene's pictures, near the end of the body
+    if (G.cut || G.cutTail || dc < Math.max(2500, G.v * 8)) files.add('cut_flush.webp');
     if (STAGES.bb && !CAPTURE) { if (nearBB) { SND.fetchSong(STAGES.bb).catch(() => {}); if (SND.ctx) SND.prepare(STAGES.bb).catch(() => {}); } else SND.release(STAGES.bb); }
     for (const f of files) decode(f).catch(() => {});
-    if (!PRELOAD) for (const f of Object.keys(bmp)) if (!files.has(f) && /^(th_|fx_fire|bb|bat_)/.test(f)) release(f);
+    if (!PRELOAD) for (const f of Object.keys(bmp)) if (!files.has(f) && /^(th_|fx_fire|bb|bat_|cut_)/.test(f)) release(f);
     manageSongs();
   }
 
@@ -163,12 +172,14 @@
   function world() { if (rot) ctx.setTransform(0, RS, -RS, 0, GH, 0); else ctx.setTransform(RS, 0, 0, RS, 0, 0); }
   function device() { if (rot) ctx.setTransform(0, 1, -1, 0, GH, 0); else ctx.setTransform(1, 0, 0, 1, 0, 0); }
 
+  let GA = 1;                                        // what is drawn now is drawn this much (the HUD fading in the cut scene)
   function spr(name, x, y, alpha = 1, w = null, h = null) {
     const s = M.sprites[name]; if (!s) return;
     const im = bmp[s.f]; if (!im) return;
-    if (alpha !== 1) ctx.globalAlpha = alpha;
+    const a = alpha * GA;
+    if (a !== 1) ctx.globalAlpha = a;
     ctx.drawImage(im, s.r[0], s.r[1], s.r[2], s.r[3], x, y, w ?? s.w, h ?? s.h);
-    if (alpha !== 1) ctx.globalAlpha = 1;
+    if (a !== 1) ctx.globalAlpha = GA;
   }
   const SW = (n) => M.sprites[n].w, SH = (n) => M.sprites[n].h;
 
@@ -191,7 +202,7 @@
       y: 0, vy: 0, jumps: 0, onGround: true, slide: false, slideHeld: false, fastFall: false,
       invul: 0, nudge: 0, char: charName, obs: [], items: [], pops: [], puffs: [],
       genX: 520, genStation: undefined, lastGate: -1e9, R: rng(12345), nextHeal: 1800, station: -1, theme: COURSE[0][3], prevTheme: null, fade: 1, banner: 0, lapShown: 0,
-      blinkAt: -1, blinkR: rng(4242), vt: 0, rh: null, orb: null, bb: null, bounce: false, pitObj: null,
+      blinkAt: -1, blinkR: rng(4242), vt: 0, rh: null, orb: null, bb: null, cut: null, cutTail: null, bounce: false, pitObj: null,
       o2n: 0, boost: 0, boostT0: -9, boostHeld: 0, boosts: 0, fire: [], fxR: rng(9191),
       intro: [[1950, 'spike'], [3650, 'drop'], [5420, 'pit'], [7250, 'shot'], [9130, 'door']],
     });
@@ -244,7 +255,9 @@
   const VES_L = new Set(['artery', 'vein', 'ivc', 'atrium', 'ventricle', 'pulmart', 'pulmvein', 'latrium', 'lventricle', 'carotid', 'vertebral', 'renalart', 'efferent', 'sma']);
   const BRAIN_L = new Set(['arach', 'pyramidal', 'hippo', 'purkinje', 'fibres', 'temporal', 'parietal', 'occipital', 'medulla', 'opticnerve']);
   const EYE_L = new Set(['retina', 'vitreous', 'lens', 'iris', 'cornea']);
+  const S2_L = new Set(['toilet']);                // stage 2: a falling wad of paper, limescale, a cleaner tablet flying
   function hzFam(look) {
+    if (S2_L.has(look)) return { drop: 'paper', spike: 'scale', door: null, shot: 'tablet' };
     if (GI_L.has(look)) return { drop: look === 'duodenum' ? 'bile' : 'mucus', spike: 'flesh', door: 'sph' };
     if (look === 'liver' || look === 'gallbladder') return { drop: 'bile', spike: 'flesh', door: 'sph' };
     if (VES_L.has(look)) return { drop: 'blood', spike: 'plaque', door: 'valve' };
@@ -273,7 +286,7 @@
     else if (u < 0.5) b = 0; else if (u < 0.56) tp = smooth3((u - 0.5) / 0.06); else if (u < 0.92) tp = 1; else if (u < 0.98) tp = 1 - smooth3((u - 0.92) / 0.06);
     return [b, tp];
   }
-  function curSpeed() { return G.orb || G.bb ? 0 : G.rh ? G.rh.speed : G.v * (0.3 + 0.7 * G.slow) * (G.boost > 0 ? BOOST_K : 1); }
+  function curSpeed() { return G.orb || G.bb || G.cut ? 0 : G.rh ? G.rh.speed : G.v * (0.3 + 0.7 * G.slow) * (G.boost > 0 ? BOOST_K : 1); }
   function arriveIn(dist, v) { return ACC > 0 ? (-v + Math.sqrt(v * v + 2 * ACC * Math.max(0, dist))) / ACC : dist / v; }
   function aimDoor(o) {                              // set its beat so the wanted lip is half way through its hold on arrival
     const ta = G.t + arriveIn(o.x + o.w / 2 - G.x, curSpeed());
@@ -302,8 +315,8 @@
     return o;
   }
   // an antibody flying at you (low: jump; high: slide), a warning at the screen's edge first; it starts on the screen
-  function addShot(x, low, vx) {
-    const name = 'hz_shot';
+  function addShot(x, low, vx, kind) {
+    const name = kind ? 'hz_shot_' + kind : 'hz_shot';
     const o = { x, y: low ? GY + 1 - SH(name) : FLOAT_BOTTOM - SH(name), w: SW(name), h: SH(name), kind: 'shot', name, low, fly: vx, hit: false, spin: G.R() * 6.28, moving: false };
     G.obs.push(o);
     return o;
@@ -387,6 +400,8 @@
   function spawnAhead() {
     const horizon = G.x + NW + 200;
     while (G.genX < horizon) {
+      { const lx = mod(G.genX, LAP), q0 = S2_X - CUT_FACE - Math.min(CUT_BRAKE, Math.max(90, curSpeed() * 0.55)) - CUT_CLEAR;   // the cut scene's stretch
+        if (lx > q0 && lx < S2_X + CUT_AFTER) { G.genX += S2_X + CUT_AFTER - lx; continue; } }
       const theme = themeAt(G.genX), th = M.themes[theme], fam = hzFam(theme);
       const coin = th.coin, special = th.special;
       // how hard: from the speed (0 at the start .. 1 at 460/s, about 5 minutes in), then a little more up to 900
@@ -512,7 +527,7 @@
         const n = d > 0.5 && R() < 0.5 * d ? 2 : 1;
         let meet = x + 40, low = R() < 0.5;
         for (let k = 0; k < n; k++) {
-          addShot(meet + shift, low, vx);
+          addShot(meet + shift, low, vx, fam.shot);
           if (low) jumpArc(meet - v * 0.3, v, coin); else coinRow(meet - 30, 5, GY - 7, coin);
           meet += v * 0.75 + 30; low = !low;
         }
@@ -548,6 +563,7 @@
     if (G.rh) { SND.spin(null); endRhythm(); }
     if (G.orb) endOrbit();
     if (G.bb) endBaseball();
+    if (G.cut) cutDone();
     const s = stationAt(G.x), here = COURSE[s.i][5];
     let j = s.i, lap = s.lap;
     do { j++; if (j >= COURSE.length) { j = 0; lap++; } } while (COURSE[j][5] === here);
@@ -563,9 +579,9 @@
   // lap, or in the next) and it begins; a mini-game on ends first
   function barMarkAt(nx, ny) {
     if (Math.abs(ny - 32.2) > 10) return null;
-    const px0 = NW / 2 - BAR_W / 2;
+    const px0 = NW / 2 - BAR_W / 2, stg = stageOf(stationAt(G.x).lx), [s0, s1] = stageSpan(stg);
     let best = null, bd = 9;
-    for (const m of MINI_MARKS) { const d = Math.abs(nx - (px0 + BAR_W * m.lx / LAP)); if (d < bd) { bd = d; best = m; } }
+    for (const m of MINI_MARKS) { if (stageOf(m.lx) !== stg) continue; const d = Math.abs(nx - (px0 + BAR_W * (m.lx - s0) / (s1 - s0))); if (d < bd) { bd = d; best = m; } }
     return best;
   }
   function goToPlace(j) {
@@ -573,6 +589,7 @@
     if (G.rh) { SND.spin(null); endRhythm(); }
     if (G.orb) endOrbit();
     if (G.bb) endBaseball();
+    if (G.cut) cutDone();
     const s = stationAt(G.x), lap = STARTS[j] + 1 > s.lx ? s.lap : s.lap + 1;
     G.x = lap * LAP + STARTS[j] + 1;
     G.obs = []; G.items = []; G.genX = G.x + NW;
@@ -991,7 +1008,7 @@
   const OB_PLANS = {};                                     // laid out once per song, when first needed
   const orbPlan = (song) => OB_PLANS[song.id] || (OB_PLANS[song.id] = planOrbit(song));
   let OB = orbPlan(songFor('orb'));                        // the path of the stage on now (or of the next one)
-  const busy = () => !!(G.rh || G.orb || G.bb);
+  const busy = () => !!(G.rh || G.orb || G.bb || G.cut);
   function otime() {
     const o = G.orb;
     if (o.wait !== null) return -OB_LEAD;                    // the song still on its way
@@ -1241,12 +1258,12 @@
   // the pitches (thrown from the mound farther off: 1.1 times the way on the screen at the same speed): flight time,
   // the break at the plate (units; sideways ones go either way), how late it comes (the
   // power of the flight it grows with: 2 early and long, 6 all at the end), and a rise on the way (the curve's arc)
-  const BB_TYPES = [
-    { name: '직구', T: 0.34, bx: 0, by: 0, pw: 3, rise: 0 },
-    { name: '커브', T: 0.48, bx: 14, by: 26, pw: 2, rise: 16 },              // up first, then a long drop
-    { name: '포크볼', T: 0.38, bx: 0, by: 34, pw: 7, rise: 0 },             // looks straight, falls off the table at the end
-    { name: '슬라이더', T: 0.39, bx: 32, by: 4, pw: 3, rise: 0 },           // late, sideways
-    { name: '체인지업', T: 0.49, bx: 3, by: 9, pw: 2, rise: 0 },            // slow, sinking a little
+  const BB_TYPES = [                                                        // (T: the flight, 10% slower than v34)
+    { name: '직구', T: 0.378, bx: 0, by: 0, pw: 3, rise: 0 },
+    { name: '커브', T: 0.533, bx: 14, by: 26, pw: 2, rise: 16 },              // up first, then a long drop
+    { name: '포크볼', T: 0.422, bx: 0, by: 34, pw: 7, rise: 0 },             // looks straight, falls off the table at the end
+    { name: '슬라이더', T: 0.433, bx: 32, by: 4, pw: 3, rise: 0 },           // late, sideways
+    { name: '체인지업', T: 0.544, bx: 3, by: 9, pw: 2, rise: 0 },            // slow, sinking a little
   ];
   const BB_PTS = { hr: 1000 };
   // the hit: the bat meets the ball BB_DS after the tap (the swing down), the game stops a moment there (hit-stop,
@@ -1281,6 +1298,168 @@
     G.bb = null; G.games = (G.games || 0) + 1; resumeBoost();
     G.genX = Math.max(G.genX, G.x + NW * 0.8);
     G.banner = G.t;
+  }
+  // ---------------------------------------------------------------- the end of the body (stage 1 to 2): the end of the
+  // anus is packed full of stool, floor to roof; the runner brakes and goes head first into it, stuck; the whole lot is
+  // pushed out (to the right) and straight into the toilet: under its water the runner comes in from the top left with a
+  // lump of it (plop), sinks to the bottom, the lumps drift off and stage 2 begins. Times (s) from the moment it stops
+  const CUT_FACE = 200;                              // the packed stool's face: this far before the end of the anus
+  const CUT_PAD = 20;                                // (its picture starts this far left of the face)
+  const CUT_IN = 7;                                  // how far past the face the runner's middle goes in
+  const CUT_CLEAR = 150, CUT_AFTER = 300;           // nothing set out from the braking's start (less this) to this far into stage 2
+  const CUT_BRAKE = 560;                             // the braking is at most this long (at a booster's speed, short and hard)
+  const CUT_PUSH = [0.3, 0.95], CUT_SWAP = 0.9, CUT_DIVE = [0.95, 1.0], CUT_HIT = 0.08, CUT_END = 2.0;
+  // lumps of it in front of the runner stuck in it (from the face: x, up from the floor, turn), and the two that come
+  // into the toilet on the runner (x, up: in the runner's size; turn)
+  const CUT_FRONT = [['cut_lump2', 6, 6, 0.1], ['cut_lump1', 3, 17, -0.5], ['cut_lump3', 10, 27, 0.35]];
+  const CUT_STUCK = [['cut_lump0', 0.32, 0.72, -0.35], ['cut_lump3', -0.3, 0.98, 0.45]];
+  const cutOn = () => G.cut || (G.station >= 0 && COURSE[G.station][5] === STAGE2 - 1);      // in the anus, or in the cut
+  const cutFaceX = () => (G.cut ? G.cut.faceX : Math.floor(G.x / LAP) * LAP + S2_X - CUT_FACE);
+  function cutCheck() {
+    const s = stationAt(G.x), stopLx = S2_X - CUT_FACE + CUT_IN, sp = curSpeed();
+    if (stopLx - s.lx <= Math.min(CUT_BRAKE, Math.max(90, sp * 0.55))) startCut(s.lap * LAP + stopLx, sp);
+  }
+  function startCut(stopX, sp) {
+    holdBoost();
+    const faceX = stopX - CUT_IN;
+    stopX = Math.max(stopX, G.x);
+    const v0 = Math.max(sp, 60), d = stopX - G.x;
+    G.cut = { t0: G.t, x0: G.x, stopX, faceX, td: d > 0.5 ? 2 * d / v0 : 0, ts: 0, lap: Math.floor(faceX / LAP), swap: 0, splash: 0, landed: 0 };
+    G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
+    G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
+    G.slideHeld = false; held.clear(); pressed.jump = false;
+  }
+  function stepCut() {
+    const c = G.cut;
+    pressed.jump = false; G.slideHeld = false;
+    if (!c.ts) {                                              // braking, evenly, to a stop in the stool
+      const k = c.td > 0 ? Math.min(1, (G.t - c.t0) / c.td) : 1;
+      G.x = c.x0 + (c.stopX - c.x0) * (1 - (1 - k) * (1 - k));
+      if (k >= 1) c.ts = G.t;
+      return;
+    }
+    const u = G.t - c.ts;
+    if (!c.swap && u >= CUT_SWAP) {                           // out of the screen: on to the start of stage 2
+      c.swap = G.t;
+      G.x = c.lap * LAP + S2_X + 1;
+      G.obs = []; G.items = []; G.genX = G.x + NW * 0.8;
+    }
+    if (c.swap && !c.banner) { c.banner = true; G.banner = G.t; }
+    if (!c.splash && u >= CUT_DIVE[0] + CUT_HIT) {           // through the water's surface
+      c.splash = G.t; SND.play('splash');
+      const R = rng(Math.floor(G.t * 1000) + 7);
+      c.bub = Array.from({ length: 26 }, (_, i) => ({ k: 0.06 + 0.5 * (i / 26) ** 1.3, dx: (R() * 2 - 1) * 7, dy: (R() * 2 - 1) * 6, r: 0.8 + R() * 1.8, w: R() * 6 }));
+      c.drops = Array.from({ length: 12 }, () => ({ vx: (R() * 2 - 1) * 70, vy: -60 - R() * 70, r: 0.9 + R() * 1.2 }));
+    }
+    if (!c.landed && u >= CUT_DIVE[0] + CUT_DIVE[1]) c.landed = G.t;
+    if (u >= CUT_END) cutDone();
+  }
+  function cutDone() {                                        // stage 2 goes on (the lumps drift off a moment longer)
+    const c = G.cut; if (!c) return;
+    if (!c.swap) { G.x = c.lap * LAP + S2_X + 1; G.obs = []; G.items = []; G.genX = G.x + NW * 0.8; }
+    G.cut = null; G.cutTail = { landed: c.landed || G.t, splash: c.splash, bub: c.bub || [], drops: c.drops || [] };
+    if (G.theme !== COURSE[S2_I][3]) G.station = -1;
+    G.slow = 0; resumeBoost();
+    G.genX = Math.max(G.genX, G.x + NW * 0.8);
+  }
+  function sprRot(name, cx, cy, rot, alpha = 1, k = 1) {
+    const w = SW(name) * k, h = SH(name) * k;
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(rot); spr(name, -w / 2, -h / 2, alpha, w, h); ctx.restore();
+  }
+  const cutReady = () => M.sprites.cut_wall && bmp[M.sprites.cut_wall.f];
+  const cutPush = (u) => { const k = Math.max(0, Math.min(1, (u - CUT_PUSH[0]) / (CUT_PUSH[1] - CUT_PUSH[0]))); return k * k * (NWf + 400); };
+  const cutDX = () => (G.cut && G.cut.ts && !G.cut.swap ? cutPush(G.t - G.cut.ts) : 0);
+  // stuck: a little shake as it goes in
+  const cutShake = () => { if (!G.cut || !G.cut.ts || G.cut.swap) return 0; const u = G.t - G.cut.ts; return u < 0.25 ? 0.7 * Math.sin(u * 110) * (1 - u / 0.25) : 0; };
+  // the packed stool (world: drawn before the runner), pushed along with it
+  function drawCutBack(cam) {
+    if (!cutOn() || (G.cut && G.cut.swap) || !cutReady()) return;
+    const x = cutFaceX() - CUT_PAD - cam + cutDX();
+    if (x > NWf || x + SW('cut_wall') < 0) return;
+    spr('cut_wall', x, GY + 2 - SH('cut_wall'));
+  }
+  // its lumps in front of the runner (world: drawn after the runner)
+  function drawCutFront(cam) {
+    if (!cutOn() || (G.cut && G.cut.swap) || !cutReady()) return;
+    const fx = cutFaceX() - cam + cutDX();
+    if (fx > NWf + 30) return;
+    for (const [n, dx, up, rot] of CUT_FRONT) sprRot(n, fx + dx, GY - up, rot);
+  }
+  // the runner with its lumps on, in one piece (into the toilet)
+  function drawMass(cx, fy, rot) {
+    const n = 'ch_' + G.char, w = SW(n), h = SH(n), my = fy - h * 0.55;
+    ctx.save(); ctx.translate(cx, my); ctx.rotate(rot); ctx.translate(-cx, -my);
+    spr(n, cx - w / 2, fy - h);
+    for (const [ln, dx, up, r] of CUT_STUCK) sprRot(ln, cx + dx * w, fy - up * h, r);
+    ctx.restore();
+  }
+  // into the toilet: from the top left, through the surface, down to the bottom (feet at fy)
+  function cutDiveAt(k) {
+    const e = 1 - (1 - k) * (1 - k);
+    return [PX - 62 + 62 * e, -12 + (GY + 1 + 12) * e, 0.75 * (1 - k) * (1 - k)];
+  }
+  function drawDive() {
+    const c = G.cut, k = Math.max(0, Math.min(1, (G.t - c.ts - CUT_DIVE[0]) / CUT_DIVE[1]));
+    if (G.t - c.ts < CUT_DIVE[0]) return;
+    const [x, fy, rot] = cutDiveAt(k);
+    drawMass(x, fy, rot);
+  }
+  // over the scene: the splash at the surface, the bubbles of the way down, then the stage's title
+  function drawCut() {
+    const c = G.cut, tail = G.cutTail;
+    world();
+    const sp = c ? c.splash : tail ? tail.splash : 0, bub = c ? c.bub : tail ? tail.bub : null, drops = c ? c.drops : tail ? tail.drops : null;
+    if (sp && bub) {
+      const v = G.t - sp, [sx] = cutDiveAt(CUT_HIT / CUT_DIVE[1]), sy = CEIL;
+      for (const d of drops) {                           // thrown up above the water, falling back
+        const x = sx + d.vx * v, y = sy - 1 + d.vy * v + 230 * v * v;
+        if (y > sy || v > 0.8) continue;
+        ctx.beginPath(); ctx.arc(x, y, d.r + 0.4, 0, 6.29); ctx.fillStyle = '#2a5a62'; ctx.fill();
+        ctx.beginPath(); ctx.arc(x, y, d.r, 0, 6.29); ctx.fillStyle = '#d6f6f8'; ctx.fill();
+      }
+      if (v < 0.6) {                                     // the water broken at the surface: a white burst, spreading rings,
+        const k = v / 0.6;                               // and the hollow it leaves behind going down, closing
+        ctx.globalAlpha = 1 - k;
+        for (let j = 0; j < 9; j++) {
+          const a = (j / 8 - 0.5) * 2.8, r = (4 + 13 * Math.sqrt(k)) * (1 - 0.3 * Math.abs(j / 8 - 0.5));
+          ctx.beginPath(); ctx.arc(sx + Math.sin(a) * r * 1.5, sy + 1 + Math.abs(Math.cos(a)) * r * 0.6, 2.8 + 3 * (1 - k), 0, 6.29);
+          ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.lineWidth = 0.5; ctx.strokeStyle = '#3a6a72'; ctx.stroke();
+        }
+        const [x1, y1] = cutDiveAt(Math.min(1, (v + CUT_HIT) / CUT_DIVE[1] * 0.6));
+        ctx.globalAlpha = 0.55 * (1 - k); ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(sx, sy + 2); ctx.lineTo(x1, y1 - 14); ctx.lineWidth = 7 * (1 - k); ctx.strokeStyle = '#ffffff'; ctx.stroke();
+        for (let r = 0; r < 2; r++) {
+          const q = (v - r * 0.12) / 0.45; if (q <= 0 || q >= 1) continue;
+          ctx.globalAlpha = 1 - q; ctx.beginPath(); ctx.ellipse(sx, sy + 0.5, 8 + 50 * q, 1 + 2.5 * q, 0, 0, 6.29); ctx.lineWidth = 1.2; ctx.strokeStyle = '#ffffff'; ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      }
+      for (const b of bub) {                             // bubbles left along the way down, rising and gone
+        const t0 = b.k * CUT_DIVE[1] - CUT_HIT, q = (v - t0) / 0.9; if (q <= 0 || q >= 1) continue;
+        const [x0, y0] = cutDiveAt(b.k), x = x0 + b.dx + Math.sin(q * 9 + b.w) * 1.2, y = y0 - 8 + b.dy - 22 * q;
+        if (y < CEIL + 2) continue;
+        ctx.globalAlpha = 1 - q * q; ctx.beginPath(); ctx.arc(x, y, b.r * (1 + 0.3 * q), 0, 6.29); ctx.fillStyle = 'rgba(235,252,252,0.6)'; ctx.fill();
+        ctx.lineWidth = 0.45; ctx.strokeStyle = '#2a5a62'; ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+    const t0 = c ? (c.landed || null) : tail ? tail.landed : null;   // the title, from the landing
+    if (t0 !== null) {
+      const v = G.t - t0 + 0.4, ta = v < 0 ? 0 : v < 0.25 ? v / 0.25 : v < 1.6 ? 1 : Math.max(0, 1 - (v - 1.6) / 0.4);
+      if (ta > 0) label('스테이지 2', NWf / 2, 70, 20, 'center', ta, '#ffffff');
+      if (tail && v > 2.2) G.cutTail = null;
+    }
+  }
+  // under the water at the start of stage 2 (world: after the runner): the lumps drift up and away off it
+  function drawCutDrift() {
+    const t0 = G.cut ? G.cut.landed : G.cutTail ? G.cutTail.landed : 0;
+    if (!t0 || !cutReady()) return;
+    const v = G.t - t0, n = 'ch_' + G.char, w = SW(n), h = SH(n), D = 1.0;
+    if (v < 0 || v >= D) return;
+    CUT_STUCK.forEach(([ln, dx, up, r], i) => {
+      const k = v / D, dir = i ? -1 : 1;
+      sprRot(ln, PX - G.nudge + dx * w + dir * 26 * k, GY + 1 - G.y - up * h - (16 + 12 * i) * k, r + dir * 0.7 * k, 1 - k * k);
+    });
   }
   const bbZone = () => [NWf / 2, BB_ZY];
   function bbPitch() {                                                         // the next pitch: its kind, where it crosses
@@ -1626,6 +1805,8 @@
     if (G.rh) stepRhythm(dt);
     if (G.orb) stepOrbit(dt);
     if (G.bb) stepBaseball(dt);
+    if (G.cut) stepCut(dt);
+    else if (!busy() && G.station >= 0 && COURSE[G.station][5] === STAGE2 - 1) cutCheck();
     G.nudge = Math.max(0, G.nudge - dt * 30);
     moveObs(dt);
     // jump / double jump / slide
@@ -1706,7 +1887,7 @@
       const arrived = G.station < 0 || COURSE[G.station][5] !== s.st[5];       // a new place (not just a new look in it)
       G.station = s.i;
       const th = s.st[3];
-      if (th !== G.theme) { G.prevTheme = G.theme; G.theme = th; G.fade = 0; }
+      if (th !== G.theme) { G.prevTheme = G.theme; G.theme = th; G.fade = G.cut && G.cut.swap ? 1 : 0; }    // (out of the anus: straight in)
       if (!themeFiles(th).every((f) => bmp[f])) { G.missing = (G.missing || 0) + 1; (G.missList = G.missList || []).push(th); }   // (tests: a look not ready on arrival)
       if (arrived) { if (!busy()) G.banner = G.t; setLabel(s.st, s.lap); if (s.st[0] === 'ra' && !busy()) startRhythm(); if (s.st[0] === 'vertebral' && !busy()) startOrbit(); if (s.st[0] === 'jejunum' && !busy()) startBaseball(); }
       manageThemes(); G.memT = G.t;
@@ -2074,13 +2255,17 @@
       spr(n, sx - SW(n) / 2, it.y - SH(n) / 2 + Math.sin(G.t * 4 + it.ph));
     }
     // the player: a shadow, dust, the character (bobbing as it runs, squashed when sliding); not while on the orbit stage
-    if (!G.orb || (G.orb.st === 'done' && G.t - G.orb.stT > OB_DONE - 0.35)) drawPlayer(cam);
+    drawCutBack(cam);
+    if (G.cut && G.cut.swap) { if (!G.cut.landed) drawDive(); else drawPlayer(cam); }
+    else if (!G.orb || (G.orb.st === 'done' && G.t - G.orb.stT > OB_DONE - 0.35)) drawPlayer(cam);
+    drawCutFront(cam);
+    if ((G.cut && G.cut.landed) || G.cutTail) drawCutDrift();
     drawShotWarnings(cam);
     for (const p of G.pops) { const u = (G.t - p.t) / 0.8; label(p.s, p.x - cam, Math.max(40, p.y - u * 14), 8, 'center', 1 - u * u); }
   }
   function drawPlayer(cam) {
     const n = 'ch_' + G.char, w = SW(n), h = SH(n);
-    const sx = PX - G.nudge;
+    const sx = PX - G.nudge + cutDX() + cutShake();
     const shw = Math.max(6, w * (0.8 - Math.min(0.4, G.y / 120)));
     const overPit = pitAt(G.x);
     if (!overPit && G.y >= 0) { ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.ellipse(sx, GY - 1, shw / 2, 1.6, 0, 0, 6.29); ctx.fill(); }
@@ -2112,10 +2297,11 @@
     path(); ctx.lineJoin = 'round'; ctx.lineWidth = 4.4; ctx.strokeStyle = fc; ctx.stroke();      // the lip
     path(); ctx.closePath();
     const g = ctx.createLinearGradient(0, GY - 2, 0, NH);
-    g.addColorStop(0, fk); g.addColorStop(0.18, '#2a0a12'); g.addColorStop(0.55, '#0c0306'); g.addColorStop(1, '#030102');
+    const s2 = S2_L.has(G.theme);                                   // (stage 2: a drain in porcelain, dark water down it)
+    g.addColorStop(0, fk); g.addColorStop(0.18, s2 ? '#16343a' : '#2a0a12'); g.addColorStop(0.55, s2 ? '#081a1e' : '#0c0306'); g.addColorStop(1, s2 ? '#020a0c' : '#030102');
     ctx.fillStyle = g; ctx.fill();
     const sh = ctx.createLinearGradient(x0, 0, x1, 0);              // the far wall side a little lit
-    sh.addColorStop(0, 'rgba(0,0,0,0.35)'); sh.addColorStop(0.7, 'rgba(0,0,0,0)'); sh.addColorStop(1, 'rgba(255,200,200,0.06)');
+    sh.addColorStop(0, 'rgba(0,0,0,0.35)'); sh.addColorStop(0.7, 'rgba(0,0,0,0)'); sh.addColorStop(1, s2 ? 'rgba(200,255,255,0.06)' : 'rgba(255,200,200,0.06)');
     ctx.fillStyle = sh; ctx.fill();
     path(); ctx.lineWidth = 1.3; ctx.strokeStyle = '#1a0a14'; ctx.stroke();
   }
@@ -2177,12 +2363,13 @@
   }
   // text with a dark edge (score, +points)
   function label(s, x, y, size, align = 'left', alpha = 1, fill = '#fff3c8') {
+    alpha *= GA;
     if (alpha !== 1) ctx.globalAlpha = alpha;
     ctx.font = `900 ${size}px system-ui, -apple-system, "Noto Sans KR", sans-serif`;
     ctx.textAlign = align; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
     ctx.lineWidth = size * 0.28; ctx.strokeStyle = '#1a0a14'; ctx.strokeText(s, x, y);
     ctx.fillStyle = fill; ctx.fillText(s, x, y);
-    if (alpha !== 1) ctx.globalAlpha = 1;
+    if (alpha !== 1) ctx.globalAlpha = GA;
   }
   function rrect(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, w, h, r) : ctx.rect(x, y, w, h); }
   // the jump and slide buttons: a circle with its name in it (1.2 times the old arrow buttons)
@@ -2201,7 +2388,7 @@
   const BAR_W = 160;
   const MINI_MARKS = [['ra', 'rh'], ['vertebral', 'orb'], ['jejunum', 'bb']].map(([id, kind]) => { const i = COURSE.findIndex((st) => st[0] === id); return { kind, i, lx: STARTS[i] }; });
   function miniMark(kind, x, y, alpha) {
-    ctx.globalAlpha = alpha;
+    ctx.globalAlpha = alpha * GA;
     ctx.beginPath(); ctx.arc(x, y, 4.6, 0, 6.29); ctx.fillStyle = '#1a0a14'; ctx.fill();
     if (kind === 'bb') {                                    // a baseball: shaded white, two curved red seams with their stitches
       const R = 4.1;
@@ -2221,7 +2408,7 @@
         ctx.stroke();
       }
       ctx.restore();
-      ctx.globalAlpha = 1; return;
+      ctx.globalAlpha = GA; return;
     }
     ctx.beginPath(); ctx.arc(x, y, 3.7, 0, 6.29); ctx.fillStyle = kind === 'rh' ? '#ff5a8a' : '#9a6cff'; ctx.fill();
     ctx.fillStyle = '#ffffff'; ctx.strokeStyle = '#ffffff';
@@ -2233,9 +2420,22 @@
       ctx.beginPath(); ctx.arc(x, y, 2.1, 0, 6.29); ctx.lineWidth = 0.6; ctx.stroke();
       ctx.beginPath(); ctx.arc(x + 1.5, y - 1.5, 0.95, 0, 6.29); ctx.fill();
     }
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = GA;
+  }
+  // the HUD goes while the cut scene plays (it would hide the dive into the toilet at the top left)
+  function hudAlpha() {
+    const c = G.cut;
+    if (c) return c.landed ? Math.min(1, (G.t - c.landed) / 0.35) : Math.max(0, 1 - (G.t - c.t0) / 0.3);
+    if (G.cutTail) return Math.min(1, (G.t - G.cutTail.landed) / 0.35);
+    return 1;
   }
   function drawHud() {
+    GA = hudAlpha();
+    document.getElementById('place').style.opacity = GA;
+    if (GA > 0) { ctx.globalAlpha = GA; drawHudAll(); }
+    GA = 1; ctx.globalAlpha = 1;
+  }
+  function drawHudAll() {
     world();
     // health bar
     const x0 = 16, y0 = 7, w = 112, h = 8;
@@ -2275,13 +2475,15 @@
     rrect(NW - 20, 4.5, 14, 14, 3); ctx.fillStyle = '#1a0a14'; ctx.fill();
     rrect(NW - 19, 5.5, 12, 12, 2.3); ctx.fillStyle = '#f4e8ee'; ctx.fill();
     ctx.fillStyle = '#1a0a14'; ctx.fillRect(NW - 16.2, 8.5, 2, 6); ctx.fillRect(NW - 12.2, 8.5, 2, 6);
-    // progress through the body (this lap), with where the mini-games come (a mark each; dimmed once passed)
-    const p = stationAt(G.x), px0 = NW / 2 - BAR_W / 2, px1 = px0 + BAR_W, py = 31;
+    // progress through this stage (the body, or stage 2), with where the mini-games come (a mark each; dimmed once
+    // passed); the stage's number at its left end
+    const p = stationAt(G.x), stg = stageOf(p.lx), [s0, s1] = stageSpan(stg), px0 = NW / 2 - BAR_W / 2, px1 = px0 + BAR_W, py = 31;
     rrect(px0 - 1, py - 1, px1 - px0 + 2, 4.4, 2.2); ctx.fillStyle = '#1a0a14'; ctx.fill();
     ctx.fillStyle = '#4a3848'; ctx.fillRect(px0, py, px1 - px0, 2.4);
-    const mk = px0 + (px1 - px0) * p.lx / LAP;
+    const mk = px0 + (px1 - px0) * (p.lx - s0) / (s1 - s0);
     ctx.fillStyle = '#ff6a8a'; ctx.fillRect(px0, py, mk - px0, 2.4);
-    for (const m of MINI_MARKS) miniMark(m.kind, px0 + (px1 - px0) * m.lx / LAP, py + 1.2, p.lx > m.lx + 1 || !!G[m.kind] ? 0.45 : 1);
+    for (const m of MINI_MARKS) if (stageOf(m.lx) === stg) miniMark(m.kind, px0 + (px1 - px0) * (m.lx - s0) / (s1 - s0), py + 1.2, p.lx > m.lx + 1 || !!G[m.kind] ? 0.45 : 1);
+    label(String(stg), px0 - 6, py + 1.4, 7, 'center', 1, '#ffe0a8');
     ctx.beginPath(); ctx.arc(mk, py + 1.2, 2.8, 0, 6.29); ctx.fillStyle = '#1a0a14'; ctx.fill();
     ctx.beginPath(); ctx.arc(mk, py + 1.2, 1.9, 0, 6.29); ctx.fillStyle = '#ffffff'; ctx.fill();
     // the settings (a gear), under the pause button
@@ -2342,7 +2544,7 @@
     device();
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, GW, GH);
     if (PROF) {
-      for (const [k, f] of [['scene', drawScene], ['lids', drawLids], ['rhythm', drawRhythm], ['orbit', drawOrbit], ['baseball', drawBaseball], ['hud', drawHud]]) {
+      for (const [k, f] of [['scene', drawScene], ['lids', drawLids], ['rhythm', drawRhythm], ['orbit', drawOrbit], ['baseball', drawBaseball], ['cut', drawCut], ['hud', drawHud]]) {
         const t0 = performance.now(); f(); PROF[k] = (PROF[k] || 0) + performance.now() - t0;
       }
       PROF.n = (PROF.n || 0) + 1;
@@ -2352,6 +2554,7 @@
       drawRhythm();
       drawOrbit();
       drawBaseball();
+      if (G.cut || G.cutTail) drawCut();
       drawHud();
     }
     // the place's name grows in for a moment when you arrive
@@ -2377,7 +2580,7 @@
   }
   function gameOver() {
     G.mode = 'over'; show('overBox', true);
-    if (busy()) { G.rh = null; G.orb = null; G.bb = null; SND.stopSong(0.3); SND.stopLoop(0.3); SND.spin(null); }
+    if (busy()) { G.rh = null; G.orb = null; G.bb = null; G.cut = null; SND.stopSong(0.3); SND.stopLoop(0.3); SND.spin(null); }
     SND.ambience(false); SND.play('over');
     document.getElementById('overMsg').textContent = `점수 ${G.score.toLocaleString('en-US')} · ${Math.floor(G.t / 60)}분 ${Math.floor(G.t % 60)}초 · ${COURSE[G.station][1]}까지`;
   }
@@ -2404,7 +2607,7 @@
   }
   document.getElementById('bResume').onclick = resume;
   document.getElementById('bRestart').onclick = () => startGame(G.char);
-  document.getElementById('bChar').onclick = () => { G.mode = 'select'; G.rh = null; G.orb = null; G.bb = null; SND.unlock(); SND.stopSong(0.2); SND.stopLoop(0.2); SND.spin(null); SND.ambience(false); show('pauseBox', false); show('overBox', false); show('hudText', false); show('select', true); };
+  document.getElementById('bChar').onclick = () => { G.mode = 'select'; G.rh = null; G.orb = null; G.bb = null; G.cut = null; G.cutTail = null; SND.unlock(); SND.stopSong(0.2); SND.stopLoop(0.2); SND.spin(null); SND.ambience(false); show('pauseBox', false); show('overBox', false); show('hudText', false); show('select', true); };
   document.getElementById('bSetBack').onclick = resume;
   document.getElementById('bSwap').onclick = () => { SET.swap = !SET.swap; try { localStorage.setItem('bodyrun.swap', SET.swap ? '1' : '0'); } catch (e) { /* storage off */ } setLabels(); render(); };
   document.getElementById('bSfx').onclick = () => { SND.setMute('sfx', !SND.muted('sfx')); setLabels(); };
@@ -2459,6 +2662,8 @@
     window.__orbPlan = (id) => { const pl = id ? orbPlan(STAGES.orb.find((s) => s.id === id)) : OB; return { id: pl.song.id, B: pl.B, ok: pl.ok, N: pl.N, P: pl.P, T: pl.T, hits: pl.hits, swirl: pl.swirl.map((v, i) => v ? i : -1).filter((i) => i >= 0), dir: pl.dir }; };
     window.__stages = STAGES;
     window.__marks = MINI_MARKS; window.__lap = LAP;
+    window.__cut = () => (G.cut ? { u: G.cut.ts ? +(G.t - G.cut.ts).toFixed(3) : null, stopped: !!G.cut.ts, swap: !!G.cut.swap, splash: !!G.cut.splash, x: Math.round(G.x) } : null);
+    window.__S2 = { STAGE2, S2_X, S2_I, LAP };
     window.__goTo = (kind) => goToPlace(MINI_MARKS.find((m) => m.kind === kind).i);   // (as tapping its mark on the bar)
     window.__orbTap = orbTap;
     window.__boost = startBoost;

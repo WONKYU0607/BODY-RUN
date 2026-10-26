@@ -19,7 +19,19 @@ function onsets(song, from, to) {                                   // the tune'
 }
 
 // ---------------------------------------------------------------- the rhythm stage
-const RH_R = 13, AR = 0.85;
+const RH_R = 13, AR = 0.85, RH_TAIL = 0.2;      // (a circle stays 0.17 s past its time when missed, a slider 0.15 s past its end)
+// a slider's track as the game draws it (Catmull-Rom through its points), then a point about every 2 units along it
+function catmull(pts, n) {
+  const out = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
+    for (let k = 0; k < n; k++) { const t = k / n, t2 = t * t, t3 = t2 * t;
+      out.push([0.5 * ((2 * p1[0]) + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3),
+        0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3)]); }
+  }
+  out.push(pts[pts.length - 1]); return out;
+}
+const dense = (P, step = 2) => { const o = [P[0]]; for (let i = 1; i < P.length; i++) { const a = P[i - 1], b = P[i], n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / step)); for (let k = 1; k <= n; k++) o.push([a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n]); } return o; };
 function rhythmChart(song) {
   const g = song.game, beat = 60 / song.bpm, fast = song.bpm >= 150;
   const spin = g.build ? { s: g.build[1] - 16, e: g.build[1] - 2 } : null;
@@ -69,13 +81,12 @@ function rhythmChart(song) {
   let u = 0.16, d = 1, curG = -1;
   const placed = [];
   // centre to centre (units, at the narrowest screen): an eighth pair just touching, then further for longer gaps
-  const spacing = (gb) => (gb <= 0.5 ? 25 : gb <= 0.75 ? 31 : gb <= 1 ? 37 : gb <= 1.5 ? 44 : 52) / (NWmin - 104);
-  const clash = (x, y, t0, self) => {                                 // the nearest circle up at the same time
+  const spacing = (gb) => (gb <= 0.5 ? 29 : gb <= 0.75 ? 31 : gb <= 1 ? 37 : gb <= 1.5 ? 44 : 52) / (NWmin - 104);
+  const clash = (x, y, t0) => {                                       // the nearest thing up at the same time
     let m = 1e9;
     for (const q of placed) {
-      if (q === self.prevPair) continue;
       const qEnd = q.kind === 's' ? tOf(q.e) : tOf(q.s);
-      if (qEnd < t0 - AR - 0.15) continue;
+      if (qEnd + RH_TAIL < t0 - AR - 0.15) continue;
       for (const [qx, qy] of q.pts) m = Math.min(m, Math.hypot(qx - x, qy - y));
     }
     return m;
@@ -87,7 +98,7 @@ function rhythmChart(song) {
     const nxt = kept[kept.indexOf(k) + 1], v2 = Math.max(0.08, Math.min(0.92, nxt && nxt.n ? (v + vOf(nxt.n)) / 2 : v));
     const vm = Math.max(0.06, Math.min(0.94, (v + v2) / 2 + side * 0.16));
     const ctrl = [[u, v], [(u + ue) / 2, vm], [ue, v2]];
-    const pts = []; for (let i = 0; i <= 8; i++) { const f = i / 8; pts.push([X(u + (ue - u) * f), Y(v + (v2 - v) * f + Math.sin(f * Math.PI) * (vm - (v + v2) / 2))]); }
+    const pts = dense(catmull(ctrl.map(([a, b]) => [X(a), Y(b)]), 14));
     return { ctrl, pts, ue, d };
   };
   let prevK = null;
@@ -95,7 +106,6 @@ function rhythmChart(song) {
     if (k.kind === 'p') { placed.push({ kind: 'p', s: k.s, e: k.e, pts: [] }); u = 0.5; prevK = null; continue; }
     if (k.g !== curG) { if (curG >= 0) d = -d; curG = k.g; }
     const gb = prevK ? (k.s - (prevK.kind === 's' ? prevK.e : prevK.s)) / 4 : 1;
-    const self = { prevPair: prevK && gb <= 0.5 ? placed[placed.length - 1] : null };
     let best = null;
     for (const dv of [0, -0.15, 0.15, -0.3, 0.3, -0.45, 0.45]) for (const flip of [false, true]) for (const side of (k.kind === 's' ? [k.g % 2 ? 1 : -1, k.g % 2 ? -1 : 1] : [0])) {
       let dd = flip ? -d : d, nu = prevK ? u + dd * spacing(gb) : u;
@@ -104,9 +114,20 @@ function rhythmChart(song) {
       const nv = Math.max(0.06, Math.min(0.94, vOf(k.n) + dv));
       const sl = k.kind === 's' ? sliderAt(k, nu, nv, dd, side) : null;
       const pts = sl ? sl.pts : [[X(nu), Y(nv)]];
-      let m = 1e9; for (const [x, y] of pts) m = Math.min(m, clash(x, y, tOf(k.s), self));
+      let m = 1e9; for (const [x, y] of pts) m = Math.min(m, clash(x, y, tOf(k.s)));
       const score = (m >= RH_R * 2.15 ? 1000 : m * 10) - Math.abs(dv) * 30 - (flip ? 8 : 0) - (sl && side !== (k.g % 2 ? 1 : -1) ? 4 : 0);   // clear of every circle up at the time first
       if (!best || score > best.score) best = { score, nu, nv, dd, sl, pts };
+    }
+    if (best.score < 1000) {                                         // nowhere clear along the flow: the clear spot nearest to it
+      const want = best; let alt = null;
+      for (let gu = 0.06; gu <= 0.941; gu += 0.02) for (let gv = 0.06; gv <= 0.941; gv += 0.04) for (const dd of (k.kind === 's' ? [want.dd, -want.dd] : [want.dd])) for (const side of (k.kind === 's' ? [1, -1] : [0])) {
+        const sl = k.kind === 's' ? sliderAt(k, gu, gv, dd, side) : null, pts = sl ? sl.pts : [[X(gu), Y(gv)]];
+        let m = 1e9; for (const [x, y] of pts) { m = Math.min(m, clash(x, y, tOf(k.s))); if (m < RH_R * 2.15) break; }
+        if (m < RH_R * 2.15) continue;
+        const cost = Math.hypot(X(gu) - X(want.nu), Y(gv) - Y(want.nv));
+        if (!alt || cost < alt.cost) alt = { score: 1000, cost, nu: gu, nv: gv, dd: sl ? sl.d : dd, sl, pts };
+      }
+      if (alt) best = alt; else console.warn('no clear spot', song.en, k.s);
     }
     d = best.dd; u = best.nu;
     if (k.kind === 'c') { k.u = u; k.v = best.nv; placed.push({ kind: 'c', s: k.s, pts: best.pts }); }
@@ -117,12 +138,11 @@ function rhythmChart(song) {
     }
     prevK = k;
   }
-  // the check: the closest two circles (or a circle and a slider's track) up at the same time, past an eighth pair
+  // the check: the closest two things (circles, slider tracks) up at the same time, any two
   let worst = 1e9;
   for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
     const A = placed[i], Bq = placed[j]; if (!A.pts.length || !Bq.pts.length) continue;
-    const aEnd = A.kind === 's' ? tOf(A.e) : tOf(A.s); if (aEnd < tOf(Bq.s) - AR - 0.15) continue;
-    if (j === i + 1 && Bq.s - (A.kind === 's' ? A.e : A.s) <= 2) continue;
+    const aEnd = A.kind === 's' ? tOf(A.e) : tOf(A.s); if (aEnd + RH_TAIL < tOf(Bq.s) - AR - 0.15) continue;
     for (const [x1, y1] of A.pts) for (const [x2, y2] of Bq.pts) worst = Math.min(worst, Math.hypot(x1 - x2, y1 - y2));
   }
   // the map: [beat, group, kind, ...] as the game reads it

@@ -17,7 +17,8 @@ THEMES = ['eso', 'stomach', 'gut', 'colon', 'artery', 'vein', 'atrium', 'ventric
           'liver', 'gallbladder', 'pancreas', 'islet', 'spleen', 'adrenal', 'kidney', 'glomerulus', 'lung', 'myocard', 'thyroid', 'villus',
           'retina', 'vitreous', 'lens', 'iris', 'cornea',
           'renalart', 'carotid', 'vertebral', 'sma', 'efferent', 'pulmvein', 'ivc', 'pulmart', 'latrium', 'lventricle', 'bronchiole',
-          'temporal', 'parietal', 'occipital', 'medulla', 'opticnerve', 'duodenum', 'ileum', 'cecum', 'rectum', 'anus']
+          'temporal', 'parietal', 'occipital', 'medulla', 'opticnerve', 'duodenum', 'ileum', 'cecum', 'rectum', 'anus',
+          'toilet']                                                   # stage 2
 TALL_K = 1.10            # tall obstacles drawn this much taller than designed: the jump is 10% higher (v17)
 CHARS = ['tardigrade', 'lacto', 'paramecium', 'amoeba', 'daphnia', 'pillbug', 'ladybug', 'jelly', 'sub', 'phage']
 CHAR_PX = 8.0            # source px per unit: the sheet's characters at 0.8 of their first size
@@ -30,7 +31,7 @@ BG = {'eso': '#40101c', 'stomach': '#3a0a1c', 'gut': '#3a0c1a', 'colon': '#3a161
       'renalart': '#42120c', 'carotid': '#4e0e2a', 'vertebral': '#3c0a1a', 'sma': '#3e1014', 'efferent': '#52201e', 'pulmvein': '#520a0c',
       'ivc': '#1c0e2c', 'pulmart': '#2e0e2c', 'latrium': '#420816', 'lventricle': '#4c0a16', 'bronchiole': '#341824', 'temporal': '#10282a',
       'parietal': '#201c2a', 'occipital': '#24162c', 'medulla': '#1c1228', 'opticnerve': '#101628', 'duodenum': '#3a1216', 'ileum': '#3e0e20',
-      'cecum': '#401a12', 'rectum': '#341010', 'anus': '#3a1618'}
+      'cecum': '#401a12', 'rectum': '#341010', 'anus': '#3a1618', 'toilet': '#6fa6ac'}
 
 
 def chunks(arr):
@@ -166,13 +167,15 @@ def build_common(manifest):
         chars['ch_' + c] = np.array(Image.open(f'/home/claude/hdart/out/charv2_{c}.png').convert('RGBA')).astype(np.float32)
     import hazards as HZ
     hz = HZ.all_sprites()
+    import toilet as TT
+    hz.update(TT.stage2_sprites())                          # stage 2's coin, special and hazards (it_*, hz_*)
     allspr = dict(spr); allspr.update(chars); allspr.update(hz)
     rects, total = pack(allspr, 1600)
     atlas = np.zeros((total, 1600, 4), np.float32)
     for k, s in allspr.items():
         x, y, w, h = rects[k]
         atlas[y:y + h, x:x + w] = s
-        kind = 'hang' if k.startswith('hz_gate') and k.endswith('_t') else 'float' if k == 'hz_shot' else None
+        kind = 'hang' if k.startswith('hz_gate') and k.endswith('_t') else 'float' if k.startswith('hz_shot') else None
         manifest['sprites'][k] = sprite_entry('common.webp', rects[k], CHAR_PX if k.startswith('ch_') else SC, s, hb=k.startswith('hz_'), kind=kind)
         if k.startswith('hz_gate') and k.endswith('_t'):         # the hanging lip: its box from the part a runner can meet
             low = s.copy(); low[:max(0, s.shape[0] - 70 * SC)] = 0      # (the bottom 70 units; the flare at the ceiling is out of reach)
@@ -196,8 +199,23 @@ def build_fire(manifest):
         x, y, w, h = rects[k]
         atlas[y:y + h, x:x + w] = s
         manifest['sprites'][k] = sprite_entry('fx_fire.webp', rects[k], SC * FIRE_K, s, hb=False)
-    manifest['extra'] = ['fx_fire.webp']
+    manifest['extra'] = sorted(set(manifest.get('extra', [])) | {'fx_fire.webp'})   # (the baseball's are in it too)
     return {'fx_fire.webp': webp(atlas, q=90)}
+
+
+def build_cut(manifest):
+    """the flush cut scene at the end of the body (toilet.py): the pile, the lumps, the bowl in section and its water, in
+    an atlas of their own, decoded only near the end of the anus"""
+    import toilet as TT
+    sp = TT.cut_sprites()
+    width = max(s.shape[1] for s in sp.values()) + 2 * GAP
+    rects, total = pack(sp, width)
+    atlas = np.zeros((total, width, 4), np.float32)
+    for k, s in sp.items():
+        x, y, w, h = rects[k]
+        atlas[y:y + h, x:x + w] = s
+        manifest['sprites'][k] = sprite_entry('cut_flush.webp', rects[k], SC, s, hb=False)
+    return {'cut_flush.webp': webp(atlas, q=88)}
 
 
 if __name__ == '__main__':
@@ -210,13 +228,15 @@ if __name__ == '__main__':
     t0 = time.time()
     files = {}
     for name in (only or THEMES):
-        if name in ('common', 'fire'):
+        if name in ('common', 'fire', 'cut'):
             continue
         files.update(build_theme(name, manifest))
     if not only or 'common' in only:
         files.update(build_common(manifest))
     if not only or 'common' in only or 'fire' in only:
         files.update(build_fire(manifest))
+    if not only or 'cut' in only:
+        files.update(build_cut(manifest))
     import hashlib
     seen = {}
     alias = {}

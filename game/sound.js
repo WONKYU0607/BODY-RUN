@@ -7,8 +7,14 @@
 // The voices take any audio context, so a test can render them offline and measure them.
 window.BodySound = (() => {
   'use strict';
-  let ctx = null, master = null, buses = null, muted = false, noiseBuf = null;
-  try { muted = localStorage.getItem('bodyrun.mute') === '1'; } catch (e) { /* storage off */ }
+  let ctx = null, master = null, buses = null, noiseBuf = null;
+  // the settings' sound switches: the effects, and the music (the running music and the mini-games' songs), each kept
+  // in this browser (the old one switch for everything, if it was on, turns both off)
+  const mute = { sfx: false, music: false }, mutes = {};
+  try {
+    const old = localStorage.getItem('bodyrun.mute') === '1';
+    for (const k of ['sfx', 'music']) { const v = localStorage.getItem('bodyrun.mute.' + k); mute[k] = v === null ? old : v === '1'; }
+  } catch (e) { /* storage off */ }
 
   // ---------------------------------------------------------------- building blocks
   function noise(c) {
@@ -93,6 +99,24 @@ window.BodySound = (() => {
     // the orbit stage: landing on a tile, the end (a miss sounds like the rhythm stage's)
     orbHit: (c, o, t) => { burst(c, o, t, 'bandpass', 3400, 3400, 1.6, 0.045, 0.34); tone(c, o, t, 'sine', 1760, 1760, 0.035, 0.1); },
     orbClear: (c, o, t) => { [72, 76, 79, 84, 88].forEach((n, i) => tone(c, o, t + i * 0.06, 'triangle', NOTE(n), null, 0.4, 0.13, 0.006)); },
+    // baseball: the throw (a whoosh), the swing (a quicker one), the ball into the mitt (a leathery pop), bat on ball (a
+    // wooden knock), a home run (a crack, a deep thump, a little fanfare and the crowd's roar rising), out (three going down)
+    bbPitch: (c, o, t) => burst(c, o, t, 'bandpass', 520, 1500, 1.3, 0.3, 0.5, 0.03),
+    bbSwing: (c, o, t) => { burst(c, o, t, 'bandpass', 600, 2300, 1.5, 0.17, 0.55, 0.012); tone(c, o, t, 'sine', 240, 140, 0.12, 0.05, 0.01, 0.12); },
+    bbMitt: (c, o, t) => { burst(c, o, t, 'lowpass', 1100, 320, 0.8, 0.07, 0.42, 0.001); tone(c, o, t, 'sine', 160, 90, 0.09, 0.3, 0.002, 0.08); },
+    bbHit: (c, o, t) => {
+      burst(c, o, t, 'bandpass', 2100, 1300, 1.6, 0.05, 0.42, 0.001);
+      tone(c, o, t, 'triangle', 1180, 720, 0.06, 0.26, 0.001, 0.05);
+      tone(c, o, t, 'sine', 190, 95, 0.12, 0.3, 0.002, 0.1);
+    },
+    bbHR: (c, o, t) => {
+      burst(c, o, t, 'highpass', 2600, 2600, 0.7, 0.07, 0.36, 0.001);
+      tone(c, o, t, 'triangle', 1500, 800, 0.07, 0.26, 0.001, 0.06);
+      tone(c, o, t, 'sine', 210, 55, 0.3, 0.32, 0.002, 0.26);
+      [72, 76, 79, 84, 88].forEach((n, i) => tone(c, o, t + 0.28 + i * 0.075, 'triangle', NOTE(n), null, i === 4 ? 0.7 : 0.3, 0.12, 0.006));
+      burst(c, o, t + 0.15, 'bandpass', 900, 1300, 0.6, 1.6, 0.12, 0.45);
+    },
+    bbOut: (c, o, t) => { [67, 63, 60].forEach((n, i) => tone(c, o, t + i * 0.16, 'triangle', NOTE(n), null, 0.24, 0.18, 0.01)); },
   };
 
   // ---------------------------------------------------------------- the live context and its buses
@@ -102,12 +126,13 @@ window.BodySound = (() => {
         const AC = window.AudioContext || window.webkitAudioContext;
         if (!AC) return null;
         ctx = new AC({ latencyHint: 'interactive' });
-        master = ctx.createGain(); master.gain.value = muted ? 0 : 1;
+        master = ctx.createGain(); master.gain.value = 1;
         const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -10; comp.ratio.value = 4; comp.attack.value = 0.003; comp.release.value = 0.15;
         master.connect(comp); comp.connect(ctx.destination);
         buses = { sfx: ctx.createGain(), music: ctx.createGain(), amb: ctx.createGain() };
         buses.sfx.gain.value = 0.85; buses.music.gain.value = 0.8; buses.amb.gain.value = 0.0001;
-        for (const b of Object.values(buses)) b.connect(master);
+        for (const k of ['sfx', 'music']) { mutes[k] = ctx.createGain(); mutes[k].gain.value = mute[k] ? 0 : 1; mutes[k].connect(master); }
+        buses.sfx.connect(mutes.sfx); buses.music.connect(mutes.music); buses.amb.connect(mutes.music);
       }
       if (ctx.state === 'suspended') ctx.resume();
     } catch (e) { return null; }
@@ -208,10 +233,10 @@ window.BodySound = (() => {
     spinNode.f.frequency.setTargetAtTime(600 + 1800 * s, ctx.currentTime, 0.04);
     spinNode.g.gain.setTargetAtTime(0.02 + 0.09 * s, ctx.currentTime, 0.05);
   }
-  function setMuted(m) {
-    muted = m;
-    try { localStorage.setItem('bodyrun.mute', m ? '1' : '0'); } catch (e) { /* storage off */ }
-    if (master) master.gain.setTargetAtTime(m ? 0 : 1, ctx.currentTime, 0.03);
+  function setMute(kind, on) {                               // kind: 'sfx' | 'music' (works while paused too)
+    mute[kind] = on;
+    try { localStorage.setItem('bodyrun.mute.' + kind, on ? '1' : '0'); localStorage.removeItem('bodyrun.mute'); } catch (e) { /* storage off */ }
+    const g = mutes[kind]; if (g) { g.gain.cancelScheduledValues(0); g.gain.value = on ? 0 : 1; }
   }
 
   // ---------------------------------------------------------------- tests: render offline and hand back the samples
@@ -227,12 +252,13 @@ window.BodySound = (() => {
   }
 
   return {
-    unlock, play, fetchSong, prepare, ready, playSong, stopSong, setBGM, ambience, spin, setMuted, renderOffline,
+    unlock, play, fetchSong, prepare, ready, playSong, stopSong, setBGM, ambience, spin, setMute, renderOffline,
     get bgmOn() { return !!bgmSrc; },
     get playing() { return cur ? cur.song : null; },
     songTime: () => (cur && ctx ? ctx.currentTime - cur.when + cur.off - cur.zero : null),   // where the song is now (tests)
     songZero: (song) => (songs[song.file] && songs[song.file].ready ? songs[song.file].ready.zero : null),
-    get muted() { return muted; },
+    muted: (kind) => mute[kind],
+    muteGain: (kind) => (mutes[kind] ? mutes[kind].gain.value : null),     // (tests)
     get ctx() { return ctx; },
     live,
     latency: () => (ctx ? (ctx.outputLatency || 0) + (ctx.baseLatency || 0) : 0),

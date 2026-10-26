@@ -16,7 +16,7 @@
   const NH = 180, GY = 150, CEIL = 14, PX = 84;
   const GRAV = 900, JUMP = 326, JUMP2 = 226, JUMP3 = 184, FASTFALL = 2.4;   // single 59 high, double 87.4, triple ~105 (v20: single +10%)
   const JMAX = (JUMP * JUMP + JUMP2 * JUMP2 + JUMP3 * JUMP3) / (2 * GRAV);    // the triple jump at its best (106.2): the 4th and on stop there
-  const V0 = 160, ACC = 0.6, VMAX = 900;
+  const V0 = 170, ACC = 0.6, VMAX = 900;
   const HP_MAX = 100, DRAIN = 1.0, HIT = 15, HEAL = 25, INVUL = 1.2;
   // the player's box: half-width and height running, sliding (the characters are drawn 0.8 of their old size)
   const PW = 6.4, PH = 19.2, SLW = 8.8, SLH = 10.4;
@@ -172,7 +172,7 @@
       y: 0, vy: 0, jumps: 0, onGround: true, slide: false, slideHeld: false, fastFall: false,
       invul: 0, nudge: 0, char: charName, obs: [], items: [], pops: [], puffs: [],
       genX: 520, genStation: undefined, lastGate: -1e9, R: rng(12345), nextHeal: 1800, station: -1, theme: COURSE[0][3], prevTheme: null, fade: 1, banner: 0, lapShown: 0,
-      blinkAt: -1, blinkR: rng(4242), vt: 0, rh: null, orb: null, bounce: false, pitObj: null,
+      blinkAt: -1, blinkR: rng(4242), vt: 0, rh: null, orb: null, bb: null, bounce: false, pitObj: null,
       o2n: 0, boost: 0, boostT0: -9, boostHeld: 0, boosts: 0, fire: [], fxR: rng(9191),
       intro: [[1950, 'spike'], [3650, 'drop'], [5420, 'pit'], [7250, 'shot'], [9130, 'door']],
     });
@@ -254,7 +254,7 @@
     else if (u < 0.5) b = 0; else if (u < 0.56) tp = smooth3((u - 0.5) / 0.06); else if (u < 0.92) tp = 1; else if (u < 0.98) tp = 1 - smooth3((u - 0.92) / 0.06);
     return [b, tp];
   }
-  function curSpeed() { return G.orb ? 0 : G.rh ? G.rh.speed : G.v * (0.3 + 0.7 * G.slow) * (G.boost > 0 ? BOOST_K : 1); }
+  function curSpeed() { return G.orb || G.bb ? 0 : G.rh ? G.rh.speed : G.v * (0.3 + 0.7 * G.slow) * (G.boost > 0 ? BOOST_K : 1); }
   function arriveIn(dist, v) { return ACC > 0 ? (-v + Math.sqrt(v * v + 2 * ACC * Math.max(0, dist))) / ACC : dist / v; }
   function aimDoor(o) {                              // set its beat so the wanted lip is half way through its hold on arrival
     const ta = G.t + arriveIn(o.x + o.w / 2 - G.x, curSpeed());
@@ -520,6 +520,26 @@
     const X = rot ? cy : cx, Y = rot ? GH - cx : cy;
     return [X / RS, Y / RS];
   }
+  // ---------------------------------------------------------------- debugging: skip to the next place (the button under the
+  // pause button; a mini-game on ends there). Arriving starts what that place starts (the rhythm stage in the right
+  // atrium, the orbit stage in the vertebral artery)
+  const DEBUG_SKIP = true;                                 // while the game is being tuned; false takes the button away
+  function skipPlace() {
+    if (G.mode !== 'play') return;
+    if (G.rh) { SND.spin(null); endRhythm(); }
+    if (G.orb) endOrbit();
+    if (G.bb) endBaseball();
+    const s = stationAt(G.x), here = COURSE[s.i][5];
+    let j = s.i, lap = s.lap;
+    do { j++; if (j >= COURSE.length) { j = 0; lap++; } } while (COURSE[j][5] === here);
+    G.x = lap * LAP + STARTS[j] + 1;
+    G.obs = []; G.items = []; G.genX = G.x + NW;              // what was set out for where you were goes; new things from off the screen
+    pressed.jump = false;
+    SND.play('ui');
+  }
+  // the settings: the jump and slide buttons' sides swapped (kept in this browser); the sound switches are in sound.js
+  const SET = { swap: false };
+  try { SET.swap = localStorage.getItem('bodyrun.swap') === '1'; } catch (e) { /* storage off */ }
   function doJump() { if (G.mode === 'play' && !busy()) pressed.jump = true; }
   function setSlide() { G.slideHeld = [...held.values()].includes('slide') || keySlide; }
   let keySlide = false;
@@ -528,25 +548,31 @@
     if (G.mode !== 'play') return;
     const [nx, ny] = toWorld(e);
     if (nx > NW - 26 && ny < 26) { pause(); return; }
+    if (DEBUG_SKIP && nx > NW - 26 && ny >= 26 && ny < 44) { skipPlace(); e.preventDefault(); return; }
     if (G.rh) { rhDown(e.pointerId, nx, ny); e.preventDefault(); return; }
     if (G.orb) { orbTap(); e.preventDefault(); return; }
-    const side = nx < NW / 2 ? 'jump' : 'slide';
+    if (G.bb) { bbDown(e.pointerId, nx, ny); e.preventDefault(); return; }
+    const side = (nx < NW / 2) !== SET.swap ? 'jump' : 'slide';    // the left half jumps (the right, swapped)
     held.set(e.pointerId, side);
     if (side === 'jump') doJump();
     setSlide(); e.preventDefault();
   });
-  const up = (e) => { held.delete(e.pointerId); setSlide(); rhUp(e.pointerId); };
+  const up = (e) => { held.delete(e.pointerId); setSlide(); rhUp(e.pointerId); bbUp(e.pointerId); };
   cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up); cv.addEventListener('pointerleave', up);
-  cv.addEventListener('pointermove', (e) => { if (G.rh && G.mode === 'play') { const [nx, ny] = toWorld(e); rhMove(e.pointerId, nx, ny); } });
+  cv.addEventListener('pointermove', (e) => { if (G.mode !== 'play') return; if (G.rh) { const [nx, ny] = toWorld(e); rhMove(e.pointerId, nx, ny); } if (G.bb) { const [nx, ny] = toWorld(e); bbMove(e.pointerId, nx, ny); } });
   document.addEventListener('visibilitychange', () => { if (document.hidden && G.mode === 'play') pause(); });
   addEventListener('keydown', (e) => {
     if (e.repeat) return;
+    if (G.bb && G.mode === 'play') {                         // baseball: the arrows move the bat's ring, space (or enter) swings
+      if (BB_KEY[e.code]) { bbKeys.add(BB_KEY[e.code]); e.preventDefault(); return; }
+      if (['Space', 'Enter', 'KeyJ', 'KeyF'].includes(e.code)) { bbSwing(); e.preventDefault(); return; }
+    }
     if (G.orb && G.mode === 'play' && ['Space', 'ArrowUp', 'ArrowDown', 'KeyW', 'KeyS', 'Enter', 'KeyJ', 'KeyF'].includes(e.code)) { orbTap(); e.preventDefault(); return; }
     if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') { doJump(); e.preventDefault(); }
     if (e.code === 'ArrowDown' || e.code === 'KeyS') { keySlide = true; setSlide(); e.preventDefault(); }
     if (e.code === 'Escape' || e.code === 'KeyP') { if (G.mode === 'play') pause(); else if (G.mode === 'pause') resume(); }
   });
-  addEventListener('keyup', (e) => { if (e.code === 'ArrowDown' || e.code === 'KeyS') { keySlide = false; setSlide(); } });
+  addEventListener('keyup', (e) => { if (BB_KEY[e.code]) bbKeys.delete(BB_KEY[e.code]); if (e.code === 'ArrowDown' || e.code === 'KeyS') { keySlide = false; setSlide(); } });
 
   // ---------------------------------------------------------------- the mini-games' songs (stages.js): five each, in turn
   // Each go of a mini-game takes the next of its songs; the turn is kept (the next run goes on from it). The songs are
@@ -627,7 +653,6 @@
       pops: [], ptr: new Map(), done: false, doneT: 0, gain: 0, lastBeat: -99, flash: -9 };
     if (audio) SND.ambience(false);
     G.slideHeld = false; held.clear();
-    for (const id of ['lj', 'ls']) document.getElementById(id).hidden = true;
   }
   // the song is in: start it (and the stage's clock with it); or it did not come: go on by the game's clock, silent
   function rhStartSong() {
@@ -640,7 +665,6 @@
     SND.stopSong(0.5); SND.spin(null); SND.ambience(true);
     G.genX = Math.max(G.genX, G.x + NW * 0.8);              // a moment to get going again
     G.banner = G.t;                                          // and where you are now
-    for (const id of ['lj', 'ls']) document.getElementById(id).hidden = false;
   }
   function rtime() {
     const r = G.rh;
@@ -914,7 +938,7 @@
   const OB_PLANS = {};                                     // laid out once per song, when first needed
   const orbPlan = (song) => OB_PLANS[song.id] || (OB_PLANS[song.id] = planOrbit(song));
   let OB = orbPlan(songFor('orb'));                        // the path of the stage on now (or of the next one)
-  const busy = () => !!(G.rh || G.orb);
+  const busy = () => !!(G.rh || G.orb || G.bb);
   function otime() {
     const o = G.orb;
     if (o.wait !== null) return -OB_LEAD;                    // the song still on its way
@@ -938,7 +962,6 @@
     G.orb = { gx0: G.x, cam0, cam: cam0.slice(), gt0: G.t + OB_LEAD, a0: null, wait: audio ? G.t : null, k: 0, st: 'play', stT: G.t,
       res: { perfect: 0, early: 0, late: 0, miss: 0 }, pops: [], landT: -9, inT: G.t, off: 0, next: OB.T[1] };
     G.slideHeld = false; held.clear(); pressed.jump = false;
-    for (const id of ['lj', 'ls']) document.getElementById(id).hidden = true;
     if (audio) SND.ambience(false);
   }
   // the song is in: start it (and the stage's clock with it); or it did not come: go on by the game's clock, silent
@@ -952,7 +975,6 @@
     SND.stopSong(0.5); SND.ambience(true);
     G.genX = Math.max(G.genX, G.x + NW * 0.8);
     G.banner = G.t;
-    for (const id of ['lj', 'ls']) document.getElementById(id).hidden = false;
   }
   // a miss: the swing carries on round and the same tile comes up again two beats later (and so does all after it);
   // the song goes back two beats, so the tile and its note come round together again
@@ -1146,6 +1168,311 @@
     G.slideHeld = slide && !jump;
   }
 
+  // ---------------------------------------------------------------- the baseball stage (in the jejunum)
+  // A ballpark of the gut's own tissue, seen from behind home plate. A macrophage on the mound throws three pitches; the
+  // runner stands up at the plate on two legs with a bat. Drag on the left to put the bat's ring where the ball will cross
+  // (a white ring shows the spot once it is thrown, closing in as it comes), tap on the right as it gets there. Right on
+  // time and on the ring's sweet middle is a home run; close, a hit; touched, a foul. A home run in three pitches wins
+  // (points only, no harm either way). The game's own clock (no song here; the run's music goes on).
+  const BBF = M.bb || { mound: [210, 100], plate: [210, 172] };                 // the field picture's numbers (baseball.py)
+  const BB_N = 3;                                                               // pitches
+  const BB_ZW = 44, BB_ZH = 50, BB_ZY = 128;                                    // the strike zone: width, height, centre y
+  const BB_CR = 9, BB_SWEET = 5.5, BB_BR = 4.6;                                 // the bat's ring, its sweet middle, the ball at the plate
+  const BB_HR = 0.075, BB_HIT = 0.12, BB_TOUCH = 0.16;                          // timing (s): home run, a hit, any touch
+  const BB_INTRO = 2.2, BB_WIND = 1.0, BB_AFTER = 1.5, BB_AFTER_HR = 2.4, BB_END = 2.2;
+  const BB_TYPES = [                                                            // name, flight time, break (units, at the plate)
+    { name: '직구', T: 0.62, bx: 0, by: 0 }, { name: '커브', T: 0.82, bx: 4, by: 14 },
+    { name: '슬라이더', T: 0.72, bx: 13, by: 3 }, { name: '체인지업', T: 0.9, bx: 2, by: 6 },
+  ];
+  const BB_PTS = { hr: 1000, hit: 150 };
+  const BB_PS = 1.45;                                                           // the pitcher's picture, scaled
+  // the batter: the runner's own pictures from six sides (front 0, front-right 45, right 90, back-right 135, back 180,
+  // back-left 225; 270 and 315 are 90 and 45 turned over), standing on its feet left of the plate. It waits turned
+  // towards the pitcher (135) and turns with the swing (180 at the hit, 225 after), the bat in two fists of its colour
+  const BB_BAT = 60, BB_FIST = 4.4;
+  const BAT_COL = { tardigrade: '#f0b870', lacto: '#7cd04a', paramecium: '#3aa8e8', amoeba: '#b060d8', daphnia: '#e8b060',
+    pillbug: '#a4a6ba', ladybug: '#3a3438', jelly: '#f4a0d0', sub: '#f4c430', phage: '#c0b4e8' };
+  const bbKeys = new Set();
+  function startBaseball() {
+    holdBoost();
+    G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
+    G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
+    G.bb = { st: 'intro', stT: G.t, inT: G.t, k: 0, res: [], hr: false, cur: [0, 0], drag: null, p: null, swingT: -9, gain: 0, msg: null, ball: null };
+    G.slideHeld = false; held.clear(); pressed.jump = false; bbKeys.clear();
+  }
+  function endBaseball() {
+    G.bb = null; G.games = (G.games || 0) + 1; resumeBoost();
+    G.genX = Math.max(G.genX, G.x + NW * 0.8);
+    G.banner = G.t;
+  }
+  const bbZone = () => [NWf / 2, BB_ZY];
+  function bbPitch() {                                                         // the next pitch: its kind, where it crosses
+    const b = G.bb, ty = BB_TYPES[Math.floor(Math.random() * BB_TYPES.length)];
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const tx = (Math.random() * 2 - 1) * BB_ZW * 0.38, tyy = (Math.random() * 2 - 1) * BB_ZH * 0.36;
+    b.p = { type: ty, rel: G.t + BB_WIND, arr: G.t + BB_WIND + ty.T, tx, ty: tyy, bx: ty.bx * side, by: ty.by, swung: false, done: false };
+    b.st = 'wind'; b.stT = G.t; b.ball = null; b.msg = null;
+  }
+  function bbPitcherFrame() {                                                  // set, wind-up, release, follow-through
+    const b = G.bb, p = b.p, u = G.t - b.stT;
+    if (b.st === 'wind') return u < 0.3 ? 0 : u < 0.8 ? 1 : 2;
+    if (b.st === 'fly') return G.t - p.rel < 0.12 ? 2 : 3;
+    if (b.st === 'after') return u < 0.6 ? 3 : 0;
+    return 0;
+  }
+  function bbPitcherAt() { const [zx] = bbZone(); return [zx + (BBF.mound[0] - 210), BBF.mound[1] - 1]; }
+  function bbHand(f) {
+    const s = M.sprites['bb_p' + f], [mx, my] = bbPitcherAt();
+    if (!s || !s.hand) return [mx, my - 30];
+    return [mx + (s.hand[0] - s.foot[0]) * BB_PS, my + (s.hand[1] - s.foot[1]) * BB_PS];
+  }
+  // the ball in flight: s from 0 at the release to 1 at the plate (and on past it, into the catcher's mitt)
+  function bbBallAt(t) {
+    const p = G.bb.p, s = Math.max(0, (t - p.rel) / p.type.T);
+    const [rx, ry] = bbHand(2), [zx, zy] = bbZone(), P = [zx + p.tx, zy + p.ty];
+    const e = s * s * 0.35 + s * 0.65;                                         // a little faster as it comes
+    const ax = P[0] - p.bx, ay = P[1] - p.by;                                  // aimed off by the break, which comes late
+    const x = rx + (ax - rx) * e + p.bx * s * s * s, y = ry + (ay - ry) * e + p.by * s * s * s;
+    return { x, y, r: 1.3 + (BB_BR - 1.3) * Math.pow(s, 1.6), s };
+  }
+  function bbSwing() {
+    const b = G.bb; if (!b || b.st !== 'fly') return;                          // only once the ball is on its way
+    const p = b.p; if (p.swung || p.done) return;
+    p.swung = true; b.swingT = G.t; SND.play('bbSwing');
+    const dt = G.t - p.arr, [zx, zy] = bbZone(), d = Math.hypot(b.cur[0] - p.tx, b.cur[1] - p.ty);
+    if (Math.abs(dt) > BB_TOUCH || d > BB_CR + BB_BR) return;                  // a miss is told when the ball goes by
+    bbResult(Math.abs(dt) <= BB_HR && d <= BB_SWEET ? 'hr' : Math.abs(dt) <= BB_HIT && d <= BB_CR ? 'hit' : 'foul', [zx + p.tx, zy + p.ty], dt, d);
+  }
+  function bbResult(res, at, dt = 0, d = 0) {
+    const b = G.bb, p = b.p;
+    p.done = true; p.res = res; p.dt = dt; p.d = d; b.res.push(res); b.st = 'after'; b.stT = G.t;
+    b.ball = null;
+    if (at) {
+      const fly = { from: at, t0: G.t, res };
+      if (res === 'hr') { fly.to = [at[0] + (Math.random() * 2 - 1) * 70, -24]; fly.dur = 1.7; fly.h = 60; }
+      else if (res === 'hit') { fly.to = [at[0] + (Math.random() * 2 - 1) * 110, 50 + Math.random() * 16]; fly.dur = 1.0; fly.h = 26; }
+      else { const sd = dt < 0 ? -1 : 1; fly.to = [at[0] + sd * (180 + Math.random() * 40), 40 + Math.random() * 30]; fly.dur = 0.8; fly.h = 22; }
+      b.ball = fly;
+    }
+    b.msg = { s: { hr: '홈런!', hit: '안타', foul: '파울', whiff: '헛스윙', strike: '스트라이크' }[res], t: G.t, res };
+    if (res === 'hr' || res === 'hit') { const pts = BB_PTS[res]; G.score += pts; b.gain += pts; }
+    if (res === 'hr') { b.hr = true; SND.play('bbHR'); buzz([30, 40, 60]); }
+    else if (res === 'hit' || res === 'foul') { SND.play('bbHit'); buzz(BUZZ_TAP); }
+    else SND.play('bbMitt');
+  }
+  function stepBaseball(dt) {                                                 // (each check reads the clock afresh: one step can change the state)
+    const b = G.bb;
+    if (bbKeys.size) {                                                         // the arrow keys move the bat's ring
+      const k = 95 * dt, mx = BB_ZW / 2 + 6, my = BB_ZH / 2 + 6;
+      if (bbKeys.has('L')) b.cur[0] -= k; if (bbKeys.has('R')) b.cur[0] += k;
+      if (bbKeys.has('U')) b.cur[1] -= k; if (bbKeys.has('D')) b.cur[1] += k;
+      b.cur[0] = Math.max(-mx, Math.min(mx, b.cur[0])); b.cur[1] = Math.max(-my, Math.min(my, b.cur[1]));
+    }
+    if (b.st === 'intro') { if (G.t - b.stT > BB_INTRO) bbPitch(); return; }
+    if (b.st === 'wind' && G.t >= b.p.rel) { b.st = 'fly'; b.stT = G.t; SND.play('bbPitch'); }
+    if (b.st === 'fly') {
+      const p = b.p;
+      if (AUTO && !window.__noAuto) {                                         // the test pilot: on the spot, on time
+        if (G.t >= p.arr - p.type.T * 0.5) b.cur = [p.tx, p.ty];
+        if (G.t >= p.arr) bbSwing();
+      }
+      if (!p.done && G.t > p.arr + BB_TOUCH) bbResult(p.swung ? 'whiff' : 'strike', null);
+    }
+    if (b.st === 'after' && G.t - b.stT > (b.hr ? BB_AFTER_HR : BB_AFTER)) {
+      if (b.hr || b.k + 1 >= BB_N) { b.st = 'done'; b.stT = G.t; if (!b.hr) SND.play('bbOut'); }
+      else { b.k++; bbPitch(); }
+    }
+    if (b.st === 'done' && G.t - b.stT > BB_END) endBaseball();
+  }
+  function bbDown(id, x, y) {
+    const b = G.bb; if (!b) return;
+    if (x > NW * 0.6) { bbSwing(); return; }
+    b.drag = { id, x, y };
+  }
+  function bbMove(id, x, y) {
+    const b = G.bb; if (!b || !b.drag || b.drag.id !== id) return;
+    const k = 1.15, mx = BB_ZW / 2 + 6, my = BB_ZH / 2 + 6;
+    b.cur[0] = Math.max(-mx, Math.min(mx, b.cur[0] + (x - b.drag.x) * k));
+    b.cur[1] = Math.max(-my, Math.min(my, b.cur[1] + (y - b.drag.y) * k));
+    b.drag.x = x; b.drag.y = y;
+  }
+  function bbUp(id) { const b = G.bb; if (b && b.drag && b.drag.id === id) b.drag = null; }
+  const BB_KEY = { ArrowLeft: 'L', KeyA: 'L', ArrowRight: 'R', KeyD: 'R', ArrowUp: 'U', KeyW: 'U', ArrowDown: 'D', KeyS: 'D' };
+
+  // ---- drawing
+  // the bat: a big round wooden club, thin at the grip and swelling to a fat barrel with a domed end; shaded as a
+  // cylinder with a long shine down it (z: towards us, a little thicker)
+  function drawBat(hx, hy, vx, vy, z) {                                         // from the knob (hx, hy) along (vx, vy)
+    const l = Math.hypot(vx, vy), k = 1 + 0.25 * z;
+    const rad = (t) => { const e = Math.max(0, Math.min(1, (t - 0.22) / 0.58)); return (2.1 + (5.8 - 2.1) * e * e * (3 - 2 * e)) * k; };
+    if (l < 1) { ctx.beginPath(); ctx.arc(hx, hy, rad(1), 0, 6.29); ctx.fillStyle = '#d89a54'; ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = '#1a0a14'; ctx.stroke(); return; }
+    const ux = vx / l, uy = vy / l, nx = -uy, ny = ux, N = 20, R1 = rad(1), L = l - R1;   // the dome's centre is R1 short of the tip
+    const at = (t, side) => { const r = rad(t), d = L * t; return [hx + ux * d + nx * r * side, hy + uy * d + ny * r * side]; };
+    ctx.beginPath();
+    for (let i = 0; i <= N; i++) { const [x, y] = at(i / N, 1); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
+    ctx.arc(hx + ux * L, hy + uy * L, R1, Math.atan2(ny, nx), Math.atan2(-ny, -nx), true);
+    for (let i = N; i >= 0; i--) { const [x, y] = at(i / N, -1); ctx.lineTo(x, y); }
+    ctx.closePath();
+    const g = ctx.createLinearGradient(hx + nx * R1, hy + ny * R1, hx - nx * R1, hy - ny * R1);
+    g.addColorStop(0, '#fbe2b4'); g.addColorStop(0.35, '#e8ae6c'); g.addColorStop(0.75, '#b8722e'); g.addColorStop(1, '#7a4418');
+    ctx.fillStyle = g; ctx.fill(); ctx.lineJoin = 'round'; ctx.lineWidth = 1.3; ctx.strokeStyle = '#1a0a14'; ctx.stroke();
+    // the shine: a soft streak along the lit side of the barrel
+    ctx.beginPath();
+    for (let i = 8; i <= N; i++) { const t = i / N, r = rad(t) * 0.5, d = L * t; const x = hx + ux * d + nx * r, y = hy + uy * d + ny * r; if (i > 8) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
+    ctx.lineCap = 'round'; ctx.lineWidth = 1.3 * k; ctx.strokeStyle = 'rgba(255,248,230,0.7)'; ctx.stroke();
+    // the knob
+    ctx.beginPath(); ctx.ellipse(hx - ux * 0.8, hy - uy * 0.8, 3.1 * k, 2 * k, Math.atan2(uy, ux) + Math.PI / 2, 0, 6.29);
+    ctx.fillStyle = '#6a3a16'; ctx.fill(); ctx.lineWidth = 1.1; ctx.strokeStyle = '#1a0a14'; ctx.stroke();
+  }
+  // the batter's pose at ts seconds after the swing (or before it): the body's turn (th, degrees: 0 faces us, 90 the
+  // plate, 180 the pitcher), the bat's turn round the body (phi: 0 points across the plate, + towards us) and rise (tlt),
+  // the hands in the body's own frame (ha along its right, hb ahead of it, both in half widths; hh down from the top, in
+  // heights), the step in. At the hit (DN, given) the bat lies across the plate to the bat's ring.
+  function bbPose(ts, DN) {
+    const ease = (v) => { v = Math.max(0, Math.min(1, v)); return v * v * (3 - 2 * v); };
+    const ST = { th: 135, phi: 140, tlt: 60, ha: 0.55, hb: 0.05, hh: 0.42, step: 0 };
+    const FO = { th: 230, phi: -170, tlt: 35, ha: -0.55, hb: 0.05, hh: 0.36, step: 1 };
+    const mix = (a, b, k) => { const o = {}; for (const q in a) o[q] = a[q] + (b[q] - a[q]) * k; return o; };
+    if (ts < 0 || ts > 1.3) return { ...ST, tlt: ST.tlt + Math.sin(G.t * 2.4) * 2.5 };      // waiting: the bat sways a little
+    if (ts < 0.2) return mix(ST, DN, ease(ts / 0.2));
+    if (ts < 0.4) return mix(DN, FO, ease((ts - 0.2) / 0.2));
+    if (ts < 0.9) return FO;
+    return mix(FO, { ...ST, phi: -220 }, ease((ts - 0.9) / 0.4));               // and back
+  }
+  function bbView(th) {                                                         // the picture for a turn: nearest of the eight
+    const a = ((Math.round(th / 45) * 45) % 360 + 360) % 360;
+    return a === 270 ? ['90', true] : a === 315 ? ['45', true] : [String(a), false];
+  }
+  function drawFist(x, y, col) {
+    ctx.beginPath(); ctx.arc(x, y, BB_FIST, 0, 6.29); ctx.fillStyle = col; ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = '#1a0a14'; ctx.stroke();
+    ctx.beginPath(); ctx.arc(x - BB_FIST * 0.3, y - BB_FIST * 0.35, BB_FIST * 0.35, 0, 6.29); ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.fill();
+  }
+  function drawBatter(x0, gy) {                                                 // x0: where it stands (the middle of its feet); gy: the ground
+    const b = G.bb, n = G.char, front = M.sprites[`bt_${n}_0`];
+    if (!front) return;
+    const Wb = front.w, Hb = front.h, col = BAT_COL[n] || '#e8b47a';
+    // the hit: the hands out ahead, the bat from them through the bat's ring
+    const [zx, zy] = bbZone(), tg = [zx + b.cur[0], zy + b.cur[1]];
+    const handAt = (P, x) => { const t = P.th * Math.PI / 180, rx = -Math.cos(t), rz = Math.sin(t), fx = Math.sin(t), fz = Math.cos(t);
+      const z = P.ha * rz + P.hb * fz;                                            // + towards us
+      return [x + (P.ha * rx + P.hb * fx) * Wb * 0.5, gy - Hb + P.hh * Hb + z * 2.5, z]; };
+    const DN0 = { th: 178, ha: 0.35, hb: 0.6, hh: 0.5, step: 1 };
+    const hD = handAt(DN0, x0 + 6);
+    const DN = { ...DN0, phi: 0, tlt: -Math.atan2(tg[1] - hD[1], tg[0] - hD[0]) * 180 / Math.PI };
+    const P = bbPose(G.t - b.swingT, DN), phi = P.phi * Math.PI / 180, tlt = P.tlt * Math.PI / 180;
+    const x = x0 + 6 * P.step, [hx, hy, hz] = handAt(P, x);
+    const bx = Math.cos(phi) * Math.cos(tlt), bz = Math.sin(phi) * Math.cos(tlt), by = -Math.sin(tlt);
+    const vx = bx * BB_BAT, vy = (by + bz * 0.14) * BB_BAT;
+    const bat = () => { drawBat(hx, hy, vx, vy, bz); drawFist(hx + vx * 0.04, hy + vy * 0.04, col); drawFist(hx + vx * 0.13, hy + vy * 0.13, col); };
+    const behind = hz + bz * 0.4 < -0.05;                                       // the hands and bat on the far side of the body
+    if (behind) bat();
+    const [v, flip] = bbView(P.th), sp = M.sprites[`bt_${n}_${v}`];
+    ctx.save(); ctx.translate(x, gy); if (flip) ctx.scale(-1, 1);
+    spr(`bt_${n}_${v}`, -sp.foot[0], -sp.foot[1], 1, sp.w, sp.h);
+    ctx.restore();
+    if (!behind) bat();
+  }
+  function drawBall(x, y, r, spin = 0) {
+    ctx.beginPath(); ctx.arc(x, y, r + 0.7, 0, 6.29); ctx.fillStyle = '#1a0a14'; ctx.fill();
+    const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.1, x, y, r); g.addColorStop(0, '#ffffff'); g.addColorStop(0.7, '#f2ece4'); g.addColorStop(1, '#c8bcb0');
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 6.29); ctx.fillStyle = g; ctx.fill();
+    if (r > 1.6) {                                                             // the seams
+      ctx.lineWidth = Math.max(0.35, r * 0.16); ctx.strokeStyle = '#d23a3a';
+      const c = Math.cos(spin) * 0.25;
+      ctx.beginPath(); ctx.arc(x - r * (1.25 + c), y, r * 0.95, -0.36 * Math.PI, 0.36 * Math.PI); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x + r * (1.25 + c), y, r * 0.95, 0.64 * Math.PI, 1.36 * Math.PI); ctx.stroke();
+    }
+  }
+  function drawBaseball() {
+    const b = G.bb; if (!b) return;
+    world();
+    const u = G.t - b.inT;
+    let al = Math.min(1, u / 0.35);
+    if (b.st === 'done') al *= Math.max(0, Math.min(1, (BB_END - (G.t - b.stT)) / 0.35));
+    ctx.globalAlpha = al;                                                      // (spr at alpha 1 keeps this)
+    const [zx, zy] = bbZone();
+    ctx.fillStyle = '#2a0812'; ctx.fillRect(0, 0, NWf, NH);
+    spr('bb_field', zx - 210, 0, 1, 420, 180);
+    // the pitcher (and the ball in its hand until it lets go)
+    const f = b.p ? bbPitcherFrame() : 0, ps = M.sprites['bb_p' + f], [mx, my] = bbPitcherAt();
+    if (ps) spr('bb_p' + f, mx - ps.foot[0] * BB_PS, my - ps.foot[1] * BB_PS, 1, ps.w * BB_PS, ps.h * BB_PS);
+    if (b.st === 'intro' || b.st === 'wind' || (b.st === 'after' && G.t - b.stT > 0.6)) { const [hx, hy] = bbHand(f); drawBall(hx, hy, 1.4); }
+    // the strike zone: a frame with thirds
+    ctx.globalAlpha = al * 0.9;
+    rrect(zx - BB_ZW / 2, zy - BB_ZH / 2, BB_ZW, BB_ZH, 2); ctx.fillStyle = 'rgba(255,240,246,0.07)'; ctx.fill();
+    ctx.lineWidth = 0.9; ctx.strokeStyle = 'rgba(255,240,246,0.75)'; ctx.stroke();
+    ctx.lineWidth = 0.45; ctx.strokeStyle = 'rgba(255,240,246,0.3)'; ctx.beginPath();
+    for (const q of [1, 2]) { ctx.moveTo(zx - BB_ZW / 2 + BB_ZW * q / 3, zy - BB_ZH / 2); ctx.lineTo(zx - BB_ZW / 2 + BB_ZW * q / 3, zy + BB_ZH / 2); ctx.moveTo(zx - BB_ZW / 2, zy - BB_ZH / 2 + BB_ZH * q / 3); ctx.lineTo(zx + BB_ZW / 2, zy - BB_ZH / 2 + BB_ZH * q / 3); }
+    ctx.stroke(); ctx.globalAlpha = al;
+    // the batter (left of the plate, feet on the ground at the bottom)
+    drawBatter(zx - 54, 178);
+    // where the ball will cross: a white ring closing in to the ball's size as it comes
+    const p = b.p, flying = p && b.st === 'fly' && !p.done;
+    if (flying) {
+      const B = bbBallAt(G.t);
+      if (B.s >= 0.12 && B.s <= 1) {
+        const q = (B.s - 0.12) / 0.88, R = BB_BR + 1 + (BB_CR * 2.4 - BB_BR - 1) * (1 - q);
+        ctx.globalAlpha = al * Math.min(1, (B.s - 0.12) * 6);
+        ctx.beginPath(); ctx.arc(zx + p.tx, zy + p.ty, R, 0, 6.29); ctx.lineWidth = 2.8; ctx.strokeStyle = 'rgba(26,10,20,0.7)'; ctx.stroke();
+        ctx.lineWidth = 1.5; ctx.strokeStyle = '#ffffff'; ctx.stroke(); ctx.globalAlpha = al;
+      }
+    }
+    // the ball on its way (over the batter's bat: it comes at us), and on past into the mitt if not hit
+    if (flying || (p && b.st === 'after' && !b.ball && G.t - p.arr < 0.32)) {
+      const B = bbBallAt(Math.min(G.t, p.arr + 0.3));
+      if (B.s < 1.32) drawBall(B.x, B.y, B.r, G.t * 30);
+    }
+    // a struck ball flying off (a few ghosts behind it)
+    if (b.ball) {
+      const F = b.ball, q = Math.min(1, (G.t - F.t0) / F.dur);
+      const at = (qq) => [F.from[0] + (F.to[0] - F.from[0]) * qq, F.from[1] + (F.to[1] - F.from[1]) * qq - Math.sin(qq * Math.PI) * F.h, BB_BR * (1 - 0.75 * qq)];
+      if (q < 1) {
+        for (let i = 4; i >= 1; i--) { const [x, y, r] = at(Math.max(0, q - i * 0.035)); ctx.globalAlpha = al * 0.12 * (5 - i); drawBall(x, y, r * (1 - i * 0.1)); }
+        ctx.globalAlpha = al; const [x, y, r] = at(q); drawBall(x, y, r, G.t * 20);
+      }
+    }
+    // the bat's ring (where you will hit) and its sweet middle
+    if (b.st !== 'done') {
+      const cx = zx + b.cur[0], cy = zy + b.cur[1];
+      ctx.beginPath(); ctx.arc(cx, cy, BB_CR, 0, 6.29); ctx.fillStyle = 'rgba(255,214,110,0.16)'; ctx.fill();
+      ctx.lineWidth = 2.8; ctx.strokeStyle = '#1a0a14'; ctx.stroke(); ctx.lineWidth = 1.5; ctx.strokeStyle = '#ffd66e'; ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx, cy, BB_SWEET, 0, 6.29); ctx.lineWidth = 0.7; ctx.strokeStyle = 'rgba(255,240,180,0.75)'; ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx, cy, 1.1, 0, 6.29); ctx.fillStyle = '#ffd66e'; ctx.fill();
+    }
+    // the controls: drag on the left, the swing button on the right
+    if (b.st !== 'done') {
+      const by = NH - 30, bxr = NW - 34;
+      ctx.beginPath(); ctx.arc(bxr, by, 20, 0, 6.29); ctx.fillStyle = 'rgba(26,10,20,0.6)'; ctx.fill();
+      ctx.beginPath(); ctx.arc(bxr, by, 18.5, 0, 6.29); ctx.fillStyle = G.t - b.swingT < 0.25 ? 'rgba(255,214,110,0.75)' : 'rgba(255,214,110,0.38)'; ctx.fill();
+      ctx.lineWidth = 1.4; ctx.strokeStyle = 'rgba(255,240,200,0.95)'; ctx.stroke();
+      label('스윙', bxr, by + 0.5, 9, 'center', al, '#ffffff');
+    }
+    // the count: three balls, used ones dimmed; under it how the ring moves
+    for (let i = 0; i < BB_N; i++) { ctx.globalAlpha = al * (i < b.res.length ? 0.28 : 1); drawBall(20 + i * 10, 44, 3.4); }
+    ctx.globalAlpha = al;
+    if (b.st !== 'done') label('왼쪽 끌기: 고리 이동', 15, 56, 6.5, 'left', al * 0.85, '#ffffff');
+    if (b.st === 'intro') {
+      const a = Math.min(1, u / 0.3) * Math.max(0, Math.min(1, (BB_INTRO - u) / 0.3));
+      label('3구 안에 홈런!', NWf / 2, 62, 16, 'center', a, '#ffe0a8');
+      label('왼쪽을 끌어 노란 고리를 공이 올 자리(흰 고리)에', NWf / 2, 80, 7.5, 'center', a, '#ffffff');
+      label('흰 고리가 공만큼 줄어들 때 오른쪽 터치', NWf / 2, 91, 7.5, 'center', a, '#ffffff');
+    }
+    if (b.msg && b.st !== 'done') {
+      const v = G.t - b.msg.t, big = b.msg.res === 'hr', a = Math.min(1, v / 0.12) * Math.max(0, Math.min(1, ((big ? 2.2 : 1.3) - v) / 0.3));
+      label(b.msg.s, NWf / 2, big ? 54 : 60, big ? 26 + 8 * Math.max(0, 1 - v * 4) : 15, 'center', a, big ? '#ffe68a' : b.msg.res === 'hit' ? '#a8e0ff' : '#ffffff');
+      if (big || b.msg.res === 'hit') label(`+${BB_PTS[b.msg.res].toLocaleString('en-US')}점`, NWf / 2, big ? 75 : 74, 9, 'center', a, '#ffe68a');
+    }
+    if (b.st === 'done') {
+      const v = G.t - b.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (BB_END - v) / 0.35));
+      ctx.globalAlpha = a * 0.78; rrect(NWf / 2 - 110, 54, 220, 60, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = 1;
+      label(b.hr ? '홈런 성공!' : '아웃!', NWf / 2, 70, 14, 'center', a, b.hr ? '#ffe68a' : '#ffd0dc');
+      const n = (q) => b.res.filter((r) => r === q).length;
+      label(`홈런 ${n('hr')} · 안타 ${n('hit')} · 파울 ${n('foul')} · 헛스윙 ${n('whiff')} · 스트라이크 ${n('strike')}`, NWf / 2, 90, 7.5, 'center', a, '#ffffff');
+      label(`+${b.gain.toLocaleString('en-US')}점`, NWf / 2, 104, 8.5, 'center', a, '#ffe68a');
+    }
+    ctx.globalAlpha = 1;
+  }
+
   // ---------------------------------------------------------------- step
   function step(dt) {
     if (G.mode !== 'play') return;
@@ -1162,6 +1489,7 @@
     stepFire(dt);
     if (G.rh) stepRhythm(dt);
     if (G.orb) stepOrbit(dt);
+    if (G.bb) stepBaseball(dt);
     G.nudge = Math.max(0, G.nudge - dt * 30);
     moveObs(dt);
     // jump / double jump / slide
@@ -1243,7 +1571,7 @@
       G.station = s.i;
       const th = s.st[3];
       if (th !== G.theme) { G.prevTheme = G.theme; G.theme = th; G.fade = 0; }
-      if (arrived) { if (!busy()) G.banner = G.t; setLabel(s.st, s.lap); if (s.st[0] === 'ra' && !busy()) startRhythm(); if (s.st[0] === 'vertebral' && !busy()) startOrbit(); }
+      if (arrived) { if (!busy()) G.banner = G.t; setLabel(s.st, s.lap); if (s.st[0] === 'ra' && !busy()) startRhythm(); if (s.st[0] === 'vertebral' && !busy()) startOrbit(); if (s.st[0] === 'jejunum' && !busy()) startBaseball(); }
       manageThemes(s.i);
     }
     G.fade = Math.min(1, G.fade + dt / 0.7);
@@ -1719,18 +2047,42 @@
     if (alpha !== 1) ctx.globalAlpha = 1;
   }
   function rrect(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, w, h, r) : ctx.rect(x, y, w, h); }
-  function button(cx, cy, up, on) {
-    const r = 16;
+  // the jump and slide buttons: a circle with its name in it (1.2 times the old arrow buttons)
+  const BTN_R = 19.2, BTN_M = 8.5;                        // radius, the gap to the screen's edges
+  function button(cx, cy, text, on) {
+    const r = BTN_R;
     ctx.beginPath(); ctx.arc(cx, cy, r + 0.8, 0, 6.29); ctx.fillStyle = 'rgba(26,10,20,0.55)'; ctx.fill();
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, 6.29); ctx.fillStyle = on ? 'rgba(255,214,110,0.45)' : 'rgba(255,255,255,0.2)'; ctx.fill();
     ctx.lineWidth = 1.3; ctx.strokeStyle = on ? 'rgba(255,230,160,0.95)' : 'rgba(255,255,255,0.8)'; ctx.stroke();
-    // an arrow
-    const s = up ? -1 : 1;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy + s * 7); ctx.lineTo(cx + 6.5, cy + s * 0.5); ctx.lineTo(cx + 2.4, cy + s * 0.5); ctx.lineTo(cx + 2.4, cy - s * 6.5);
-    ctx.lineTo(cx - 2.4, cy - s * 6.5); ctx.lineTo(cx - 2.4, cy + s * 0.5); ctx.lineTo(cx - 6.5, cy + s * 0.5); ctx.closePath();
-    ctx.lineJoin = 'round'; ctx.lineWidth = 1.6; ctx.strokeStyle = '#1a0a14'; ctx.stroke();
-    ctx.fillStyle = '#ffffff'; ctx.fill();
+    ctx.font = '900 9px system-ui, -apple-system, "Noto Sans KR", sans-serif';
+    const fit = Math.min(9, 9 * BTN_R * 1.5 / ctx.measureText(text).width);   // the name inside the ring, however long
+    label(text, cx, cy + 0.4, fit, 'center', 1, '#ffffff');
+  }
+  // the mini-games on the progress bar: where in the lap each comes (the start of its place), and its mark: the rhythm
+  // stage a pink disc with a note, the orbit stage a violet disc with a little orbit, baseball a ball. More games: add them here.
+  const BAR_W = 160;
+  const MINI_MARKS = [['ra', 'rh'], ['vertebral', 'orb'], ['jejunum', 'bb']].map(([id, kind]) => ({ kind, lx: STARTS[COURSE.findIndex((st) => st[0] === id)] }));
+  function miniMark(kind, x, y, alpha) {
+    ctx.globalAlpha = alpha;
+    ctx.beginPath(); ctx.arc(x, y, 4.6, 0, 6.29); ctx.fillStyle = '#1a0a14'; ctx.fill();
+    if (kind === 'bb') {                                    // a baseball: white, with its two red seams
+      ctx.beginPath(); ctx.arc(x, y, 3.7, 0, 6.29); ctx.fillStyle = '#f6f0ea'; ctx.fill();
+      ctx.lineWidth = 0.6; ctx.strokeStyle = '#d23a3a';
+      ctx.beginPath(); ctx.arc(x - 4.6, y, 3.5, -0.34 * Math.PI, 0.34 * Math.PI); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x + 4.6, y, 3.5, 0.66 * Math.PI, 1.34 * Math.PI); ctx.stroke();
+      ctx.globalAlpha = 1; return;
+    }
+    ctx.beginPath(); ctx.arc(x, y, 3.7, 0, 6.29); ctx.fillStyle = kind === 'rh' ? '#ff5a8a' : '#9a6cff'; ctx.fill();
+    ctx.fillStyle = '#ffffff'; ctx.strokeStyle = '#ffffff';
+    if (kind === 'rh') {                                    // an eighth note
+      ctx.beginPath(); ctx.ellipse(x - 0.9, y + 1.4, 1.25, 0.95, -0.4, 0, 6.29); ctx.fill();
+      ctx.fillRect(x + 0.15, y - 2.3, 0.6, 3.7);
+      ctx.beginPath(); ctx.moveTo(x + 0.75, y - 2.3); ctx.quadraticCurveTo(x + 2.2, y - 1.4, x + 1.7, y - 0.2); ctx.lineWidth = 0.6; ctx.stroke();
+    } else {                                                // a ring and a body going round it
+      ctx.beginPath(); ctx.arc(x, y, 2.1, 0, 6.29); ctx.lineWidth = 0.6; ctx.stroke();
+      ctx.beginPath(); ctx.arc(x + 1.5, y - 1.5, 0.95, 0, 6.29); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
   }
   function drawHud() {
     world();
@@ -1772,19 +2124,29 @@
     rrect(NW - 20, 4.5, 14, 14, 3); ctx.fillStyle = '#1a0a14'; ctx.fill();
     rrect(NW - 19, 5.5, 12, 12, 2.3); ctx.fillStyle = '#f4e8ee'; ctx.fill();
     ctx.fillStyle = '#1a0a14'; ctx.fillRect(NW - 16.2, 8.5, 2, 6); ctx.fillRect(NW - 12.2, 8.5, 2, 6);
-    // progress through the body (this lap)
-    const p = stationAt(G.x), px0 = NW / 2 - 40, px1 = px0 + 80, py = 31;
-    rrect(px0 - 1, py - 1, px1 - px0 + 2, 4, 2); ctx.fillStyle = '#1a0a14'; ctx.fill();
-    ctx.fillStyle = '#4a3848'; ctx.fillRect(px0, py, px1 - px0, 2);
+    // progress through the body (this lap), with where the mini-games come (a mark each; dimmed once passed)
+    const p = stationAt(G.x), px0 = NW / 2 - BAR_W / 2, px1 = px0 + BAR_W, py = 31;
+    rrect(px0 - 1, py - 1, px1 - px0 + 2, 4.4, 2.2); ctx.fillStyle = '#1a0a14'; ctx.fill();
+    ctx.fillStyle = '#4a3848'; ctx.fillRect(px0, py, px1 - px0, 2.4);
     const mk = px0 + (px1 - px0) * p.lx / LAP;
-    ctx.fillStyle = '#ff6a8a'; ctx.fillRect(px0, py, mk - px0, 2);
-    ctx.beginPath(); ctx.arc(mk, py + 1, 2.6, 0, 6.29); ctx.fillStyle = '#1a0a14'; ctx.fill();
-    ctx.beginPath(); ctx.arc(mk, py + 1, 1.7, 0, 6.29); ctx.fillStyle = '#ffffff'; ctx.fill();
+    ctx.fillStyle = '#ff6a8a'; ctx.fillRect(px0, py, mk - px0, 2.4);
+    for (const m of MINI_MARKS) miniMark(m.kind, px0 + (px1 - px0) * m.lx / LAP, py + 1.2, p.lx > m.lx + 1 || !!G[m.kind] ? 0.45 : 1);
+    ctx.beginPath(); ctx.arc(mk, py + 1.2, 2.8, 0, 6.29); ctx.fillStyle = '#1a0a14'; ctx.fill();
+    ctx.beginPath(); ctx.arc(mk, py + 1.2, 1.9, 0, 6.29); ctx.fillStyle = '#ffffff'; ctx.fill();
+    // debugging: the skip button (two arrows and a bar), under the pause button
+    if (DEBUG_SKIP) {
+      rrect(NW - 20, 26.5, 14, 14, 3); ctx.fillStyle = '#1a0a14'; ctx.fill();
+      rrect(NW - 19, 27.5, 12, 12, 2.3); ctx.fillStyle = '#f4e8ee'; ctx.fill();
+      ctx.fillStyle = '#1a0a14';
+      for (const ox of [0, 3.6]) { ctx.beginPath(); ctx.moveTo(NW - 17.2 + ox, 30.3); ctx.lineTo(NW - 13.4 + ox, 33.5); ctx.lineTo(NW - 17.2 + ox, 36.7); ctx.closePath(); ctx.fill(); }
+      ctx.fillRect(NW - 9.6, 30.3, 1.4, 6.4);
+    }
     // buttons (not on the rhythm or orbit stage)
     if (busy()) return;
     const jOn = [...held.values()].includes('jump') || (AUTO && !G.onGround);
-    button(8 + 16.5, NH - 41 + 16.5, true, jOn);
-    button(NW - 43 + 16.5, NH - 41 + 16.5, false, G.slideHeld);
+    const by = NH - BTN_M - BTN_R, bl = BTN_M + BTN_R, br = NW - BTN_M - 2 - BTN_R;
+    button(SET.swap ? br : bl, by, '점프', jOn);
+    button(SET.swap ? bl : br, by, '슬라이드', G.slideHeld);
   }
   // eyelids closing over the screen: 0 open .. 1 shut (close fast, hold, open a little slower)
   const BLINK = 0.32;
@@ -1819,6 +2181,7 @@
     drawLids();
     drawRhythm();
     drawOrbit();
+    drawBaseball();
     drawHud();
     // the place's name grows in for a moment when you arrive
     const u = (G.t - G.banner);
@@ -1831,20 +2194,26 @@
     document.getElementById('pen').textContent = st[2] + (lap > 0 ? `  ·  ${lap + 1}바퀴` : '');
   }
   function show(id, on) { document.getElementById(id).hidden = !on; }
-  function pause() { if (G.mode !== 'play') return; G.mode = 'pause'; held.clear(); G.slideHeld = false; if (G.rh) G.rh.ptr.clear(); show('pauseBox', true); soundLabel(); if (SND.ctx) SND.ctx.suspend(); }
-  function resume() { show('pauseBox', false); G.mode = 'play'; last = performance.now(); SND.unlock(); SND.play('ui'); }
-  function soundLabel() { const b = document.getElementById('bSound'); if (b) b.textContent = SND.muted ? '소리 켜기' : '소리 끄기'; }
+  function pause() { if (G.mode !== 'play') return; G.mode = 'pause'; held.clear(); G.slideHeld = false; if (G.rh) G.rh.ptr.clear(); if (G.bb) G.bb.drag = null; bbKeys.clear(); show('pauseBox', true); if (SND.ctx) SND.ctx.suspend(); }
+  function resume() { show('pauseBox', false); show('setBox', false); G.mode = 'play'; last = performance.now(); SND.unlock(); SND.play('ui'); }
+  function setLabels() {                                   // the settings' buttons show how things are now
+    document.getElementById('bSwap').textContent = SET.swap ? '왼쪽 슬라이드 · 오른쪽 점프' : '왼쪽 점프 · 오른쪽 슬라이드';
+    for (const [id, k, name] of [['bSfx', 'sfx', '효과음'], ['bMus', 'music', '배경음악']]) {
+      const b = document.getElementById(id), off = SND.muted(k);
+      b.textContent = name + (off ? ' 꺼짐' : ' 켜짐'); b.classList.toggle('off', off);
+    }
+  }
   function gameOver() {
     G.mode = 'over'; show('overBox', true);
-    if (busy()) { G.rh = null; G.orb = null; SND.stopSong(0.3); SND.spin(null); for (const id of ['lj', 'ls']) document.getElementById(id).hidden = false; }
+    if (busy()) { G.rh = null; G.orb = null; G.bb = null; SND.stopSong(0.3); SND.spin(null); }
     SND.ambience(false); SND.play('over');
     document.getElementById('overMsg').textContent = `점수 ${G.score.toLocaleString('en-US')} · ${Math.floor(G.t / 60)}분 ${Math.floor(G.t % 60)}초 · ${COURSE[G.station][1]}까지`;
   }
   function startGame(c) {
     try { localStorage.setItem('bodyrun.char', c); } catch (e) { /* storage off */ }
-    show('select', false); show('pauseBox', false); show('overBox', false); show('hudText', true);
-    for (const id of ['lj', 'ls']) document.getElementById(id).hidden = false;
+    show('select', false); show('pauseBox', false); show('setBox', false); show('overBox', false); show('hudText', true);
     if (!CAPTURE) { SND.unlock(); SND.stopSong(0.2); SND.spin(null); SND.play('ui'); SND.ambience(true); getReady(); }
+    decode(`bat_${c}.webp`).catch(() => {});                // its batter pictures (the baseball stage), in the background
     newRun(c); G.station = -1; step(0); last = performance.now();
     try { if (!CAPTURE && document.documentElement.requestFullscreen && matchMedia('(pointer: coarse)').matches) document.documentElement.requestFullscreen().then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {})).catch(() => {}); } catch (e) { /* not allowed here */ }
   }
@@ -1864,8 +2233,12 @@
   }
   document.getElementById('bResume').onclick = resume;
   document.getElementById('bRestart').onclick = () => startGame(G.char);
-  document.getElementById('bChar').onclick = () => { G.mode = 'select'; G.rh = null; G.orb = null; SND.unlock(); SND.stopSong(0.2); SND.spin(null); SND.ambience(false); show('pauseBox', false); show('overBox', false); show('hudText', false); show('select', true); };
-  document.getElementById('bSound').onclick = () => { SND.setMuted(!SND.muted); soundLabel(); };
+  document.getElementById('bChar').onclick = () => { G.mode = 'select'; G.rh = null; G.orb = null; G.bb = null; SND.unlock(); SND.stopSong(0.2); SND.spin(null); SND.ambience(false); show('pauseBox', false); show('overBox', false); show('hudText', false); show('select', true); };
+  document.getElementById('bSet').onclick = () => { setLabels(); show('pauseBox', false); show('setBox', true); };
+  document.getElementById('bSetBack').onclick = () => { show('setBox', false); show('pauseBox', true); };
+  document.getElementById('bSwap').onclick = () => { SET.swap = !SET.swap; try { localStorage.setItem('bodyrun.swap', SET.swap ? '1' : '0'); } catch (e) { /* storage off */ } setLabels(); render(); };
+  document.getElementById('bSfx').onclick = () => { SND.setMute('sfx', !SND.muted('sfx')); setLabels(); };
+  document.getElementById('bMus').onclick = () => { SND.setMute('music', !SND.muted('music')); setLabels(); };
   document.getElementById('bAgain').onclick = () => startGame(G.char);
   document.getElementById('bChar2').onclick = () => { G.mode = 'select'; SND.ambience(false); show('overBox', false); show('hudText', false); show('select', true); };
 
@@ -1908,7 +2281,7 @@
     window.__settle = async () => { while (Object.keys(pending).length) await Promise.all(Object.values(pending)).catch(() => {}); render(); return Object.keys(bmp).length; };
     window.__state = () => ({ mode: G.mode, t: +G.t.toFixed(2), x: Math.round(G.x), v: +G.v.toFixed(1), hp: +G.hp.toFixed(1), score: G.score, eaten: G.eaten, hits: G.hits,
       station: COURSE[Math.max(0, G.station)][0], seg: G.station, theme: G.theme, lid: +lidAmount().toFixed(2), lastHit: G.lastHit, rot, lap: stationAt(G.x).lap, y: +G.y.toFixed(1), slide: G.slide, obs: G.obs.length, items: G.items.length,
-      NW, RS: +RS.toFixed(3), GW, GH, rhSong: G.rh ? G.rh.song.id : null, orbSong: G.orb ? OB.song.id : null, rotation: { ...ROT }, o2n: G.o2n, boost: +G.boost.toFixed(2), boostHeld: +G.boostHeld.toFixed(2), boosts: G.boosts, decoded: Object.keys(bmp).length, atp: G.atp || 0, orbits: G.orbits || 0, orb: G.orb ? G.orb.st : null, huge: G.obs.filter((o) => o.kind === 'huge').length });
+      NW, RS: +RS.toFixed(3), GW, GH, rhSong: G.rh ? G.rh.song.id : null, orbSong: G.orb ? OB.song.id : null, rotation: { ...ROT }, o2n: G.o2n, boost: +G.boost.toFixed(2), boostHeld: +G.boostHeld.toFixed(2), boosts: G.boosts, decoded: Object.keys(bmp).length, atp: G.atp || 0, orbits: G.orbits || 0, orb: G.orb ? G.orb.st : null, bb: G.bb ? G.bb.st : null, games: G.games || 0, huge: G.obs.filter((o) => o.kind === 'huge').length });
     window.__G = G;
     window.__orb = () => { const o = G.orb; if (!o) return null; const t = otime();
       return { t: +t.toFixed(3), clock: o.a0 !== null ? 'sound' : 'game', k: o.k, N: OB.N, st: o.st, res: o.res, th: o.st === 'play' ? +(((obAngle(o.k, t, o.next) % 6.2832) + 6.2832) % 6.2832).toFixed(3) : null, off: +o.off.toFixed(3), next: +o.next.toFixed(3), cam: o.cam.map((v) => +v.toFixed(1)) }; };
@@ -1916,6 +2289,10 @@
     window.__stages = STAGES;
     window.__orbTap = orbTap;
     window.__boost = startBoost;
+    window.__bb = () => { const b = G.bb; if (!b) return null;
+      return { st: b.st, k: b.k, res: b.res.slice(), hr: b.hr, gain: b.gain, cur: b.cur.slice(), p: b.p && { type: b.p.type.name, tx: +b.p.tx.toFixed(1), ty: +b.p.ty.toFixed(1), rel: +(b.p.rel - G.t).toFixed(3), arr: +(b.p.arr - G.t).toFixed(3), dt: b.p.dt, d: b.p.d, res: b.p.res } }; };
+    window.__bbSwing = () => bbSwing();
+    window.__bbAim = (x, y) => { if (G.bb) G.bb.cur = [x, y]; };
     window.__rh = () => { const r = G.rh; if (!r) return null; const t = rtime();
       return { t: +t.toFixed(3), n: r.n, combo: r.combo, maxCombo: r.maxCombo, done: r.done, gain: r.gain,
         notes: r.notes.map((n) => { const o = { b: n.b, kind: n.kind, tn: n.tn, te: n.te, res: n.res, num: n.num };

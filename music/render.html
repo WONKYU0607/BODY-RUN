@@ -1,5 +1,5 @@
 <!doctype html><html><head><meta charset="utf-8"><title>chip render</title></head><body>
-<script src="chip.js"></script><script src="songlib.js"></script><script src="songs.js"></script><script src="songs_rh.js"></script><script src="songs_epic.js"></script><script src="gamesongs.js"></script>
+<script src="chip.js"></script><script src="songlib.js"></script><script src="songs.js"></script><script src="songs_rh.js"></script><script src="songs_epic.js"></script><script src="gamesongs.js"></script><script src="songs_bgm.js"></script>
 <script>
 // render song i -> 16-bit stereo WAV (base64), plus some numbers about it
 window.renderSong = async (i, set) => {
@@ -40,6 +40,20 @@ window.renderRaw = async (i, set, keep) => {
   for (let k = 0; k < n; k++) { dv.setInt16(44 + k * 4, Math.max(-1, Math.min(1, L[k] * 0.5)) * 32767, true); dv.setInt16(46 + k * 4, Math.max(-1, Math.min(1, R[k] * 0.5)) * 32767, true); }
   let bin = ''; const u8 = new Uint8Array(buf); for (let k = 0; k < u8.length; k += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(k, k + 0x8000));
   return { chans: Object.keys(song.ch), ms: Math.round(ms), wav: btoa(bin) };
+};
+// the running music, three rounds, raw (x0.5) 16-bit WAV
+window.renderBGM = async () => {
+  const song = SongsBGM.innerTide(3);
+  const t0 = performance.now();
+  const [L, R] = await Chip.render(song, { tail: 0.5 });
+  const n = L.length, buf = new ArrayBuffer(44 + n * 4), dv = new DataView(buf);
+  const w = (o, s) => [...s].forEach((ch, k) => dv.setUint8(o + k, ch.charCodeAt(0)));
+  w(0, 'RIFF'); dv.setUint32(4, 36 + n * 4, true); w(8, 'WAVE'); w(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 2, true);
+  dv.setUint32(24, 44100, true); dv.setUint32(28, 44100 * 4, true); dv.setUint16(32, 4, true); dv.setUint16(34, 16, true); w(36, 'data'); dv.setUint32(40, n * 4, true);
+  let pk = 0;
+  for (let k = 0; k < n; k++) { pk = Math.max(pk, Math.abs(L[k]), Math.abs(R[k])); dv.setInt16(44 + k * 4, Math.max(-1, Math.min(1, L[k] * 0.5)) * 32767, true); dv.setInt16(46 + k * 4, Math.max(-1, Math.min(1, R[k] * 0.5)) * 32767, true); }
+  let bin = ''; const u8 = new Uint8Array(buf); for (let k = 0; k < u8.length; k += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(k, k + 0x8000));
+  return { ms: Math.round(performance.now() - t0), peak: pk, bpm: song.bpm, loopBars: song.loopBars, wav: btoa(bin) };
 };
 window.ready = true;
 </script></body></html>

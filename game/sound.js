@@ -1,7 +1,7 @@
 // Body Run sounds: the effects and the ambience are synthesized with the Web Audio API; the mini-games' songs are
 // files (made with the chip engine in chip/, see stages.js):
 //  - effects: jump (1st/2nd/3rd), slide, items, heal, hit, game over, buttons, the rhythm and orbit stages' hits
-//  - a quiet body ambience while running (a slow heartbeat under a soft pad)
+//  - the running music: a file that loops (light, as if under water), turned down for the mini-games
 //  - the songs of the rhythm and orbit stages: fetched early, decoded once the sound is on, played from the buffer
 //    (a song can be started at any point of it, which the orbit stage uses to go back two beats after a miss)
 // The voices take any audio context, so a test can render them offline and measure them.
@@ -47,13 +47,29 @@ window.BodySound = (() => {
     s.start(t, Math.random() * 0.5); s.stop(t + a + dur + 0.05);
   }
   const NOTE = (n) => 440 * Math.pow(2, (n - 69) / 12);  // MIDI note number -> Hz
+  // under water: a lowpass the sound goes through (muffled), and a bubble (a sine whose pitch flies up as it forms)
+  function water(c, out, f) { const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = f; lp.Q.value = 0.7; lp.connect(out); return lp; }
+  function bubble(c, out, t, f, peak) { tone(c, out, t, 'sine', f, f * 2.3, 0.055, peak, 0.003, 0.04); }
+  function bloop(c, out, t, f, up, peak, bubbles) {
+    const w = water(c, out, 1900);
+    tone(c, w, t, 'sine', f, f * up, 0.17, peak, 0.004, 0.08);                 // the bloop
+    tone(c, w, t, 'triangle', f * 2, f * 2 * up, 0.07, peak * 0.25, 0.004, 0.06);   // its edge
+    for (const [dt, bf] of bubbles) bubble(c, out, t + dt, bf, peak * 0.2);
+  }
 
   // ---------------------------------------------------------------- effects
   const SFX = {
-    jump1: (c, o, t) => { tone(c, o, t, 'triangle', 330, 720, 0.13, 0.32, 0.004, 0.09); tone(c, o, t, 'square', 330, 720, 0.07, 0.05, 0.004, 0.07); },
-    jump2: (c, o, t) => { tone(c, o, t, 'triangle', 440, 960, 0.13, 0.3, 0.004, 0.08); tone(c, o, t, 'square', 440, 960, 0.07, 0.05, 0.004, 0.07); },
-    jump3: (c, o, t) => { tone(c, o, t, 'triangle', 560, 1240, 0.15, 0.28, 0.004, 0.08); tone(c, o, t + 0.05, 'sine', 1660, 1660, 0.12, 0.08); },
-    slide: (c, o, t) => burst(c, o, t, 'bandpass', 2600, 500, 1.4, 0.22, 0.32, 0.01),
+    // jumping and sliding, as if under water: a jump is a 'bloop' (a bubble's note flying up, muffled) with little
+    // bubbles after it, higher for the second and third; a slide is a swoosh of water going down, a soft thump, bubbles
+    jump1: (c, o, t) => bloop(c, o, t, 210, 2.4, 0.28, [[0.05, 720], [0.1, 980]]),
+    jump2: (c, o, t) => bloop(c, o, t, 290, 2.3, 0.25, [[0.045, 880], [0.085, 1180], [0.13, 1020]]),
+    jump3: (c, o, t) => bloop(c, o, t, 380, 2.2, 0.23, [[0.04, 1040], [0.075, 1400], [0.11, 1240], [0.15, 1640]]),
+    slide: (c, o, t) => {
+      const w = water(c, o, 1500);
+      burst(c, w, t, 'lowpass', 1300, 240, 0.9, 0.3, 0.3, 0.025);
+      tone(c, w, t, 'sine', 150, 85, 0.16, 0.14, 0.006, 0.14);
+      for (const [dt, f, pk] of [[0.06, 560, 0.06], [0.12, 700, 0.05], [0.19, 640, 0.04]]) bubble(c, o, t + dt, f, pk);
+    },
     coin: (c, o, t) => { tone(c, o, t, 'triangle', NOTE(88), null, 0.06, 0.2); tone(c, o, t + 0.055, 'triangle', NOTE(93), null, 0.14, 0.2); },
     special: (c, o, t) => { [84, 88, 91, 96].forEach((n, i) => tone(c, o, t + i * 0.045, 'triangle', NOTE(n), null, 0.12, 0.17)); },
     atp: (c, o, t) => {
@@ -79,32 +95,7 @@ window.BodySound = (() => {
     orbClear: (c, o, t) => { [72, 76, 79, 84, 88].forEach((n, i) => tone(c, o, t + i * 0.06, 'triangle', NOTE(n), null, 0.4, 0.13, 0.006)); },
   };
 
-  // ---------------------------------------------------------------- the ambience's voices
-  const MUS = {
-    lub: (c, o, t, v = 1) => { tone(c, o, t, 'sine', 95, 48, 0.2, 0.9 * v, 0.003, 0.12); burst(c, o, t, 'lowpass', 300, 150, 0.6, 0.06, 0.2 * v); },
-    dub: (c, o, t, v = 1) => tone(c, o, t, 'sine', 80, 52, 0.16, 0.6 * v, 0.003, 0.1),
-    pad: (c, o, t, notes, dur, v = 1) => {
-      for (const n of notes) for (const det of [-6, 6]) {
-        const os = c.createOscillator(); os.type = 'sawtooth'; os.frequency.setValueAtTime(NOTE(n), t); os.detune.value = det;
-        const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1200;
-        const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.018 * v, t + Math.min(0.4, dur * 0.3));
-        g.gain.setValueAtTime(0.018 * v, t + dur * 0.8); g.gain.linearRampToValueAtTime(0.0001, t + dur);
-        os.connect(f); f.connect(g); g.connect(o); os.start(t); os.stop(t + dur + 0.05);
-      }
-    },
-  };
-  const CHORDS = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]];   // Am F C G
-
-  // ---------------------------------------------------------------- the body ambience while running: 72 BPM heartbeat, slow pad
-  const AMB_BEAT = 60 / 72;
-  function ambienceBar(k) {                                // events of bar k (4 beats), in seconds from the bar's start
-    const ev = [];
-    for (let b = 0; b < 4; b++) { ev.push([b * AMB_BEAT, 'lub', [0.45]]); ev.push([b * AMB_BEAT + 0.28, 'dub', [0.35]]); }
-    if (k % 2 === 0) ev.push([0, 'pad', [CHORDS[(k / 2) % 4], AMB_BEAT * 8, 0.55]]);
-    return ev;
-  }
-
-  // ---------------------------------------------------------------- the live context, buses, a little scheduler
+  // ---------------------------------------------------------------- the live context and its buses
   function unlock() {
     try {
       if (!ctx) {
@@ -115,9 +106,8 @@ window.BodySound = (() => {
         const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -10; comp.ratio.value = 4; comp.attack.value = 0.003; comp.release.value = 0.15;
         master.connect(comp); comp.connect(ctx.destination);
         buses = { sfx: ctx.createGain(), music: ctx.createGain(), amb: ctx.createGain() };
-        buses.sfx.gain.value = 0.85; buses.music.gain.value = 0.8; buses.amb.gain.value = 0.55;
+        buses.sfx.gain.value = 0.85; buses.music.gain.value = 0.8; buses.amb.gain.value = 0.0001;
         for (const b of Object.values(buses)) b.connect(master);
-        setInterval(schedule, 25);
       }
       if (ctx.state === 'suspended') ctx.resume();
     } catch (e) { return null; }
@@ -126,17 +116,7 @@ window.BodySound = (() => {
   const live = () => ctx && ctx.state === 'running';
   function play(name) { if (!live()) return; try { SFX[name](ctx, buses.sfx, ctx.currentTime + 0.005); } catch (e) { /* ignore */ } }
 
-  let amb = null, spinNode = null;
-  function schedule() {
-    if (!live()) return;
-    const until = ctx.currentTime + 0.15;
-    if (amb && amb.on) {
-      while (amb.next < until) {
-        for (const [dt, fn, a] of ambienceBar(amb.k)) if (amb.next + dt >= ctx.currentTime - 0.02) MUS[fn](ctx, buses.amb, Math.max(amb.next + dt, ctx.currentTime), ...a);
-        amb.next += AMB_BEAT * 4; amb.k++;
-      }
-    }
-  }
+  let spinNode = null;
   // ---------------------------------------------------------------- the songs
   // song: { file, gain, lead } (stages.js). The file's bytes are fetched as soon as asked; they are decoded once there
   // is a context (decoding gives the context's own rate). Where the song starts in the decoded buffer is found by its
@@ -190,15 +170,27 @@ window.BodySound = (() => {
     try { src.stop(t + fade + 0.02); } catch (e) { /* not started */ }
     cur = null;
   }
+  // ---------------------------------------------------------------- the running music: one source looping the file's
+  // loop (bgm: { file, gain, loop: [start, end] s }); it plays on (silent) through the mini-games, and comes back up
+  const AMB = 0.55;                                       // its bus's level when on
+  let bgm = null, bgmSrc = null, bgmWant = false;
+  function setBGM(b) { bgm = b; fetchSong(b).catch(() => {}); if (ctx) prepare(b).catch(() => {}); }
+  function startBGM() {
+    if (!ctx || !bgm || bgmSrc) return;
+    if (!ready(bgm)) { prepare(bgm).then(() => { if (bgmWant) startBGM(); }).catch(() => {}); return; }
+    const S = songs[bgm.file].ready, src = ctx.createBufferSource();
+    src.buffer = S.buf; src.loop = true; src.loopStart = bgm.loop[0]; src.loopEnd = bgm.loop[1];
+    const g = ctx.createGain(), t0 = ctx.currentTime + 0.05; src.connect(g); g.connect(buses.amb);
+    g.gain.setValueAtTime(0.0001, t0); g.gain.linearRampToValueAtTime(bgm.gain, t0 + 1.2);   // in softly, whenever it comes
+    src.start(t0, bgm.loop[0]);
+    bgmSrc = src;
+  }
   function ambience(on) {
+    bgmWant = on;
     if (!ctx) return;
-    if (on && !(amb && amb.on)) {
-      amb = { on: true, k: 0, next: ctx.currentTime + 0.3 };
-      buses.amb.gain.cancelScheduledValues(ctx.currentTime); buses.amb.gain.setValueAtTime(0.0001, ctx.currentTime); buses.amb.gain.linearRampToValueAtTime(0.55, ctx.currentTime + 1.5);
-    } else if (!on && amb && amb.on) {
-      amb.on = false;
-      buses.amb.gain.cancelScheduledValues(ctx.currentTime); buses.amb.gain.setValueAtTime(buses.amb.gain.value, ctx.currentTime); buses.amb.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 0.6);
-    }
+    const g = buses.amb.gain, t = ctx.currentTime;
+    g.cancelScheduledValues(t); g.setValueAtTime(Math.max(0.0001, g.value), t);
+    if (on) { startBGM(); g.linearRampToValueAtTime(AMB, t + 1.5); } else g.linearRampToValueAtTime(0.0001, t + 0.6);
   }
   // the spinner: a hum whose pitch follows how fast you turn
   function spin(speed) {
@@ -223,20 +215,20 @@ window.BodySound = (() => {
   }
 
   // ---------------------------------------------------------------- tests: render offline and hand back the samples
-  async function renderOffline(what, secs) {
+  async function renderOffline(what, secs) {                // the effects one after another (tests)
     const sr = 44100;
     const c = new OfflineAudioContext(1, Math.ceil(sr * secs), sr);
     const comp = c.createDynamicsCompressor(); comp.threshold.value = -10; comp.ratio.value = 4; comp.attack.value = 0.003; comp.release.value = 0.15;
     comp.connect(c.destination);
-    const bus = c.createGain(); bus.gain.value = what === 'sfx' ? 0.85 : 0.55; bus.connect(comp);
-    if (what === 'amb') { let t = 0.05, k = 0; while (t < secs) { for (const [dt, fn, a] of ambienceBar(k)) MUS[fn](c, bus, t + dt, ...a); t += AMB_BEAT * 4; k++; } }
-    else { Object.keys(SFX).forEach((n, i) => SFX[n](c, bus, 0.05 + i * 0.6)); }
+    const bus = c.createGain(); bus.gain.value = 0.85; bus.connect(comp);
+    Object.keys(SFX).forEach((n, i) => SFX[n](c, bus, 0.05 + i * 0.6));
     const buf = await c.startRendering();
     return buf.getChannelData(0);
   }
 
   return {
-    unlock, play, fetchSong, prepare, ready, playSong, stopSong, ambience, spin, setMuted, renderOffline,
+    unlock, play, fetchSong, prepare, ready, playSong, stopSong, setBGM, ambience, spin, setMuted, renderOffline,
+    get bgmOn() { return !!bgmSrc; },
     get playing() { return cur ? cur.song : null; },
     songTime: () => (cur && ctx ? ctx.currentTime - cur.when + cur.off - cur.zero : null),   // where the song is now (tests)
     songZero: (song) => (songs[song.file] && songs[song.file].ready ? songs[song.file].ready.zero : null),

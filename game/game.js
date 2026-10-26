@@ -568,6 +568,10 @@
     return s;
   }
   const SONG_WAIT = 4;                                     // a song not decoded yet: wait this long for it, then go on without
+  // a buzz under the finger (phones that can, Android): a tap that hits on the rhythm and orbit stages, short; and
+  // while you follow a ball along its track, every 0.3 s a rough little drag (two quick pulses)
+  const BUZZ_TAP = 20, BUZZ_DRAG = [12, 16, 12], BUZZ_EVERY = 0.3;
+  function buzz(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) { /* not here */ } }
 
   // ---------------------------------------------------------------- the rhythm stage (in the right atrium)
   // The heart races: the run slows to a walk, the song plays, and circles come up on its tune (tap when the shrinking
@@ -670,8 +674,9 @@
       const [nx, ny] = rhPos(n.u, n.v);
       if (Math.hypot(x - nx, y - ny) > RH_R * 1.3) continue;
       const res = Math.abs(t - n.tn) <= RH_PERF ? 'perfect' : 'good';
+      buzz(BUZZ_TAP);
       if (n.kind === 'c') rhJudge(n, res, nx, ny);
-      else { n.start = res; n.holder = id; SND.play(res); r.pops.push({ x: nx, y: ny, s: res === 'perfect' ? 'Perfect' : 'Good', res, t: G.t, small: true }); }
+      else { n.start = res; n.holder = id; n.buzzT = t; SND.play(res); r.pops.push({ x: nx, y: ny, s: res === 'perfect' ? 'Perfect' : 'Good', res, t: G.t, small: true }); }
       return;
     }
   }
@@ -714,6 +719,7 @@
           for (const p of r.ptr.values()) if (Math.hypot(p.x - bx, p.y - by) <= RH_R * 2.4) ok = true;
           n.allT += dt; if (ok) n.inT += dt;
           n.following = ok;
+          if (ok && !AUTO && t - (n.buzzT ?? n.tn) >= BUZZ_EVERY) { n.buzzT = t; buzz(BUZZ_DRAG); }   // held: the drag under the finger
           const k = Math.floor((t - n.tn) / (B / 2));
           if (k > n.ticks) { n.ticks = k; if (ok) SND.play('tick'); }
         }
@@ -962,6 +968,7 @@
     const e = otime() - o.next;
     if (e < -OB_EARLY) return;                               // far too soon: not a try at this tile
     if (e < -OB_WIN) { orbMiss('early'); return; }
+    buzz(BUZZ_TAP);
     orbLand(Math.abs(e) <= OB_PERF ? 'perfect' : e < 0 ? 'early' : 'late');
   }
   function orbLand(res) {
@@ -1887,6 +1894,7 @@
       return;
     }
     buildSelect();
+    if (!CAPTURE) SND.setBGM(STAGES.bgm);                    // the running music's file
     getReady();                                              // the songs' files, while you pick
     document.getElementById('loading').hidden = true;
     const auto = qs.get('char');

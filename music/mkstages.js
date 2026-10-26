@@ -217,6 +217,7 @@ GameSongs.orb.forEach((f, i) => {
   const hist = {}; for (const b of t.beats) hist[b] = (hist[b] || 0) + 1;
   console.log(`${id} ${s.en.padEnd(24)} ${s.bpm} BPM  ${t.tiles} tiles (${t.fillers} off the tune), first at beat ${t.first}, ${t.beats.reduce((a, b) => a + b, 0)} beats = ${(t.beats.reduce((a, b) => a + b, 0) * 60 / s.bpm).toFixed(1)}s, gaps ${JSON.stringify(hist)}, path ${p.ok ? 'ok' : 'FAILED'} (${p.swirls} swirls)`);
 });
+{ const m = META.bgm || {}; out.bgm = { id: 'bgm', name: '몸속 물결', en: 'Inner Tide', file: 'assets/bgm.mp3', gain: m.gain ?? 0.5, lead: 0, loop: m.loop || [0.25, 57.85] }; }
 const js = '// made by work/mkstages.js from the game songs (chip/gamesongs.js): the rhythm maps and the orbit tiles, per song\nwindow.BodyStages = ' + JSON.stringify(out) + ';\n';
 if (process.argv.includes('--write')) { fs.writeFileSync(__dirname + '/../game/stages.js', js); console.log('wrote stages.js', js.length); }
 module.exports = { rhythmChart, orbitTiles, planOK };

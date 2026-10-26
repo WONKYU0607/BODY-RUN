@@ -65,7 +65,9 @@ window.Chip = (() => {
     const comp = c.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 3; comp.attack.value = 0.006; comp.release.value = 0.14; comp.knee.value = 6;
     const lim = c.createDynamicsCompressor(); lim.threshold.value = -2.5; lim.ratio.value = 20; lim.attack.value = 0.001; lim.release.value = 0.08; lim.knee.value = 0;
     const out = c.createGain(); out.gain.value = o.gain || 1;
-    B.in.connect(hp); hp.connect(comp); comp.connect(lim); lim.connect(out); out.connect(dest);
+    if (o.lp) { const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = o.lp; lp.Q.value = 0.5; B.in.connect(lp); lp.connect(hp); }   // the whole mix a little softened (under water)
+    else B.in.connect(hp);
+    hp.connect(comp); comp.connect(lim); lim.connect(out); out.connect(dest);
     // echo: two taps left and right (ping-pong), darker each time round
     B.echo = c.createGain(); B.echo.gain.value = 1;
     const dl = c.createDelay(2), dr = c.createDelay(2), fb = c.createGain(), lp = c.createBiquadFilter(), wet = c.createGain();
@@ -233,6 +235,17 @@ window.Chip = (() => {
     else if (kind === 't1' || kind === 't2' || kind === 't3') { const f = { t1: 260, t2: 190, t3: 140 }[kind]; body('tri', f, f * 0.55, 0.2, 0.55 * v); noise('nlong', 0.3, 900, 'lowpass', 0.6, 0.06, 0.12 * v); }
     else if (kind === 'x') noise('nlong', 2, 9000, 'highpass', 0.5, 0.018, 0.12 * v);         // a shaker tick
     // the big drums (for the epic songs): a taiko, its rim, floor toms that ring, a big snare, an impact
+    // water: a bubble (a little sine whose pitch flies up as it forms) and a drip (a plink falling in pitch)
+    else if (kind === 'bub') {
+      const f = d.f || 520, o = c.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * 2.4, t + 0.045);
+      const g = c.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.16 * v, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0008, t + 0.07);
+      o.connect(g); sendTo(g, d.pan, d.echo); o.start(t); o.stop(t + 0.1);
+    }
+    else if (kind === 'drip') {
+      const f = d.f || 1700, o = c.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * 0.45, t + 0.035);
+      const g = c.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.14 * v, t + 0.002); g.gain.exponentialRampToValueAtTime(0.0008, t + 0.16);
+      o.connect(g); sendTo(g, d.pan, d.echo); o.start(t); o.stop(t + 0.2);
+    }
     else if (kind === 'kd') { body('sine', 150, 55, 0.085, 0.62 * v); noise('nlong', 1, 4200, 'highpass', 0.7, 0.008, 0.2 * v, 0.001, 0, 0); }   // a tight kick (double-kick runs)
     else if (kind === 'T') { body('sine', 118, 50, 0.62, 0.95 * v); body('tri', 175, 85, 0.13, 0.35 * v); noise('nlong', 0.4, 700, 'lowpass', 0.7, 0.07, 0.4 * v, 0.001, d.pan ?? 0, 0); }
     else if (kind === 'ka') { body('tri', 980, 900, 0.03, 0.2 * v, d.pan ?? 0.2); noise('nlong', 1, 2600, 'bandpass', 2, 0.025, 0.3 * v, 0.001, d.pan ?? 0.2, 0); }
@@ -271,7 +284,7 @@ window.Chip = (() => {
     const sr = opts.sr || 44100, st = 60 / song.bpm / 4, secs = song.bars * 16 * st + (opts.tail ?? 2.5);
     const c = new OfflineAudioContext(2, Math.ceil(sr * secs), sr);
     const B = bus(c, c.destination, { echoTime: st * 3, echoFb: song.echoFb, echoWet: song.echoWet, gain: song.gain || 1, drive: song.drive || 1,
-      drumGain: song.drumGain, drumRev: song.drumRev, reverb: song.reverb });
+      drumGain: song.drumGain, drumRev: song.drumRev, reverb: song.reverb, lp: song.lp });
     for (const ch of Object.values(song.ch)) strip(c, B, ch);          // every strip made before the first kick (for the pump)
     const ev = events(song), CH = opts.chunk || 0;
     if (!CH) for (const e of ev) play(c, B, e, 0.05);

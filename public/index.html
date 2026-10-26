@@ -62,16 +62,15 @@
 </div>
 <div id="loading">불러오는 중</div>
 <script>
-// Body Run sounds: everything is synthesized with the Web Audio API (no sound files).
-//  - effects: jump (1st/2nd/3rd), slide, items, heal, hit, game over, buttons, the rhythm stage's hits and misses
+// Body Run sounds: the effects and the ambience are synthesized with the Web Audio API; the mini-games' songs are
+// files (made with the chip engine in chip/, see stages.js):
+//  - effects: jump (1st/2nd/3rd), slide, items, heal, hit, game over, buttons, the rhythm and orbit stages' hits
 //  - a quiet body ambience while running (a slow heartbeat under a soft pad)
-//  - the rhythm stage's track: 110 BPM, the heartbeat as its kick drum
-//  - the orbit stage's track (a stand-in until the real song): 120 BPM, its lead plays each tile's beat
+//  - the songs of the rhythm and orbit stages: fetched early, decoded once the sound is on, played from the buffer
+//    (a song can be started at any point of it, which the orbit stage uses to go back two beats after a miss)
 // The voices take any audio context, so a test can render them offline and measure them.
 window.BodySound = (() => {
   'use strict';
-  const BPM = 110, BEAT = 60 / BPM;
-  const ORB_BPM = 120, ORB_BEAT = 60 / ORB_BPM;
   let ctx = null, master = null, buses = null, muted = false, noiseBuf = null;
   try { muted = localStorage.getItem('bodyrun.mute') === '1'; } catch (e) { /* storage off */ }
 
@@ -144,24 +143,10 @@ window.BodySound = (() => {
     orbClear: (c, o, t) => { [72, 76, 79, 84, 88].forEach((n, i) => tone(c, o, t + i * 0.06, 'triangle', NOTE(n), null, 0.4, 0.13, 0.006)); },
   };
 
-  // ---------------------------------------------------------------- music voices
+  // ---------------------------------------------------------------- the ambience's voices
   const MUS = {
     lub: (c, o, t, v = 1) => { tone(c, o, t, 'sine', 95, 48, 0.2, 0.9 * v, 0.003, 0.12); burst(c, o, t, 'lowpass', 300, 150, 0.6, 0.06, 0.2 * v); },
     dub: (c, o, t, v = 1) => tone(c, o, t, 'sine', 80, 52, 0.16, 0.6 * v, 0.003, 0.1),
-    hat: (c, o, t, v = 1) => burst(c, o, t, 'highpass', 7500, 7500, 0.7, 0.035, 0.12 * v),
-    clap: (c, o, t, v = 1) => { burst(c, o, t, 'bandpass', 1800, 1400, 0.9, 0.13, 0.3 * v); tone(c, o, t, 'triangle', 190, 160, 0.06, 0.12 * v); },
-    bass: (c, o, t, n, dur = BEAT / 2) => {
-      const os = c.createOscillator(); os.type = 'sawtooth'; os.frequency.setValueAtTime(NOTE(n), t);
-      const f = c.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 4; f.frequency.setValueAtTime(900, t); f.frequency.exponentialRampToValueAtTime(220, t + dur);
-      const g = gainEnv(c, o, t, 0.2, 0.006, dur * 0.95);
-      os.connect(f); f.connect(g); os.start(t); os.stop(t + dur + 0.05);
-    },
-    lead: (c, o, t, n, dur = BEAT / 2, v = 1) => {
-      const os = c.createOscillator(); os.type = 'square'; os.frequency.setValueAtTime(NOTE(n), t);
-      const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.setValueAtTime(3200, t); f.frequency.exponentialRampToValueAtTime(900, t + dur);
-      const g = gainEnv(c, o, t, 0.07 * v, 0.004, dur * 0.9);
-      os.connect(f); f.connect(g); os.start(t); os.stop(t + dur + 0.05);
-    },
     pad: (c, o, t, notes, dur, v = 1) => {
       for (const n of notes) for (const det of [-6, 6]) {
         const os = c.createOscillator(); os.type = 'sawtooth'; os.frequency.setValueAtTime(NOTE(n), t); os.detune.value = det;
@@ -171,78 +156,8 @@ window.BodySound = (() => {
         os.connect(f); f.connect(g); g.connect(o); os.start(t); os.stop(t + dur + 0.05);
       }
     },
-    riser: (c, o, t, dur) => {
-      burst(c, o, t, 'bandpass', 400, 5000, 2.0, dur, 0.22, dur * 0.85);
-      const os = c.createOscillator(); os.type = 'sawtooth'; os.frequency.setValueAtTime(110, t); os.frequency.exponentialRampToValueAtTime(880, t + dur);
-      const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 2000;
-      const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.06, t + dur * 0.9); g.gain.linearRampToValueAtTime(0.0001, t + dur);
-      os.connect(f); f.connect(g); g.connect(o); os.start(t); os.stop(t + dur + 0.05);
-    },
-    crash: (c, o, t) => burst(c, o, t, 'highpass', 4000, 3000, 0.5, 1.2, 0.22),
-    kick: (c, o, t, v = 1) => { tone(c, o, t, 'sine', 150, 45, 0.18, 0.85 * v, 0.002, 0.1); burst(c, o, t, 'lowpass', 900, 200, 0.6, 0.03, 0.15 * v); },
-    count: (c, o, t, hi = false) => tone(c, o, t, 'triangle', hi ? 1568 : 1046, null, 0.07, 0.16),
-    pluck: (c, o, t, n, v = 1) => {                       // the tune: a bright pluck on every tile
-      for (const [type, det, pk] of [['triangle', 0, 0.16], ['square', 7, 0.035]]) {
-        const os = c.createOscillator(); os.type = type; os.frequency.setValueAtTime(NOTE(n), t); os.detune.value = det;
-        const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.setValueAtTime(5000, t); f.frequency.exponentialRampToValueAtTime(1200, t + 0.25);
-        const g = gainEnv(c, o, t, pk * v, 0.003, 0.28);
-        os.connect(f); f.connect(g); os.start(t); os.stop(t + 0.35);
-      }
-    },
   };
-
-  // ---------------------------------------------------------------- the rhythm stage's track (beats from its start)
   const CHORDS = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]];   // Am F C G
-  const ROOT = [45, 41, 48, 43];
-  function trackEvents() {
-    const ev = [];
-    const add = (b, fn, ...a) => ev.push([b, fn, a]);
-    const TOTAL = 42;
-    for (let b = 0; b < TOTAL; b++) {
-      const bar = Math.floor(b / 4), ch = bar % 4, inBar = b % 4;
-      const full = b >= 4 && b < 32, spin = b >= 32 && b < 37;
-      add(b, 'lub', b < 4 ? 0.8 : 1); add(b + 0.3, 'dub', b < 4 ? 0.7 : 0.85);
-      if (inBar === 0) add(b, 'pad', CHORDS[ch], BEAT * 4, b < 4 ? 0.7 : 1);
-      if (full || spin) { add(b, 'hat', 0.8); add(b + 0.5, 'hat', 1.2); }
-      if (full && (inBar === 1 || inBar === 3)) add(b, 'clap');
-      if (full || spin) { add(b, 'bass', ROOT[ch]); add(b + 0.5, 'bass', ROOT[ch] + (inBar === 3 ? 7 : 0)); }
-      if (b >= 12 && b < 32) {                            // an arpeggio over the chords once it gets going
-        const tones = CHORDS[ch].map((n) => n + 12);
-        const seq = [0, 1, 2, 1];
-        add(b, 'lead', tones[seq[inBar]], BEAT / 2, 1); add(b + 0.5, 'lead', tones[(seq[inBar] + 1) % 3] + (inBar === 3 ? 12 : 0), BEAT / 2, 0.8);
-      }
-    }
-    add(32, 'riser', BEAT * 5);
-    add(37, 'crash'); add(37, 'pad', [57, 60, 64, 69], BEAT * 4, 1.2);
-    return ev.sort((a, b) => a[0] - b[0]);
-  }
-
-  // ---------------------------------------------------------------- the orbit stage's stand-in track (beats from its start)
-  // hits: the beats the tiles fall on (the first after a count of four); four on the floor, claps, eighth hats, a bass
-  // and a pad on Am F C G, and the tune on the tiles themselves (so you can hear when to tap). The bars count from
-  // `first` (the first tile's beat as planned), so after a miss pushes the tiles on, the bars stay where they were
-  function orbEvents(hits, first = hits[0]) {
-    const ev = [];
-    const add = (b, fn, ...a) => ev.push([b, fn, a]);
-    const last = hits[hits.length - 1];
-    for (let b = 0; b < first; b++) add(b, 'count', b === first - 1);
-    for (let b = first; b < last; b++) {
-      const k = b - first, bar = Math.floor(k / 4), ch = bar % 4, inBar = k % 4;
-      add(b, 'kick', inBar === 0 ? 1 : 0.85);
-      if (inBar === 1 || inBar === 3) add(b, 'clap', 0.8);
-      add(b + 0.5, 'hat', 1); if (bar >= 4) add(b, 'hat', 0.6);
-      add(b, 'bass', ROOT[ch], ORB_BEAT / 2); add(b + 0.5, 'bass', ROOT[ch] + (inBar === 3 ? 7 : 12), ORB_BEAT / 2);
-      if (inBar === 0) add(b, 'pad', CHORDS[ch], ORB_BEAT * 4, 0.8);
-    }
-    hits.forEach((h, i) => {
-      if (h >= last) return;
-      const ch = Math.max(0, Math.floor((h - first) / 4)) % 4, tones = CHORDS[ch].map((n) => n + 24);
-      add(h, 'pluck', tones[i % 3] + (i % 6 === 5 ? 12 : 0), 1);
-    });
-    if (last - first >= 8) add(last - 8, 'riser', ORB_BEAT * 7.5);
-    add(last, 'crash'); add(last, 'pad', [57, 60, 64, 69], ORB_BEAT * 4, 0.8); add(last, 'pluck', 93, 0.7);
-    return ev.sort((a, b) => a[0] - b[0]);
-  }
 
   // ---------------------------------------------------------------- the body ambience while running: 72 BPM heartbeat, slow pad
   const AMB_BEAT = 60 / 72;
@@ -275,17 +190,10 @@ window.BodySound = (() => {
   const live = () => ctx && ctx.state === 'running';
   function play(name) { if (!live()) return; try { SFX[name](ctx, buses.sfx, ctx.currentTime + 0.005); } catch (e) { /* ignore */ } }
 
-  let track = null, amb = null, spinNode = null;
+  let amb = null, spinNode = null;
   function schedule() {
     if (!live()) return;
     const until = ctx.currentTime + 0.15;
-    if (track) {
-      while (track.i < track.ev.length && track.t0 + track.ev[track.i][0] * track.beat < until) {
-        const [b, fn, a] = track.ev[track.i++];
-        const t = track.t0 + b * track.beat;
-        if (t >= ctx.currentTime - 0.02) MUS[fn](ctx, buses.music, Math.max(t, ctx.currentTime), ...a);
-      }
-    }
     if (amb && amb.on) {
       while (amb.next < until) {
         for (const [dt, fn, a] of ambienceBar(amb.k)) if (amb.next + dt >= ctx.currentTime - 0.02) MUS[fn](ctx, buses.amb, Math.max(amb.next + dt, ctx.currentTime), ...a);
@@ -293,9 +201,59 @@ window.BodySound = (() => {
       }
     }
   }
-  function startTrack(t0) { if (!ctx) return; track = { ev: trackEvents(), i: 0, t0, beat: BEAT }; schedule(); }
-  function startOrb(t0, hits, first) { if (!ctx) return; track = { ev: orbEvents(hits, first), i: 0, t0, beat: ORB_BEAT }; schedule(); }
-  function stopTrack() { track = null; }
+  // ---------------------------------------------------------------- the songs
+  // song: { file, gain, lead } (stages.js). The file's bytes are fetched as soon as asked; they are decoded once there
+  // is a context (decoding gives the context's own rate). Where the song starts in the decoded buffer is found by its
+  // first sound: `lead` is when that comes, in the time of the render (where song time 0 is at 0.05 s), so whatever
+  // padding a decoder puts at the front does not matter.
+  const bytes = {}, songs = {};
+  function fetchSong(song) {
+    if (!bytes[song.file]) bytes[song.file] = fetch(song.file).then((r) => { if (!r.ok) throw new Error(song.file + ' ' + r.status); return r.arrayBuffer(); });
+    return bytes[song.file];
+  }
+  function firstSound(buf) {
+    const L = buf.getChannelData(0), R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L;
+    for (let i = 0; i < L.length; i++) if (Math.abs(L[i]) > 0.004 || Math.abs(R[i]) > 0.004) return i / buf.sampleRate;
+    return 0;
+  }
+  function prepare(song) {
+    if (songs[song.file]) return songs[song.file];
+    const p = (async () => {
+      const ab = await fetchSong(song);
+      if (!ctx) throw new Error('no sound yet');
+      const buf = await ctx.decodeAudioData(ab.slice(0));
+      p.ready = { buf, zero: firstSound(buf) - song.lead + 0.05 };
+      return p.ready;
+    })();
+    p.catch(() => { if (songs[song.file] === p) delete songs[song.file]; });  // to try again later
+    songs[song.file] = p;
+    return p;
+  }
+  const ready = (song) => !!(songs[song.file] && songs[song.file].ready);
+  let cur = null;
+  // play `song` so that its time 0 (the first beat of its first bar) sounds at context time t0; when it is already
+  // playing, it goes over with a quick crossfade (the orbit stage going back two beats)
+  function playSong(song, t0) {
+    if (!ctx || !ready(song)) return false;
+    const S = songs[song.file].ready, now = ctx.currentTime, fade = cur ? 0.03 : 0;
+    stopSong(0.03);
+    const src = ctx.createBufferSource(); src.buffer = S.buf;
+    const g = ctx.createGain(); src.connect(g); g.connect(buses.music);
+    let when = t0, off = S.zero;                       // where song time 0 is in the buffer
+    if (when < now) { off += now - when; when = now; }
+    if (off < 0) { when -= off; off = 0; }
+    if (fade) { g.gain.setValueAtTime(0.0001, when); g.gain.linearRampToValueAtTime(song.gain, when + fade); } else g.gain.value = song.gain;
+    src.start(when, off);
+    cur = { src, g, song, when, off, zero: S.zero };
+    return true;
+  }
+  function stopSong(fade = 0.4) {
+    if (!cur || !ctx) { cur = null; return; }
+    const { src, g } = cur, t = ctx.currentTime;
+    g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), t); g.gain.linearRampToValueAtTime(0.0001, t + fade);
+    try { src.stop(t + fade + 0.02); } catch (e) { /* not started */ }
+    cur = null;
+  }
   function ambience(on) {
     if (!ctx) return;
     if (on && !(amb && amb.on)) {
@@ -329,22 +287,23 @@ window.BodySound = (() => {
   }
 
   // ---------------------------------------------------------------- tests: render offline and hand back the samples
-  async function renderOffline(what, secs, hits, first) {
+  async function renderOffline(what, secs) {
     const sr = 44100;
     const c = new OfflineAudioContext(1, Math.ceil(sr * secs), sr);
     const comp = c.createDynamicsCompressor(); comp.threshold.value = -10; comp.ratio.value = 4; comp.attack.value = 0.003; comp.release.value = 0.15;
     comp.connect(c.destination);
-    const bus = c.createGain(); bus.gain.value = what === 'sfx' ? 0.85 : what === 'amb' ? 0.55 : 0.8; bus.connect(comp);
-    if (what === 'track') for (const [b, fn, a] of trackEvents()) { if (b * BEAT < secs) MUS[fn](c, bus, 0.05 + b * BEAT, ...a); }
-    else if (what === 'orb') for (const [b, fn, a] of orbEvents(hits, first)) { if (b * ORB_BEAT < secs) MUS[fn](c, bus, 0.05 + b * ORB_BEAT, ...a); }
-    else if (what === 'amb') { let t = 0.05, k = 0; while (t < secs) { for (const [dt, fn, a] of ambienceBar(k)) MUS[fn](c, bus, t + dt, ...a); t += AMB_BEAT * 4; k++; } }
+    const bus = c.createGain(); bus.gain.value = what === 'sfx' ? 0.85 : 0.55; bus.connect(comp);
+    if (what === 'amb') { let t = 0.05, k = 0; while (t < secs) { for (const [dt, fn, a] of ambienceBar(k)) MUS[fn](c, bus, t + dt, ...a); t += AMB_BEAT * 4; k++; } }
     else { Object.keys(SFX).forEach((n, i) => SFX[n](c, bus, 0.05 + i * 0.6)); }
     const buf = await c.startRendering();
     return buf.getChannelData(0);
   }
 
   return {
-    BPM, BEAT, ORB_BEAT, unlock, play, startTrack, startOrb, stopTrack, ambience, spin, setMuted, renderOffline,
+    unlock, play, fetchSong, prepare, ready, playSong, stopSong, ambience, spin, setMuted, renderOffline,
+    get playing() { return cur ? cur.song : null; },
+    songTime: () => (cur && ctx ? ctx.currentTime - cur.when + cur.off - cur.zero : null),   // where the song is now (tests)
+    songZero: (song) => (songs[song.file] && songs[song.file].ready ? songs[song.file].ready.zero : null),
     get muted() { return muted; },
     get ctx() { return ctx; },
     live,
@@ -352,6 +311,11 @@ window.BodySound = (() => {
     names: () => Object.keys(SFX),
   };
 })();
+
+</script>
+<script>
+// made by work/mkstages.js from the game songs (chip/gamesongs.js): the rhythm maps and the orbit tiles, per song
+window.BodyStages = {"rh":[{"id":"rh1","name":"세포 록 앤섬","en":"Cell Rock Anthem","bpm":150,"file":"assets/rh1.mp3","gain":0.627,"lead":0.04727,"first":4,"end":81,"map":[[4,0,"c",0.16,0.659],[5,0,"c",0.349,0.523],[6,0,"c",0.538,0.296],[8,1,"c",0.272,0.613],[8.5,1,"c",0.145,0.613],[9.75,1,"c",0.369,0.387],[10.5,1,"c",0.527,0.477],[11.5,1,"c",0.716,0.704],[12,1,"s",14,[[0.844,0.763],[0.724,0.931],[0.604,0.779]]],[15,1,"c",0.415,0.795],[15.5,1,"c",0.287,0.704],[16.5,2,"c",0.099,0.704],[17,2,"c",0.226,0.327],[18.5,2,"c",0.451,0.296],[19,2,"c",0.578,0.387],[20,2,"s",22,[[0.389,0.673],[0.269,0.498],[0.149,0.643]]],[23,2,"c",0.338,0.163],[23.5,2,"c",0.466,0.373],[24.5,3,"c",0.654,0.613],[25,3,"c",0.782,0.477],[26.5,3,"c",0.558,0.327],[27,3,"c",0.43,0.296],[28,4,"p",31.5,2],[32,5,"c",0.5,0.477],[32.75,5,"c",0.658,0.477],[34,5,"c",0.883,0.387],[34.5,5,"c",0.755,0.177],[36,5,"c",0.531,0.523],[36.75,5,"c",0.372,0.523],[38,5,"c",0.148,0.387],[38.5,5,"c",0.276,0.223],[40,6,"c",0.5,0.613],[41,6,"c",0.689,0.477],[42,6,"c",0.878,0.296],[43,6,"c",0.689,0.087],[43.5,6,"c",0.561,0.327],[45,6,"c",0.337,0.477],[47,7,"c",0.602,0.477],[48,7,"c",0.791,0.251],[48.75,7,"c",0.633,0.101],[50,7,"c",0.408,0.387],[51,7,"c",0.219,0.613],[52,8,"c",0.408,0.06],[52.75,8,"c",0.566,0.16],[54,8,"c",0.791,0.387],[55,8,"c",0.602,0.523],[56,8,"c",0.413,0.296],[57,8,"c",0.224,0.387],[58,8,"c",0.413,0.627],[59,8,"c",0.602,0.704],[60,9,"s",61.5,[[0.413,0.223],[0.311,0.217],[0.208,0.531]]],[63,9,"c",0.433,0.84],[64,9,"c",0.622,0.387],[64.75,9,"c",0.78,0.387],[66,9,"c",0.555,0.06],[66.5,9,"c",0.428,0.387],[68,10,"c",0.652,0.432],[68.75,10,"c",0.81,0.432],[70,10,"c",0.586,0.146],[70.5,10,"c",0.458,0.432],[72,10,"c",0.234,0.523],[73,10,"c",0.423,0.087],[74,10,"c",0.611,0.205],[75,10,"c",0.8,0.296],[75.5,11,"c",0.673,0.537],[78,12,"c",0.407,0.568],[79,12,"c",0.218,0.749],[80,12,"c",0.407,0.223]]},{"id":"rh2","name":"플라즈마 펑크","en":"Plasma Funk","bpm":124,"file":"assets/rh2.mp3","gain":0.56,"lead":0.04569,"first":8,"end":65,"map":[[8,0,"c",0.16,0.84],[8.75,0,"c",0.318,0.733],[9.5,0,"c",0.476,0.661],[10.75,0,"c",0.701,0.482],[11.25,0,"c",0.828,0.589],[12,0,"c",0.67,0.818],[13,0,"c",0.481,0.589],[13.5,0,"c",0.354,0.661],[14.5,1,"c",0.543,0.883],[15,1,"c",0.67,0.84],[16,1,"c",0.859,0.84],[16.75,1,"c",0.701,0.433],[17.5,1,"c",0.543,0.661],[18.75,1,"c",0.318,0.411],[19.25,1,"c",0.191,0.482],[19.75,1,"c",0.318,0.739],[22.5,2,"c",0.583,0.84],[23,2,"c",0.711,0.733],[23.5,2,"c",0.839,0.661],[25,2,"c",0.614,0.482],[26,2,"c",0.425,0.339],[27,2,"c",0.237,0.232],[28,3,"p",31.5,2],[32,4,"c",0.5,0.411],[33,4,"c",0.689,0.411],[33.5,4,"c",0.816,0.482],[34,4,"c",0.689,0.06],[35,4,"c",0.5,0.303],[36,4,"c",0.311,0.339],[37,4,"c",0.122,0.339],[37.5,4,"c",0.25,0.711],[38,5,"c",0.122,0.789],[39,5,"c",0.311,0.232],[40,5,"c",0.5,0.482],[41,5,"c",0.689,0.589],[42,5,"c",0.878,0.339],[43,5,"c",0.689,0.182],[44,6,"s",46,[[0.5,0.411],[0.38,0.268],[0.26,0.446]]],[47,6,"c",0.449,0.782],[47.5,6,"c",0.576,0.111],[48,6,"c",0.704,0.232],[49,6,"c",0.893,0.339],[50,6,"c",0.704,0.632],[50.5,6,"c",0.576,0.339],[51,6,"c",0.449,0.232],[52,7,"c",0.638,0.06],[53,7,"c",0.826,0.267],[54,7,"c",0.638,0.411],[54.5,7,"c",0.51,0.267],[55,7,"c",0.382,0.16],[56,7,"c",0.194,0.16],[57,7,"c",0.382,0.567],[58,7,"c",0.571,0.375],[59,8,"c",0.76,0.518],[60,8,"s",62,[[0.571,0.06],[0.451,0.06],[0.331,0.199]]],[64,9,"c",0.597,0.489]]},{"id":"rh3","name":"뉴로 유로비트","en":"Neuro Eurobeat","bpm":155,"file":"assets/rh3.mp3","gain":0.587,"lead":0.045,"first":4,"end":81,"map":[[4,0,"c",0.16,0.84],[4.5,0,"c",0.288,0.704],[5.5,0,"c",0.476,0.432],[6,0,"c",0.604,0.5],[7,0,"c",0.793,0.704],[7.5,0,"c",0.665,0.84],[9,0,"c",0.441,0.67],[9.5,0,"c",0.313,0.602],[11,1,"c",0.538,0.432],[11.5,1,"c",0.665,0.568],[13.5,2,"c",0.4,0.738],[14,2,"c",0.272,0.806],[16,3,"c",0.538,0.588],[17,3,"c",0.726,0.738],[17.5,3,"c",0.854,0.67],[19,3,"c",0.629,0.37],[19.5,3,"c",0.502,0.738],[22,4,"c",0.767,0.602],[24,5,"c",0.502,0.432],[24.75,5,"c",0.344,0.432],[26.5,5,"c",0.609,0.718],[27,5,"c",0.737,0.432],[28,6,"p",31.5,2],[32,7,"c",0.5,0.262],[33,7,"c",0.311,0.33],[34,7,"c",0.122,0.398],[35,7,"c",0.311,0.718],[35.5,7,"c",0.439,0.548],[37,7,"c",0.663,0.262],[38,7,"c",0.852,0.194],[39,7,"c",0.663,0.65],[40,8,"s",41.5,[[0.474,0.194],[0.372,0.093],[0.269,0.313]]],[43,8,"c",0.494,0.582],[44,8,"s",46,[[0.683,0.262],[0.803,0.144],[0.923,0.347]]],[47.5,8,"c",0.698,0.582],[48,9,"s",49,[[0.826,0.698],[0.741,0.808],[0.656,0.599]]],[50,9,"c",0.467,0.5],[51,9,"c",0.278,0.67],[51.5,9,"c",0.151,0.5],[53,9,"c",0.375,0.398],[54,9,"c",0.564,0.5],[55,9,"c",0.753,0.602],[55.5,9,"c",0.88,0.5],[58,10,"c",0.615,0.296],[59,10,"c",0.426,0.194],[60,10,"s",62,[[0.237,0.746],[0.357,0.777],[0.477,0.487]]],[64,11,"c",0.212,0.228],[65,11,"c",0.401,0.296],[66,11,"c",0.59,0.364],[67,11,"c",0.778,0.534],[67.5,11,"c",0.906,0.364],[69,11,"c",0.682,0.228],[70,11,"c",0.493,0.16],[71,11,"c",0.304,0.466],[72,12,"s",73.5,[[0.493,0.61],[0.595,0.397],[0.698,0.504]]],[75,12,"c",0.473,0.098],[76,12,"s",78,[[0.662,0.078],[0.782,0.06],[0.902,0.238]]],[79.5,12,"c",0.678,0.398],[80,13,"c",0.805,0.636]]},{"id":"rh4","name":"백혈구 출정","en":"Leukocyte Crusade","bpm":160,"file":"assets/rh4.mp3","gain":0.553,"lead":0.05002,"first":4,"end":89,"map":[[4,0,"c",0.16,0.661],[4.5,0,"c",0.288,0.661],[5.5,0,"c",0.476,0.589],[6,0,"c",0.604,0.661],[7,0,"c",0.793,0.411],[7.5,0,"c",0.665,0.332],[9,0,"c",0.441,0.661],[10,0,"c",0.252,0.589],[11,1,"c",0.441,0.332],[12,1,"c",0.629,0.84],[12.5,1,"c",0.757,0.661],[13.5,1,"c",0.568,0.561],[14.5,1,"c",0.379,0.482],[15,1,"c",0.252,0.554],[16,2,"s",17.5,[[0.441,0.94],[0.543,0.94],[0.646,0.801]]],[19,2,"c",0.87,0.661],[19.5,2,"c",0.743,0.504],[20.5,2,"c",0.554,0.804],[21,2,"c",0.426,0.661],[22.5,2,"c",0.202,0.554],[23,2,"c",0.329,0.361],[24,3,"c",0.141,0.84],[25,3,"c",0.329,0.697],[26,3,"c",0.518,0.589],[27,3,"c",0.707,0.411],[28,3,"c",0.896,0.804],[28.5,3,"c",0.768,0.811],[29.5,3,"c",0.579,0.225],[30.5,3,"c",0.391,0.554],[31,4,"c",0.518,0.661],[32,5,"p",35.5,2],[36,6,"s",37,[[0.5,0.661],[0.415,0.438],[0.33,0.536]]],[38,6,"s",39,[[0.141,0.111],[0.226,0.06],[0.311,0.171]]],[40,6,"s",41.5,[[0.5,0.232],[0.602,0.107],[0.705,0.303]]],[42.5,6,"c",0.894,0.375],[43.5,6,"c",0.705,0.704],[44,7,"s",45,[[0.577,0.561],[0.492,0.683],[0.407,0.486]]],[46,7,"c",0.219,0.411],[47,7,"c",0.407,0.104],[47.5,7,"c",0.535,0.261],[50,8,"c",0.27,0.589],[50.5,8,"c",0.142,0.482],[52,8,"s",53,[[0.367,0.225],[0.452,0.129],[0.537,0.353]]],[54,8,"s",55,[[0.725,0.482],[0.81,0.259],[0.895,0.357]]],[56,9,"s",57.5,[[0.707,0.06],[0.604,0.06],[0.502,0.217]]],[59,9,"c",0.277,0.375],[60,9,"s",61.5,[[0.466,0.567],[0.568,0.733],[0.671,0.578]]],[63,9,"c",0.895,0.589],[64,10,"s",65.5,[[0.707,0.06],[0.604,0.06],[0.502,0.289]]],[67,10,"c",0.277,0.518],[68,10,"s",69,[[0.466,0.589],[0.551,0.687],[0.636,0.464]]],[70,10,"s",71,[[0.825,0.06],[0.74,0.06],[0.655,0.11]]],[72,11,"s",73.5,[[0.466,0.16],[0.363,0.356],[0.261,0.232]]],[74.5,11,"c",0.45,0.753],[75.5,11,"c",0.638,0.482],[76,11,"s",77,[[0.766,0.339],[0.851,0.499],[0.936,0.339]]],[78,11,"c",0.747,0.789],[79,11,"c",0.558,0.482],[79.5,11,"c",0.431,0.339],[82,12,"c",0.696,0.518],[82.5,12,"c",0.824,0.411],[84,12,"s",86,[[0.599,0.16],[0.479,0.06],[0.359,0.16]]],[87,12,"c",0.171,0.16],[88,13,"c",0.359,0.61]]},{"id":"rh5","name":"심장 북소리","en":"War Drums of the Heart","bpm":140,"file":"assets/rh5.mp3","gain":0.472,"lead":0.05001,"first":4,"end":77,"map":[[4,0,"s",5,[[0.16,0.84],[0.245,0.68],[0.33,0.84]]],[6,0,"c",0.519,0.84],[6.5,0,"c",0.646,0.704],[7,0,"c",0.774,0.523],[8,0,"c",0.585,0.373],[9,0,"c",0.396,0.613],[9.5,0,"c",0.269,0.704],[10,0,"c",0.141,0.613],[11,1,"c",0.33,0.223],[12,1,"c",0.519,0.84],[13,1,"c",0.708,0.704],[14,1,"s",15,[[0.896,0.373],[0.811,0.193],[0.726,0.334]]],[16,2,"s",17.5,[[0.538,0.296],[0.435,0.238],[0.333,0.5]]],[19,2,"c",0.108,0.704],[20,2,"c",0.297,0.749],[21,2,"c",0.486,0.613],[22,2,"s",23,[[0.674,0.387],[0.759,0.181],[0.844,0.296]]],[24,3,"s",25.5,[[0.656,0.655],[0.553,0.782],[0.451,0.589]]],[27,3,"c",0.226,0.523],[28,3,"c",0.415,0.704],[28.5,3,"c",0.542,0.477],[29,3,"c",0.67,0.296],[30,3,"c",0.859,0.704],[30.5,3,"c",0.731,0.627],[31,3,"c",0.859,0.296],[32,4,"p",35.5,2],[36,5,"s",37.5,[[0.5,0.296],[0.397,0.558],[0.295,0.5]]],[39,5,"c",0.519,0.854],[39.5,5,"c",0.647,0.523],[40,5,"s",41.5,[[0.775,0.477],[0.672,0.558],[0.57,0.319]]],[43,5,"c",0.345,0.16],[44,6,"s",45,[[0.534,0.387],[0.619,0.306],[0.704,0.545]]],[46,6,"c",0.893,0.704],[47,6,"c",0.704,0.94],[47.5,6,"c",0.576,0.387],[48,6,"s",49.5,[[0.449,0.205],[0.346,0.147],[0.244,0.409]]],[51,6,"c",0.468,0.613],[52,7,"s",53.5,[[0.279,0.296],[0.177,0.535],[0.074,0.455]]],[55,7,"c",0.299,0.763],[55.5,7,"c",0.427,0.477],[56,7,"s",57,[[0.554,0.296],[0.639,0.456],[0.724,0.296]]],[59,8,"c",0.459,0.06],[59.5,8,"c",0.331,0.477],[60,8,"s",61.5,[[0.204,0.491],[0.306,0.58],[0.409,0.348]]],[63,8,"c",0.633,0.205],[64,9,"s",66,[[0.444,0.205],[0.324,0.524],[0.204,0.523]]],[68,10,"c",0.47,0.84],[69.5,10,"c",0.694,0.84],[71,10,"c",0.919,0.84],[72,10,"c",0.73,0.84],[72.75,10,"c",0.572,0.84],[73.5,10,"c",0.414,0.84],[74.5,10,"c",0.225,0.84],[75,10,"c",0.097,0.84],[75.5,11,"c",0.225,0.39]]}],"orb":[{"id":"orb1","name":"심장 질주","en":"Heartbeat Rush","bpm":132,"file":"assets/orb1.mp3","gain":0.609,"lead":0.04713,"first":8,"beats":[1.5,0.5,0.5,1.5,1,1,1,0.5,0.5,1.5,0.5,1,0.5,0.5,1,1,1,1,1.5,1.5,1,1.5,1.5,1,1.5,1.5,0.5,0.5,1,1.5,0.5,1,1.5,1.5,0.5,0.5,1.5,1.5,0.5,0.5,1,0.5,1.25,1.25,1,1,1,1,1.5,0.5,1.5,0.5,1,1,1,1,1.5,0.5,0.5,1.5,1,1,1,1]},{"id":"orb2","name":"산소 방울 퍼레이드","en":"Bubble Parade","bpm":136,"file":"assets/orb2.mp3","gain":0.626,"lead":0.04829,"first":8,"beats":[0.5,1.5,0.5,1.5,1.5,0.5,1,1,0.5,1.5,0.5,1.5,1,1,1,1,1,1,1.5,0.5,1,1,1.5,0.5,1,1,1.5,0.5,1,1.5,1.5,1,1,1.5,0.5,1,1,1.5,0.5,1,1,1.5,0.5,1.5,0.5,1,1,0.5,1.5,0.5,1.5,1.5,0.5,1,1,1.5,0.5,1.5,0.5,1,1.5,1.5]},{"id":"orb3","name":"뉴런 시냅스","en":"Neon Synapse","bpm":120,"file":"assets/orb3.mp3","gain":0.69,"lead":0.05003,"first":8,"beats":[1,1,1,0.5,0.5,1,1,1,1,1.5,1.5,0.5,0.5,1,1,1,1,0.5,0.5,1,0.5,0.5,1,1,0.5,0.5,1,1,0.5,0.5,1.5,0.5,1,0.5,0.5,1,1,1,1.5,0.5,1.5,0.5,1,1,1.5,0.5,1,1,1,1,1,1,1,1,1.5,1.5,0.5,0.5,1,1,1,1]},{"id":"orb4","name":"척추 대모험","en":"Spine Odyssey","bpm":128,"file":"assets/orb4.mp3","gain":0.591,"lead":0.04708,"first":8,"beats":[1.5,0.5,1.5,0.5,1,1,1.5,0.5,1,1,1.5,0.5,1,1,1,1,1.5,0.5,1,1,1.5,0.5,1,1,1,1,1,1,1,1,1,1,0.5,0.5,1,0.5,0.5,1,0.5,1.5,0.5,1.5,0.5,1.5,1,1,1,1,1,1,1.5,0.5,1.5,0.5,1,1,1.5,0.5,1,1,1.5,0.5,1,1,1,1]},{"id":"orb5","name":"뇌로 가는 길","en":"Road to the Brain","bpm":140,"file":"assets/orb5.mp3","gain":0.569,"lead":0.04809,"first":8,"beats":[1.5,1.5,1,1,1,1.5,0.5,1.5,1.5,0.5,0.5,1,1,1,1,1.5,1.5,1,1,1,1.5,0.5,1.5,1.5,0.5,0.5,1,1,1,1,1.5,1.5,1,1.5,1.5,1,0.5,0.5,1.5,1.5,1,1,1,1,1.5,1.5,0.5,0.5,1,1,1.5,0.5,1.5,1.5,0.5,0.5,1,1,1,1]}]};
 
 </script>
 <script>
@@ -533,7 +497,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
       invul: 0, nudge: 0, char: charName, obs: [], items: [], pops: [], puffs: [],
       genX: 520, genStation: undefined, lastGate: -1e9, R: rng(12345), nextHeal: 1800, station: -1, theme: COURSE[0][3], prevTheme: null, fade: 1, banner: 0, lapShown: 0,
       blinkAt: -1, blinkR: rng(4242), vt: 0, rh: null, orb: null, bounce: false, pitObj: null,
-      o2n: 0, boost: 0, boosts: 0, fire: [], fxR: rng(9191),
+      o2n: 0, boost: 0, boostT0: -9, boostHeld: 0, boosts: 0, fire: [], fxR: rng(9191),
       intro: [[1950, 'spike'], [3650, 'drop'], [5420, 'pit'], [7250, 'shot'], [9130, 'door']],
     });
     pressed.jump = false;
@@ -614,7 +578,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     else if (u < 0.5) b = 0; else if (u < 0.56) tp = smooth3((u - 0.5) / 0.06); else if (u < 0.92) tp = 1; else if (u < 0.98) tp = 1 - smooth3((u - 0.92) / 0.06);
     return [b, tp];
   }
-  function curSpeed() { return G.orb ? 0 : G.rh ? RH_SPEED : G.v * (0.3 + 0.7 * G.slow) * (G.boost > 0 ? BOOST_K : 1); }
+  function curSpeed() { return G.orb ? 0 : G.rh ? G.rh.speed : G.v * (0.3 + 0.7 * G.slow) * (G.boost > 0 ? BOOST_K : 1); }
   function arriveIn(dist, v) { return ACC > 0 ? (-v + Math.sqrt(v * v + 2 * ACC * Math.max(0, dist))) / ACC : dist / v; }
   function aimDoor(o) {                              // set its beat so the wanted lip is half way through its hold on arrival
     const ta = G.t + arriveIn(o.x + o.w / 2 - G.x, curSpeed());
@@ -908,27 +872,36 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   });
   addEventListener('keyup', (e) => { if (e.code === 'ArrowDown' || e.code === 'KeyS') { keySlide = false; setSlide(); } });
 
+  // ---------------------------------------------------------------- the mini-games' songs (stages.js): five each, in turn
+  // Each go of a mini-game takes the next of its songs; the turn is kept (the next run goes on from it). The songs are
+  // files: fetched when the page opens, decoded once the sound is on (the next one of each, ahead of time).
+  // ?rhsong=N / ?orbsong=N (1..5): always that song (tests).
+  const SND = window.BodySound, STAGES = window.BodyStages;
+  const ROT = { rh: 0, orb: 0 }, FIX = { rh: +qs.get('rhsong') || 0, orb: +qs.get('orbsong') || 0 };
+  for (const k of ['rh', 'orb']) { try { ROT[k] = (+localStorage.getItem('bodyrun.' + k + 'Song') || 0) % STAGES[k].length; } catch (e) { /* storage off */ } }
+  const songFor = (k) => STAGES[k][FIX[k] ? (FIX[k] - 1) % STAGES[k].length : ROT[k]];
+  function getReady() {
+    if (CAPTURE) return;
+    for (const k of ['rh', 'orb']) { const s = songFor(k); SND.fetchSong(s).catch(() => {}); if (SND.ctx) SND.prepare(s).catch(() => {}); }
+  }
+  function takeSong(k) {
+    const s = songFor(k);
+    if (!FIX[k]) { ROT[k] = (ROT[k] + 1) % STAGES[k].length; try { localStorage.setItem('bodyrun.' + k + 'Song', String(ROT[k])); } catch (e) { /* storage off */ } }
+    if (SND.ctx) SND.prepare(s).catch(() => {});
+    getReady();
+    return s;
+  }
+  const SONG_WAIT = 4;                                     // a song not decoded yet: wait this long for it, then go on without
+
   // ---------------------------------------------------------------- the rhythm stage (in the right atrium)
-  // The heart races: the run pauses, and circles come up on the beat (tap when the shrinking ring meets the circle,
-  // in their numbered order), balls to follow along a track (touch, hold, drag), and a disc to spin. The clock is the
-  // sound card's (what you hear), or the game's when there is no sound (tests).
-  const SND = window.BodySound;
-  const RH_R = 13, RH_AR = 0.85, RH_PERF = 0.085, RH_GOOD = 0.17, RH_SPEED = 60, RH_LEAD = 1.8;
+  // The heart races: the run slows to a walk, the song plays, and circles come up on its tune (tap when the shrinking
+  // ring meets the circle, in their numbered order), balls to follow along a track (touch, hold, drag) on its long
+  // notes, and a disc to spin on the build before the chorus. The clock is the sound card's (what you hear), or the
+  // game's when there is no sound (tests). The background goes on slowly enough to stay in the heart.
+  const RH_R = 13, RH_AR = 0.85, RH_PERF = 0.085, RH_GOOD = 0.17, RH_LEAD = 1.2, RH_DONE = 2.4;
   const RH_COLS = [['#ff5a8a', '#ffc0d2', '#a01848'], ['#ffa03a', '#ffe0a8', '#a85a08'], ['#46b4ff', '#c4e8ff', '#1060a8'], ['#6ad25a', '#ccf4c0', '#2a7a1e']];
-  // [beat, group, kind, ...]: 'c' circle (u, v); 's' slider (end beat, control points); 'p' spinner (end beat, turns)
-  const RH_MAP = [
-    [4, 0, 'c', 0.2, 0.55], [5, 0, 'c', 0.4, 0.32], [6, 0, 'c', 0.6, 0.55], [7, 0, 'c', 0.8, 0.32],
-    [8, 1, 'c', 0.78, 0.78], [8.5, 1, 'c', 0.6, 0.86], [10, 1, 'c', 0.32, 0.78], [10.5, 1, 'c', 0.16, 0.6],
-    [12, 2, 'c', 0.28, 0.3], [13, 2, 'c', 0.5, 0.18], [14, 2, 'c', 0.72, 0.3], [14.5, 2, 'c', 0.84, 0.48], [15, 2, 'c', 0.84, 0.7],
-    [16, 3, 's', 17.5, [[0.68, 0.8], [0.5, 0.88], [0.3, 0.74]]], [18, 3, 'c', 0.14, 0.46], [19, 3, 'c', 0.3, 0.22],
-    [20, 0, 's', 21, [[0.46, 0.3], [0.68, 0.3]]], [22, 0, 'c', 0.86, 0.46], [22.5, 0, 'c', 0.76, 0.64], [23, 0, 'c', 0.6, 0.78],
-    [24, 1, 's', 26, [[0.36, 0.76], [0.18, 0.5], [0.34, 0.24], [0.56, 0.34]]],
-    [27, 2, 'c', 0.76, 0.28], [27.5, 2, 'c', 0.86, 0.5], [28, 2, 'c', 0.76, 0.72], [28.5, 2, 'c', 0.56, 0.78],
-    [29.5, 3, 's', 31, [[0.34, 0.62], [0.5, 0.44], [0.66, 0.62]]],
-    [32, 0, 'p', 36, 3],
-    [37, 1, 'c', 0.5, 0.52],
-  ];
-  const RH_END = 38.5;                                     // beats; then the results
+  // the walk through the heart: the right atrium and ventricle, less a little
+  const RH_ROOM = COURSE.filter((st) => st[0] === 'ra' || st[0] === 'rv').reduce((L, st) => L + st[4], 0) - 160;
   const rhPos = (u, v) => [52 + u * (NW - 104), 52 + v * 92];
   function catmull(pts, n) {
     const out = [];
@@ -955,34 +928,43 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     return [path.P[i - 1][0] + (path.P[i][0] - path.P[i - 1][0]) * k, path.P[i - 1][1] + (path.P[i][1] - path.P[i - 1][1]) * k];
   }
   function startRhythm() {
-    G.boost = 0;
+    holdBoost();
     G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);       // clear what was set out ahead (what you passed scrolls off)
     G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
-    const audio = !CAPTURE && SND.live();
+    const song = takeSong('rh'), B = 60 / song.bpm, audio = !CAPTURE && SND.live();
     const notes = []; let num = 0, grp = -1;
-    for (const m of RH_MAP) {
+    for (const m of song.map) {
       if (m[1] !== grp) { grp = m[1]; num = 0; }
-      const n = { b: m[0], tn: m[0] * SND.BEAT, kind: m[2], num: ++num, col: RH_COLS[m[1] % RH_COLS.length], res: null };
+      const n = { b: m[0], tn: m[0] * B, kind: m[2], num: ++num, col: RH_COLS[m[1] % RH_COLS.length], res: null };
       if (n.kind === 'c') { n.u = m[3]; n.v = m[4]; }
-      if (n.kind === 's') { n.te = m[3] * SND.BEAT; n.ctrl = m[4]; n.u = m[4][0][0]; n.v = m[4][0][1]; n.inT = 0; n.allT = 0; n.start = null; n.ticks = 0; }
-      if (n.kind === 'p') { n.te = m[3] * SND.BEAT; n.need = m[4]; n.turns = 0; n.ang = 0; n.rate = 0; }
+      if (n.kind === 's') { n.te = m[3] * B; n.ctrl = m[4]; n.u = m[4][0][0]; n.v = m[4][0][1]; n.inT = 0; n.allT = 0; n.start = null; n.ticks = 0; }
+      if (n.kind === 'p') { n.te = m[3] * B; n.need = m[4]; n.turns = 0; n.ang = 0; n.rate = 0; }
       notes.push(n);
     }
-    G.rh = { gt0: G.t + RH_LEAD, a0: audio ? SND.ctx.currentTime + RH_LEAD : null, notes, combo: 0, maxCombo: 0, n: { perfect: 0, good: 0, miss: 0 },
+    const secs = RH_LEAD + song.end * B + RH_DONE;
+    G.rh = { song, B, first: song.first, end: song.end, speed: Math.max(30, Math.min(60, RH_ROOM / secs)),
+      gt0: G.t + RH_LEAD, a0: null, wait: audio ? G.t : null, notes, combo: 0, maxCombo: 0, n: { perfect: 0, good: 0, miss: 0 },
       pops: [], ptr: new Map(), done: false, doneT: 0, gain: 0, lastBeat: -99, flash: -9 };
-    if (audio) { SND.ambience(false); SND.startTrack(G.rh.a0); }
+    if (audio) SND.ambience(false);
     G.slideHeld = false; held.clear();
     for (const id of ['lj', 'ls']) document.getElementById(id).hidden = true;
   }
+  // the song is in: start it (and the stage's clock with it); or it did not come: go on by the game's clock, silent
+  function rhStartSong() {
+    const r = G.rh;
+    if (SND.ready(r.song) && SND.live()) { r.a0 = SND.ctx.currentTime + RH_LEAD; SND.playSong(r.song, r.a0); r.wait = null; }
+    else if (G.t - r.wait > SONG_WAIT) { r.gt0 = G.t + RH_LEAD; r.wait = null; }
+  }
   function endRhythm() {
-    G.rh = null;
-    SND.stopTrack(); SND.spin(null); SND.ambience(true);
+    G.rh = null; resumeBoost();
+    SND.stopSong(0.5); SND.spin(null); SND.ambience(true);
     G.genX = Math.max(G.genX, G.x + NW * 0.8);              // a moment to get going again
     G.banner = G.t;                                          // and where you are now
     for (const id of ['lj', 'ls']) document.getElementById(id).hidden = false;
   }
   function rtime() {
     const r = G.rh;
+    if (r.wait !== null) return -RH_LEAD;                    // the song still on its way
     return r.a0 !== null && SND.ctx ? SND.ctx.currentTime - SND.latency() - r.a0 : G.t - r.gt0;   // the sound card's clock stops while paused
   }
   function rhJudge(n, res, x, y) {
@@ -1037,9 +1019,11 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   }
   function rhUp(id) { const r = G.rh; if (r) r.ptr.delete(id); }
   function stepRhythm(dt) {
-    const r = G.rh, t = rtime();
-    const beat = Math.floor(t / SND.BEAT);
-    if (beat !== r.lastBeat) { r.lastBeat = beat; if (beat >= 0 && t < RH_END * SND.BEAT) r.flash = G.t; }
+    const r = G.rh;
+    if (r.wait !== null) rhStartSong();
+    const t = rtime(), B = r.B;
+    const beat = Math.floor(t / B);
+    if (beat !== r.lastBeat) { r.lastBeat = beat; if (beat >= 0 && t < r.end * B) r.flash = G.t; }
     for (const n of r.notes) {
       if (n.res) continue;
       if (n.kind === 'c') {
@@ -1054,7 +1038,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
           for (const p of r.ptr.values()) if (Math.hypot(p.x - bx, p.y - by) <= RH_R * 2.4) ok = true;
           n.allT += dt; if (ok) n.inT += dt;
           n.following = ok;
-          const k = Math.floor((t - n.tn) / (SND.BEAT / 2));
+          const k = Math.floor((t - n.tn) / (B / 2));
           if (k > n.ticks) { n.ticks = k; if (ok) SND.play('tick'); }
         }
         if (t > n.te) {
@@ -1076,8 +1060,8 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
       }
     }
     r.pops = r.pops.filter((p) => G.t - p.t < 0.6);
-    if (!r.done && t > RH_END * SND.BEAT && r.notes.every((n) => n.res)) { r.done = true; r.doneT = G.t; }
-    if (r.done && G.t - r.doneT > 2.4) endRhythm();
+    if (!r.done && t > r.end * B && r.notes.every((n) => n.res)) { r.done = true; r.doneT = G.t; }
+    if (r.done && G.t - r.doneT > RH_DONE) endRhythm();
   }
   function drawRhythm() {
     const r = G.rh; if (!r) return;
@@ -1091,12 +1075,15 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
       g.addColorStop(0, 'rgba(255,40,80,0)'); g.addColorStop(1, `rgba(255,40,80,${0.32 * fl})`);
       ctx.fillStyle = g; ctx.fillRect(0, 0, NWf, NH);
     }
-    // the title, before the first beat and while the count-in runs
-    if (t < 4 * SND.BEAT) {
-      const a = Math.min(1, (t + RH_LEAD) / 0.3) * Math.min(1, (4 * SND.BEAT - t) / 0.4);
-      label('심장이 두근두근!', NWf / 2, 70, 17, 'center', a, '#ffd0dc');
-      label('원은 고리가 겹칠 때 터치 · 공은 잡고 따라가기 · 원판은 빙빙', NWf / 2, 92, 7, 'center', a, '#ffffff');
-      if (t > 0) label(String(4 - Math.floor(t / SND.BEAT)), NWf / 2, 122, 16, 'center', a * (1 - (t / SND.BEAT) % 1), '#ffffff');
+    // the title (and the song's name), before the first note; a count of four into it
+    const B = r.B, f0 = r.first * B;
+    if (t < f0) {
+      const a = Math.min(1, (t + RH_LEAD) / 0.3) * Math.min(1, (f0 - t) / 0.4);
+      label('심장이 두근두근!', NWf / 2, 66, 17, 'center', a, '#ffd0dc');
+      label('원은 고리가 겹칠 때 터치 · 공은 잡고 따라가기 · 원판은 빙빙', NWf / 2, 86, 7, 'center', a, '#ffffff');
+      label(r.song.name, NWf / 2, 100, 7.5, 'center', a * 0.9, '#ffe0a8');
+      const c = r.first - Math.floor(t / B);
+      if (t > 0 && c >= 1 && c <= 4) label(String(c), NWf / 2, 126, 16, 'center', a * (1 - (t / B) % 1), '#ffffff');
     }
     // notes, later ones underneath
     for (let i = r.notes.length - 1; i >= 0; i--) {
@@ -1122,7 +1109,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     }
     if (r.combo >= 2 && !r.done) label(`${r.combo} 콤보`, 18, NH - 14, 10, 'left', 1, '#fff3c8');
     if (r.done) {
-      const a = Math.min(1, (G.t - r.doneT) / 0.25) * Math.min(1, (2.4 - (G.t - r.doneT)) / 0.3);
+      const a = Math.min(1, (G.t - r.doneT) / 0.25) * Math.min(1, (RH_DONE - (G.t - r.doneT)) / 0.3);
       ctx.globalAlpha = a * 0.78; rrect(NWf / 2 - 110, 54, 220, 74, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = 1;
       label('리듬 끝!', NWf / 2, 70, 14, 'center', a, '#ffd0dc');
       label(`Perfect ${r.n.perfect}  ·  Good ${r.n.good}  ·  Miss ${r.n.miss}`, NWf / 2, 92, 8.5, 'center', a, '#ffffff');
@@ -1189,29 +1176,21 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   // ---------------------------------------------------------------- the orbit stage (the vertebral artery, on the way into the brain)
   // The runner and an oxygen bubble step along a path of tiles: one stays on its tile while the other swings round it,
   // half a turn a beat; tap as the swinging one comes over the next tile and it lands there, and then the other swings.
-  // The bend of the path at a tile is the rhythm: straight on is one beat, a quarter turn half a beat or one and a half,
-  // a sixth two thirds; a swirl on a tile turns the swing round the other way. A miss (or a tap too early) stops nothing:
-  // the swing goes on round, the same tile comes up again a turn (two beats) later, and all after it moves on by as much.
-  // The clock is the sound card's, as on the rhythm stage. The music is a stand-in (sound.js) until the real song.
+  // The tiles are on the song's tune (and on the beat under its long notes); the bend of the path at a tile is the
+  // rhythm: straight on is one beat, a quarter turn half a beat or one and a half, an eighth of a turn three quarters
+  // or one and a quarter; a swirl on a tile turns the swing round the other way. A miss (or a tap too early) stops
+  // nothing: the swing goes on round, the same tile comes up again a turn (two beats) later, all after it moves on by
+  // as much, and the song goes back two beats with it. The clock is the sound card's, as on the rhythm stage.
   const OB_L = 30;                                         // tile to tile, and the swing's radius (units)
   const OB_PERF = 0.055, OB_WIN = 0.12, OB_EARLY = 0.24;   // perfect / early or late (lands) / too early (a miss; earlier still: not counted)
-  const OB_LEAD = 1.4, OB_DONE = 2.6;                      // title before the count-in; the results (seconds)
+  const OB_LEAD = 0.8, OB_DONE = 2.6;                      // before the song starts; the results (seconds)
   const OB_CS = 0.62, OB_BS = 15;                          // the runner drawn at 0.62 of its size; the bubble 15 units
-  // beats from each tile to the next, after a count of four: 50 tiles, 44 beats (11 bars)
-  const OB_BEATS = [
-    1, 1, 1, 1,
-    1.5, 0.5, 1, 1, 1.5, 0.5, 1, 1,
-    1, 1, 0.5, 0.5, 1, 1, 1, 0.5, 0.5, 1,
-    0.5, 0.5, 0.5, 0.5, 1, 1, 1.5, 1.5, 1,
-    2 / 3, 2 / 3, 2 / 3, 1, 1,
-    1.5, 1.5, 1,
-    0.5, 0.5, 1, 0.5, 0.5, 1, 1, 1, 1, 1,
-  ];
-  // the path: tile 0 is the start; tile k (k >= 1) is landed on at beat hits[k]. Laid out once: each bend goes the way
-  // that keeps the path heading on (never back to the left), off every earlier tile, with as few swirls as it can
-  const OB = (() => {
-    const n = OB_BEATS.length, B = ORB_BEAT();
-    const hits = [0, 4]; for (let k = 1; k <= n; k++) hits.push(+(hits[k] + OB_BEATS[k - 1]).toFixed(6));
+  // the path of a song: tile 0 is the start; tile k (k >= 1) is landed on at beat hits[k] (tile 1 on the song's first
+  // note, after the intro). Laid out once: each bend goes the way that keeps the path heading on (never back to the
+  // left), off every earlier tile, with as few swirls as it can
+  function planOrbit(song) {
+    const beats = song.beats, n = beats.length, B = 60 / song.bpm;
+    const hits = [0, song.first]; for (let k = 1; k <= n; k++) hits.push(+(hits[k] + beats[k - 1]).toFixed(6));
     const P = [[0, 0], [OB_L, 0]], head = [0], dir = [1];
     const segDist = (p, a, b) => {
       const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy;
@@ -1228,7 +1207,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     };
     const solve = (k) => {                                 // choose the way out of tile k (tiles 0..k are placed)
       if (k > n) return true;
-      const b = OB_BEATS[k - 1], back = head[k - 1] + Math.PI, opts = [];
+      const b = beats[k - 1], back = head[k - 1] + Math.PI, opts = [];
       for (const d of [dir[k - 1], -dir[k - 1]]) {
         if (d !== dir[k - 1] && Math.abs(b - 1) < 1e-6) continue;          // straight on goes the same either way
         let h = back + d * Math.PI * b; h = Math.atan2(Math.sin(h), Math.cos(h));
@@ -1248,49 +1227,59 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     const ok = solve(1);
     const N = P.length - 1;                                // the last tile
     const swirl = dir.map((d, k) => k > 0 && d !== dir[k - 1]);
-    return { ok, P, head, dir, swirl, hits, T: hits.map((h) => h * B), N };
-  })();
-  function ORB_BEAT() { return (window.BodySound && window.BodySound.ORB_BEAT) || 0.5; }
+    return { song, B, ok, P, head, dir, swirl, hits, T: hits.map((h) => h * B), N };
+  }
+  const OB_PLANS = {};                                     // laid out once per song, when first needed
+  const orbPlan = (song) => OB_PLANS[song.id] || (OB_PLANS[song.id] = planOrbit(song));
+  let OB = orbPlan(songFor('orb'));                        // the path of the stage on now (or of the next one)
   const busy = () => !!(G.rh || G.orb);
   function otime() {
     const o = G.orb;
+    if (o.wait !== null) return -OB_LEAD;                    // the song still on its way
     return o.a0 !== null && SND.ctx ? SND.ctx.currentTime - SND.latency() - o.a0 : G.t - o.gt0;
   }
   // the swinging body's angle round tile k at time t, over the next tile at time `next` (y down: + is clockwise on screen)
-  function obAngle(k, t, next) { return OB.head[k] + OB.dir[k] * Math.PI * (t - next) / ORB_BEAT(); }
+  function obAngle(k, t, next) { return OB.head[k] + OB.dir[k] * Math.PI * (t - next) / OB.B; }
   function obTarget(k) {                                   // where the camera looks: the tile and the next two
     const a = OB.P[k], b = OB.P[Math.min(OB.N, k + 1)], c = OB.P[Math.min(OB.N, k + 2)];
     return [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3];
   }
   const obAnchor = () => [NWf * 0.42, NH * 0.53];
   function startOrbit() {
-    G.boost = 0;
+    holdBoost();
+    OB = orbPlan(takeSong('orb'));
     G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
     G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
     const A = obAnchor(), h = SH('ch_' + G.char) * OB_CS;
     const cam0 = [OB.P[0][0] - (PX - A[0]), OB.P[0][1] - (GY + 1 - G.y - h / 2 - A[1])];    // tile 0 where the runner is
     const audio = !CAPTURE && SND.live();
-    G.orb = { gx0: G.x, cam0, cam: cam0.slice(), gt0: G.t + OB_LEAD, a0: audio ? SND.ctx.currentTime + OB_LEAD : null, k: 0, st: 'play', stT: G.t,
+    G.orb = { gx0: G.x, cam0, cam: cam0.slice(), gt0: G.t + OB_LEAD, a0: null, wait: audio ? G.t : null, k: 0, st: 'play', stT: G.t,
       res: { perfect: 0, early: 0, late: 0, miss: 0 }, pops: [], landT: -9, inT: G.t, off: 0, next: OB.T[1] };
     G.slideHeld = false; held.clear(); pressed.jump = false;
     for (const id of ['lj', 'ls']) document.getElementById(id).hidden = true;
-    if (audio) { SND.ambience(false); SND.startOrb(G.orb.a0, OB.hits.slice(1)); }
+    if (audio) SND.ambience(false);
+  }
+  // the song is in: start it (and the stage's clock with it); or it did not come: go on by the game's clock, silent
+  function orbStartSong() {
+    const o = G.orb;
+    if (SND.ready(OB.song) && SND.live()) { o.a0 = SND.ctx.currentTime + OB_LEAD; SND.playSong(OB.song, o.a0); o.wait = null; }
+    else if (G.t - o.wait > SONG_WAIT) { o.gt0 = G.t + OB_LEAD; o.wait = null; }
   }
   function endOrbit() {
-    G.orb = null; G.orbits = (G.orbits || 0) + 1;
-    SND.stopTrack(); SND.ambience(true);
+    G.orb = null; G.orbits = (G.orbits || 0) + 1; resumeBoost();
+    SND.stopSong(0.5); SND.ambience(true);
     G.genX = Math.max(G.genX, G.x + NW * 0.8);
     G.banner = G.t;
     for (const id of ['lj', 'ls']) document.getElementById(id).hidden = false;
   }
   // a miss: the swing carries on round and the same tile comes up again two beats later (and so does all after it);
-  // the stand-in track is laid again from the new tile times (what has played already is skipped)
+  // the song goes back two beats, so the tile and its note come round together again
   function orbMiss(why) {
-    const o = G.orb, B = ORB_BEAT();
+    const o = G.orb, B = OB.B;
     o.res.miss++; o.off += 2 * B; o.next += 2 * B;
     o.pops.push({ k: o.k + 1, res: 'miss', s: why === 'early' ? '빨라요' : '놓침', t: G.t });
     SND.play('miss');
-    if (o.a0 !== null) SND.startOrb(o.a0, OB.hits.slice(1).map((h, i) => (i + 1 > o.k ? h + o.off / B : h)), OB.hits[1]);
+    if (o.a0 !== null) SND.playSong(OB.song, o.a0 + o.off);
   }
   function orbTap() {
     const o = G.orb; if (!o || o.st !== 'play') return;
@@ -1309,9 +1298,10 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   }
   function stepOrbit(dt) {
     const o = G.orb;
+    if (o.wait !== null) orbStartSong();
     if (o.st === 'play') {
       const t = otime();
-      if (AUTO && t >= o.next) orbLand('perfect');
+      if (AUTO && !window.__noAuto && t >= o.next) orbLand('perfect');           // (__noAuto: a test letting tiles go by)
       else if (t > o.next + OB_WIN) orbMiss('late');
     } else if (o.st === 'done' && G.t - o.stT > OB_DONE) { endOrbit(); return; }
     {
@@ -1391,13 +1381,14 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     }
     ctx.restore();
     ctx.globalAlpha = 1;
-    // words
-    const B = ORB_BEAT();
+    // words: the title and the song's name until the first tile; a count of three into it
+    const B = OB.B;
     if (o.st === 'play' && t < OB.T[1]) {
       const a = Math.min(1, (G.t - o.stT) / 0.3) * Math.min(1, (OB.T[1] - t) / 0.3);
       label('박자 맞춰 빙글빙글!', NWf / 2, 46, 15, 'center', a, '#ffe0a8');
       label('돌던 쪽이 다음 칸에 닿을 때 터치 · 놓치면 한 바퀴 더 돌고 그 칸부터', NWf / 2, 64, 7, 'center', a, '#ffffff');
-      if (t > 0) { const c = 4 - Math.floor(t / B); if (c >= 1 && c <= 3) label(String(c), NWf / 2, 136, 20, 'center', a * (1 - 0.7 * ((t / B) % 1)), '#ffffff'); }
+      label(OB.song.name, NWf / 2, 77, 7.5, 'center', a * 0.9, '#ffe0a8');
+      if (t > 0) { const c = OB.hits[1] - Math.floor(t / B); if (c >= 1 && c <= 3) label(String(c), NWf / 2, 136, 20, 'center', a * (1 - 0.7 * ((t / B) % 1)), '#ffffff'); }
     }
     if (o.st === 'done') {
       const u = G.t - o.stT, a = Math.min(1, u / 0.25) * Math.max(0, Math.min(1, (OB_DONE - u) / 0.35));
@@ -1586,7 +1577,15 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     return G.slide ? [x - SLW, GY - SLH, x + SLW, GY] : [x - PW, feet - PH, x + PW, feet];
   }
   function startBoost() {
-    G.boost = BOOST_T; G.o2n = 0; G.boosts++; G.slow = 1; G.nudge = 0;
+    G.boost = BOOST_T; G.boostT0 = G.t; G.o2n = 0; G.boosts++; G.slow = 1; G.nudge = 0;
+    if (AUTO) G.slideHeld = false;
+    for (let i = 0; i < 16; i++) addSpark(true);
+  }
+  // a mini-game (rhythm, orbit) arriving mid-boost: what is left of the boost is kept, and lit again when it ends
+  function holdBoost() { if (G.boost > 0) G.boostHeld = G.boost; G.boost = 0; }
+  function resumeBoost() {
+    if (!(G.boostHeld > 0)) return;
+    G.boost = G.boostHeld; G.boostHeld = 0; G.boostT0 = G.t; G.slow = 1; G.nudge = 0;
     if (AUTO) G.slideHeld = false;
     for (let i = 0; i < 16; i++) addSpark(true);
   }
@@ -1684,7 +1683,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   function rbFrame(since) { return since < 0.3 ? Math.min(4, Math.floor(since / 0.075)) : RB_LOOP[Math.floor((since - 0.3) * 14) % RB_LOOP.length]; }
   function drawRainbow(sx, feet, w, h, k, ax, cy, ph) {
     const s0 = M.sprites.fx_rb0; if (!s0) return;
-    const since = BOOST_T - G.boost, fade = Math.min(1, G.boost / 0.35);
+    const since = G.t - G.boostT0, fade = Math.min(1, G.boost / 0.35);
     const Wd = w * 3.8, Hd = Wd * (s0.h / s0.w) * 0.6, headY = 0.44;
     const tilt = G.onGround ? 0 : Math.max(-0.4, Math.min(0.4, -G.vy / 900 * 0.6));
     const draw = (fr, x, y, a, th) => { ctx.save(); ctx.translate(x, y); ctx.rotate(th); spr('fx_rb' + fr, -Wd, -Hd * headY, a, Wd, Hd); ctx.restore(); };
@@ -1708,7 +1707,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   // rim, glossy highlights, little stars twinkling round it and a glint running along the rim
   function drawField(sx, feet, w, h) {
     if (!(G.boost > 0)) return;
-    const k = Math.min(1, (BOOST_T - G.boost) / 0.2) * Math.min(1, G.boost / 0.35);
+    const k = Math.min(1, (G.t - G.boostT0) / 0.2) * Math.min(1, G.boost / 0.35);
     const cy = feet - h * 0.5, R = Math.max(w, h) * 0.62 + 0.4 * Math.sin(G.t * 6);
     const g = ctx.createRadialGradient(sx, cy, R * 0.3, sx, cy, R);
     g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.8, `rgba(255,255,255,${0.05 * k})`); g.addColorStop(1, `rgba(255,255,255,${0.16 * k})`);
@@ -1753,7 +1752,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     }
   }
   function drawFire(sx, feet, w, h) {
-    const on = G.boost > 0, k = on ? Math.min(1, (BOOST_T - G.boost) / 0.15) * Math.min(1, G.boost / 0.35) : 0;
+    const on = G.boost > 0, k = on ? Math.min(1, (G.t - G.boostT0) / 0.15) * Math.min(1, G.boost / 0.35) : 0;
     const st = FIRE_STYLE, cy = feet - h * 0.5, ph = G.t * 22;
     if (k > 0 && (st === 1 || st === 5)) speedLines(k);
     // smoke behind everything (the warm looks only)
@@ -2154,7 +2153,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   function soundLabel() { const b = document.getElementById('bSound'); if (b) b.textContent = SND.muted ? '소리 켜기' : '소리 끄기'; }
   function gameOver() {
     G.mode = 'over'; show('overBox', true);
-    if (busy()) { G.rh = null; G.orb = null; SND.stopTrack(); SND.spin(null); for (const id of ['lj', 'ls']) document.getElementById(id).hidden = false; }
+    if (busy()) { G.rh = null; G.orb = null; SND.stopSong(0.3); SND.spin(null); for (const id of ['lj', 'ls']) document.getElementById(id).hidden = false; }
     SND.ambience(false); SND.play('over');
     document.getElementById('overMsg').textContent = `점수 ${G.score.toLocaleString('en-US')} · ${Math.floor(G.t / 60)}분 ${Math.floor(G.t % 60)}초 · ${COURSE[G.station][1]}까지`;
   }
@@ -2162,7 +2161,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     try { localStorage.setItem('bodyrun.char', c); } catch (e) { /* storage off */ }
     show('select', false); show('pauseBox', false); show('overBox', false); show('hudText', true);
     for (const id of ['lj', 'ls']) document.getElementById(id).hidden = false;
-    if (!CAPTURE) { SND.unlock(); SND.stopTrack(); SND.spin(null); SND.play('ui'); SND.ambience(true); }
+    if (!CAPTURE) { SND.unlock(); SND.stopSong(0.2); SND.spin(null); SND.play('ui'); SND.ambience(true); getReady(); }
     newRun(c); G.station = -1; step(0); last = performance.now();
     try { if (!CAPTURE && document.documentElement.requestFullscreen && matchMedia('(pointer: coarse)').matches) document.documentElement.requestFullscreen().then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {})).catch(() => {}); } catch (e) { /* not allowed here */ }
   }
@@ -2182,7 +2181,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   }
   document.getElementById('bResume').onclick = resume;
   document.getElementById('bRestart').onclick = () => startGame(G.char);
-  document.getElementById('bChar').onclick = () => { G.mode = 'select'; G.rh = null; G.orb = null; SND.unlock(); SND.stopTrack(); SND.spin(null); SND.ambience(false); show('pauseBox', false); show('overBox', false); show('hudText', false); show('select', true); };
+  document.getElementById('bChar').onclick = () => { G.mode = 'select'; G.rh = null; G.orb = null; SND.unlock(); SND.stopSong(0.2); SND.spin(null); SND.ambience(false); show('pauseBox', false); show('overBox', false); show('hudText', false); show('select', true); };
   document.getElementById('bSound').onclick = () => { SND.setMuted(!SND.muted); soundLabel(); };
   document.getElementById('bAgain').onclick = () => startGame(G.char);
   document.getElementById('bChar2').onclick = () => { G.mode = 'select'; SND.ambience(false); show('overBox', false); show('hudText', false); show('select', true); };
@@ -2212,6 +2211,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
       return;
     }
     buildSelect();
+    getReady();                                              // the songs' files, while you pick
     document.getElementById('loading').hidden = true;
     const auto = qs.get('char');
     if (CAPTURE || AUTO || auto) startGame(auto && M.chars.includes(auto) ? auto : 'tardigrade');
@@ -2224,11 +2224,12 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     window.__settle = async () => { while (Object.keys(pending).length) await Promise.all(Object.values(pending)).catch(() => {}); render(); return Object.keys(bmp).length; };
     window.__state = () => ({ mode: G.mode, t: +G.t.toFixed(2), x: Math.round(G.x), v: +G.v.toFixed(1), hp: +G.hp.toFixed(1), score: G.score, eaten: G.eaten, hits: G.hits,
       station: COURSE[Math.max(0, G.station)][0], seg: G.station, theme: G.theme, lid: +lidAmount().toFixed(2), lastHit: G.lastHit, rot, lap: stationAt(G.x).lap, y: +G.y.toFixed(1), slide: G.slide, obs: G.obs.length, items: G.items.length,
-      NW, RS: +RS.toFixed(3), GW, GH, o2n: G.o2n, boost: +G.boost.toFixed(2), boosts: G.boosts, decoded: Object.keys(bmp).length, atp: G.atp || 0, orbits: G.orbits || 0, orb: G.orb ? G.orb.st : null, huge: G.obs.filter((o) => o.kind === 'huge').length });
+      NW, RS: +RS.toFixed(3), GW, GH, rhSong: G.rh ? G.rh.song.id : null, orbSong: G.orb ? OB.song.id : null, rotation: { ...ROT }, o2n: G.o2n, boost: +G.boost.toFixed(2), boostHeld: +G.boostHeld.toFixed(2), boosts: G.boosts, decoded: Object.keys(bmp).length, atp: G.atp || 0, orbits: G.orbits || 0, orb: G.orb ? G.orb.st : null, huge: G.obs.filter((o) => o.kind === 'huge').length });
     window.__G = G;
     window.__orb = () => { const o = G.orb; if (!o) return null; const t = otime();
       return { t: +t.toFixed(3), clock: o.a0 !== null ? 'sound' : 'game', k: o.k, N: OB.N, st: o.st, res: o.res, th: o.st === 'play' ? +(((obAngle(o.k, t, o.next) % 6.2832) + 6.2832) % 6.2832).toFixed(3) : null, off: +o.off.toFixed(3), next: +o.next.toFixed(3), cam: o.cam.map((v) => +v.toFixed(1)) }; };
-    window.__orbPlan = () => ({ ok: OB.ok, N: OB.N, P: OB.P, T: OB.T, hits: OB.hits, swirl: OB.swirl.map((v, i) => v ? i : -1).filter((i) => i >= 0), dir: OB.dir });
+    window.__orbPlan = (id) => { const pl = id ? orbPlan(STAGES.orb.find((s) => s.id === id)) : OB; return { id: pl.song.id, B: pl.B, ok: pl.ok, N: pl.N, P: pl.P, T: pl.T, hits: pl.hits, swirl: pl.swirl.map((v, i) => v ? i : -1).filter((i) => i >= 0), dir: pl.dir }; };
+    window.__stages = STAGES;
     window.__orbTap = orbTap;
     window.__boost = startBoost;
     window.__rh = () => { const r = G.rh; if (!r) return null; const t = rtime();

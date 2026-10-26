@@ -173,7 +173,7 @@
       invul: 0, nudge: 0, char: charName, obs: [], items: [], pops: [], puffs: [],
       genX: 520, genStation: undefined, lastGate: -1e9, R: rng(12345), nextHeal: 1800, station: -1, theme: COURSE[0][3], prevTheme: null, fade: 1, banner: 0, lapShown: 0,
       blinkAt: -1, blinkR: rng(4242), vt: 0, rh: null, orb: null, bounce: false, pitObj: null,
-      o2n: 0, boost: 0, boosts: 0, fire: [], fxR: rng(9191),
+      o2n: 0, boost: 0, boostT0: -9, boostHeld: 0, boosts: 0, fire: [], fxR: rng(9191),
       intro: [[1950, 'spike'], [3650, 'drop'], [5420, 'pit'], [7250, 'shot'], [9130, 'door']],
     });
     pressed.jump = false;
@@ -254,7 +254,7 @@
     else if (u < 0.5) b = 0; else if (u < 0.56) tp = smooth3((u - 0.5) / 0.06); else if (u < 0.92) tp = 1; else if (u < 0.98) tp = 1 - smooth3((u - 0.92) / 0.06);
     return [b, tp];
   }
-  function curSpeed() { return G.orb ? 0 : G.rh ? RH_SPEED : G.v * (0.3 + 0.7 * G.slow) * (G.boost > 0 ? BOOST_K : 1); }
+  function curSpeed() { return G.orb ? 0 : G.rh ? G.rh.speed : G.v * (0.3 + 0.7 * G.slow) * (G.boost > 0 ? BOOST_K : 1); }
   function arriveIn(dist, v) { return ACC > 0 ? (-v + Math.sqrt(v * v + 2 * ACC * Math.max(0, dist))) / ACC : dist / v; }
   function aimDoor(o) {                              // set its beat so the wanted lip is half way through its hold on arrival
     const ta = G.t + arriveIn(o.x + o.w / 2 - G.x, curSpeed());
@@ -548,27 +548,36 @@
   });
   addEventListener('keyup', (e) => { if (e.code === 'ArrowDown' || e.code === 'KeyS') { keySlide = false; setSlide(); } });
 
+  // ---------------------------------------------------------------- the mini-games' songs (stages.js): five each, in turn
+  // Each go of a mini-game takes the next of its songs; the turn is kept (the next run goes on from it). The songs are
+  // files: fetched when the page opens, decoded once the sound is on (the next one of each, ahead of time).
+  // ?rhsong=N / ?orbsong=N (1..5): always that song (tests).
+  const SND = window.BodySound, STAGES = window.BodyStages;
+  const ROT = { rh: 0, orb: 0 }, FIX = { rh: +qs.get('rhsong') || 0, orb: +qs.get('orbsong') || 0 };
+  for (const k of ['rh', 'orb']) { try { ROT[k] = (+localStorage.getItem('bodyrun.' + k + 'Song') || 0) % STAGES[k].length; } catch (e) { /* storage off */ } }
+  const songFor = (k) => STAGES[k][FIX[k] ? (FIX[k] - 1) % STAGES[k].length : ROT[k]];
+  function getReady() {
+    if (CAPTURE) return;
+    for (const k of ['rh', 'orb']) { const s = songFor(k); SND.fetchSong(s).catch(() => {}); if (SND.ctx) SND.prepare(s).catch(() => {}); }
+  }
+  function takeSong(k) {
+    const s = songFor(k);
+    if (!FIX[k]) { ROT[k] = (ROT[k] + 1) % STAGES[k].length; try { localStorage.setItem('bodyrun.' + k + 'Song', String(ROT[k])); } catch (e) { /* storage off */ } }
+    if (SND.ctx) SND.prepare(s).catch(() => {});
+    getReady();
+    return s;
+  }
+  const SONG_WAIT = 4;                                     // a song not decoded yet: wait this long for it, then go on without
+
   // ---------------------------------------------------------------- the rhythm stage (in the right atrium)
-  // The heart races: the run pauses, and circles come up on the beat (tap when the shrinking ring meets the circle,
-  // in their numbered order), balls to follow along a track (touch, hold, drag), and a disc to spin. The clock is the
-  // sound card's (what you hear), or the game's when there is no sound (tests).
-  const SND = window.BodySound;
-  const RH_R = 13, RH_AR = 0.85, RH_PERF = 0.085, RH_GOOD = 0.17, RH_SPEED = 60, RH_LEAD = 1.8;
+  // The heart races: the run slows to a walk, the song plays, and circles come up on its tune (tap when the shrinking
+  // ring meets the circle, in their numbered order), balls to follow along a track (touch, hold, drag) on its long
+  // notes, and a disc to spin on the build before the chorus. The clock is the sound card's (what you hear), or the
+  // game's when there is no sound (tests). The background goes on slowly enough to stay in the heart.
+  const RH_R = 13, RH_AR = 0.85, RH_PERF = 0.085, RH_GOOD = 0.17, RH_LEAD = 1.2, RH_DONE = 2.4;
   const RH_COLS = [['#ff5a8a', '#ffc0d2', '#a01848'], ['#ffa03a', '#ffe0a8', '#a85a08'], ['#46b4ff', '#c4e8ff', '#1060a8'], ['#6ad25a', '#ccf4c0', '#2a7a1e']];
-  // [beat, group, kind, ...]: 'c' circle (u, v); 's' slider (end beat, control points); 'p' spinner (end beat, turns)
-  const RH_MAP = [
-    [4, 0, 'c', 0.2, 0.55], [5, 0, 'c', 0.4, 0.32], [6, 0, 'c', 0.6, 0.55], [7, 0, 'c', 0.8, 0.32],
-    [8, 1, 'c', 0.78, 0.78], [8.5, 1, 'c', 0.6, 0.86], [10, 1, 'c', 0.32, 0.78], [10.5, 1, 'c', 0.16, 0.6],
-    [12, 2, 'c', 0.28, 0.3], [13, 2, 'c', 0.5, 0.18], [14, 2, 'c', 0.72, 0.3], [14.5, 2, 'c', 0.84, 0.48], [15, 2, 'c', 0.84, 0.7],
-    [16, 3, 's', 17.5, [[0.68, 0.8], [0.5, 0.88], [0.3, 0.74]]], [18, 3, 'c', 0.14, 0.46], [19, 3, 'c', 0.3, 0.22],
-    [20, 0, 's', 21, [[0.46, 0.3], [0.68, 0.3]]], [22, 0, 'c', 0.86, 0.46], [22.5, 0, 'c', 0.76, 0.64], [23, 0, 'c', 0.6, 0.78],
-    [24, 1, 's', 26, [[0.36, 0.76], [0.18, 0.5], [0.34, 0.24], [0.56, 0.34]]],
-    [27, 2, 'c', 0.76, 0.28], [27.5, 2, 'c', 0.86, 0.5], [28, 2, 'c', 0.76, 0.72], [28.5, 2, 'c', 0.56, 0.78],
-    [29.5, 3, 's', 31, [[0.34, 0.62], [0.5, 0.44], [0.66, 0.62]]],
-    [32, 0, 'p', 36, 3],
-    [37, 1, 'c', 0.5, 0.52],
-  ];
-  const RH_END = 38.5;                                     // beats; then the results
+  // the walk through the heart: the right atrium and ventricle, less a little
+  const RH_ROOM = COURSE.filter((st) => st[0] === 'ra' || st[0] === 'rv').reduce((L, st) => L + st[4], 0) - 160;
   const rhPos = (u, v) => [52 + u * (NW - 104), 52 + v * 92];
   function catmull(pts, n) {
     const out = [];
@@ -595,34 +604,43 @@
     return [path.P[i - 1][0] + (path.P[i][0] - path.P[i - 1][0]) * k, path.P[i - 1][1] + (path.P[i][1] - path.P[i - 1][1]) * k];
   }
   function startRhythm() {
-    G.boost = 0;
+    holdBoost();
     G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);       // clear what was set out ahead (what you passed scrolls off)
     G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
-    const audio = !CAPTURE && SND.live();
+    const song = takeSong('rh'), B = 60 / song.bpm, audio = !CAPTURE && SND.live();
     const notes = []; let num = 0, grp = -1;
-    for (const m of RH_MAP) {
+    for (const m of song.map) {
       if (m[1] !== grp) { grp = m[1]; num = 0; }
-      const n = { b: m[0], tn: m[0] * SND.BEAT, kind: m[2], num: ++num, col: RH_COLS[m[1] % RH_COLS.length], res: null };
+      const n = { b: m[0], tn: m[0] * B, kind: m[2], num: ++num, col: RH_COLS[m[1] % RH_COLS.length], res: null };
       if (n.kind === 'c') { n.u = m[3]; n.v = m[4]; }
-      if (n.kind === 's') { n.te = m[3] * SND.BEAT; n.ctrl = m[4]; n.u = m[4][0][0]; n.v = m[4][0][1]; n.inT = 0; n.allT = 0; n.start = null; n.ticks = 0; }
-      if (n.kind === 'p') { n.te = m[3] * SND.BEAT; n.need = m[4]; n.turns = 0; n.ang = 0; n.rate = 0; }
+      if (n.kind === 's') { n.te = m[3] * B; n.ctrl = m[4]; n.u = m[4][0][0]; n.v = m[4][0][1]; n.inT = 0; n.allT = 0; n.start = null; n.ticks = 0; }
+      if (n.kind === 'p') { n.te = m[3] * B; n.need = m[4]; n.turns = 0; n.ang = 0; n.rate = 0; }
       notes.push(n);
     }
-    G.rh = { gt0: G.t + RH_LEAD, a0: audio ? SND.ctx.currentTime + RH_LEAD : null, notes, combo: 0, maxCombo: 0, n: { perfect: 0, good: 0, miss: 0 },
+    const secs = RH_LEAD + song.end * B + RH_DONE;
+    G.rh = { song, B, first: song.first, end: song.end, speed: Math.max(30, Math.min(60, RH_ROOM / secs)),
+      gt0: G.t + RH_LEAD, a0: null, wait: audio ? G.t : null, notes, combo: 0, maxCombo: 0, n: { perfect: 0, good: 0, miss: 0 },
       pops: [], ptr: new Map(), done: false, doneT: 0, gain: 0, lastBeat: -99, flash: -9 };
-    if (audio) { SND.ambience(false); SND.startTrack(G.rh.a0); }
+    if (audio) SND.ambience(false);
     G.slideHeld = false; held.clear();
     for (const id of ['lj', 'ls']) document.getElementById(id).hidden = true;
   }
+  // the song is in: start it (and the stage's clock with it); or it did not come: go on by the game's clock, silent
+  function rhStartSong() {
+    const r = G.rh;
+    if (SND.ready(r.song) && SND.live()) { r.a0 = SND.ctx.currentTime + RH_LEAD; SND.playSong(r.song, r.a0); r.wait = null; }
+    else if (G.t - r.wait > SONG_WAIT) { r.gt0 = G.t + RH_LEAD; r.wait = null; }
+  }
   function endRhythm() {
-    G.rh = null;
-    SND.stopTrack(); SND.spin(null); SND.ambience(true);
+    G.rh = null; resumeBoost();
+    SND.stopSong(0.5); SND.spin(null); SND.ambience(true);
     G.genX = Math.max(G.genX, G.x + NW * 0.8);              // a moment to get going again
     G.banner = G.t;                                          // and where you are now
     for (const id of ['lj', 'ls']) document.getElementById(id).hidden = false;
   }
   function rtime() {
     const r = G.rh;
+    if (r.wait !== null) return -RH_LEAD;                    // the song still on its way
     return r.a0 !== null && SND.ctx ? SND.ctx.currentTime - SND.latency() - r.a0 : G.t - r.gt0;   // the sound card's clock stops while paused
   }
   function rhJudge(n, res, x, y) {
@@ -677,9 +695,11 @@
   }
   function rhUp(id) { const r = G.rh; if (r) r.ptr.delete(id); }
   function stepRhythm(dt) {
-    const r = G.rh, t = rtime();
-    const beat = Math.floor(t / SND.BEAT);
-    if (beat !== r.lastBeat) { r.lastBeat = beat; if (beat >= 0 && t < RH_END * SND.BEAT) r.flash = G.t; }
+    const r = G.rh;
+    if (r.wait !== null) rhStartSong();
+    const t = rtime(), B = r.B;
+    const beat = Math.floor(t / B);
+    if (beat !== r.lastBeat) { r.lastBeat = beat; if (beat >= 0 && t < r.end * B) r.flash = G.t; }
     for (const n of r.notes) {
       if (n.res) continue;
       if (n.kind === 'c') {
@@ -694,7 +714,7 @@
           for (const p of r.ptr.values()) if (Math.hypot(p.x - bx, p.y - by) <= RH_R * 2.4) ok = true;
           n.allT += dt; if (ok) n.inT += dt;
           n.following = ok;
-          const k = Math.floor((t - n.tn) / (SND.BEAT / 2));
+          const k = Math.floor((t - n.tn) / (B / 2));
           if (k > n.ticks) { n.ticks = k; if (ok) SND.play('tick'); }
         }
         if (t > n.te) {
@@ -716,8 +736,8 @@
       }
     }
     r.pops = r.pops.filter((p) => G.t - p.t < 0.6);
-    if (!r.done && t > RH_END * SND.BEAT && r.notes.every((n) => n.res)) { r.done = true; r.doneT = G.t; }
-    if (r.done && G.t - r.doneT > 2.4) endRhythm();
+    if (!r.done && t > r.end * B && r.notes.every((n) => n.res)) { r.done = true; r.doneT = G.t; }
+    if (r.done && G.t - r.doneT > RH_DONE) endRhythm();
   }
   function drawRhythm() {
     const r = G.rh; if (!r) return;
@@ -731,12 +751,15 @@
       g.addColorStop(0, 'rgba(255,40,80,0)'); g.addColorStop(1, `rgba(255,40,80,${0.32 * fl})`);
       ctx.fillStyle = g; ctx.fillRect(0, 0, NWf, NH);
     }
-    // the title, before the first beat and while the count-in runs
-    if (t < 4 * SND.BEAT) {
-      const a = Math.min(1, (t + RH_LEAD) / 0.3) * Math.min(1, (4 * SND.BEAT - t) / 0.4);
-      label('심장이 두근두근!', NWf / 2, 70, 17, 'center', a, '#ffd0dc');
-      label('원은 고리가 겹칠 때 터치 · 공은 잡고 따라가기 · 원판은 빙빙', NWf / 2, 92, 7, 'center', a, '#ffffff');
-      if (t > 0) label(String(4 - Math.floor(t / SND.BEAT)), NWf / 2, 122, 16, 'center', a * (1 - (t / SND.BEAT) % 1), '#ffffff');
+    // the title (and the song's name), before the first note; a count of four into it
+    const B = r.B, f0 = r.first * B;
+    if (t < f0) {
+      const a = Math.min(1, (t + RH_LEAD) / 0.3) * Math.min(1, (f0 - t) / 0.4);
+      label('심장이 두근두근!', NWf / 2, 66, 17, 'center', a, '#ffd0dc');
+      label('원은 고리가 겹칠 때 터치 · 공은 잡고 따라가기 · 원판은 빙빙', NWf / 2, 86, 7, 'center', a, '#ffffff');
+      label(r.song.name, NWf / 2, 100, 7.5, 'center', a * 0.9, '#ffe0a8');
+      const c = r.first - Math.floor(t / B);
+      if (t > 0 && c >= 1 && c <= 4) label(String(c), NWf / 2, 126, 16, 'center', a * (1 - (t / B) % 1), '#ffffff');
     }
     // notes, later ones underneath
     for (let i = r.notes.length - 1; i >= 0; i--) {
@@ -762,7 +785,7 @@
     }
     if (r.combo >= 2 && !r.done) label(`${r.combo} 콤보`, 18, NH - 14, 10, 'left', 1, '#fff3c8');
     if (r.done) {
-      const a = Math.min(1, (G.t - r.doneT) / 0.25) * Math.min(1, (2.4 - (G.t - r.doneT)) / 0.3);
+      const a = Math.min(1, (G.t - r.doneT) / 0.25) * Math.min(1, (RH_DONE - (G.t - r.doneT)) / 0.3);
       ctx.globalAlpha = a * 0.78; rrect(NWf / 2 - 110, 54, 220, 74, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = 1;
       label('리듬 끝!', NWf / 2, 70, 14, 'center', a, '#ffd0dc');
       label(`Perfect ${r.n.perfect}  ·  Good ${r.n.good}  ·  Miss ${r.n.miss}`, NWf / 2, 92, 8.5, 'center', a, '#ffffff');
@@ -829,29 +852,21 @@
   // ---------------------------------------------------------------- the orbit stage (the vertebral artery, on the way into the brain)
   // The runner and an oxygen bubble step along a path of tiles: one stays on its tile while the other swings round it,
   // half a turn a beat; tap as the swinging one comes over the next tile and it lands there, and then the other swings.
-  // The bend of the path at a tile is the rhythm: straight on is one beat, a quarter turn half a beat or one and a half,
-  // a sixth two thirds; a swirl on a tile turns the swing round the other way. A miss (or a tap too early) stops nothing:
-  // the swing goes on round, the same tile comes up again a turn (two beats) later, and all after it moves on by as much.
-  // The clock is the sound card's, as on the rhythm stage. The music is a stand-in (sound.js) until the real song.
+  // The tiles are on the song's tune (and on the beat under its long notes); the bend of the path at a tile is the
+  // rhythm: straight on is one beat, a quarter turn half a beat or one and a half, an eighth of a turn three quarters
+  // or one and a quarter; a swirl on a tile turns the swing round the other way. A miss (or a tap too early) stops
+  // nothing: the swing goes on round, the same tile comes up again a turn (two beats) later, all after it moves on by
+  // as much, and the song goes back two beats with it. The clock is the sound card's, as on the rhythm stage.
   const OB_L = 30;                                         // tile to tile, and the swing's radius (units)
   const OB_PERF = 0.055, OB_WIN = 0.12, OB_EARLY = 0.24;   // perfect / early or late (lands) / too early (a miss; earlier still: not counted)
-  const OB_LEAD = 1.4, OB_DONE = 2.6;                      // title before the count-in; the results (seconds)
+  const OB_LEAD = 0.8, OB_DONE = 2.6;                      // before the song starts; the results (seconds)
   const OB_CS = 0.62, OB_BS = 15;                          // the runner drawn at 0.62 of its size; the bubble 15 units
-  // beats from each tile to the next, after a count of four: 50 tiles, 44 beats (11 bars)
-  const OB_BEATS = [
-    1, 1, 1, 1,
-    1.5, 0.5, 1, 1, 1.5, 0.5, 1, 1,
-    1, 1, 0.5, 0.5, 1, 1, 1, 0.5, 0.5, 1,
-    0.5, 0.5, 0.5, 0.5, 1, 1, 1.5, 1.5, 1,
-    2 / 3, 2 / 3, 2 / 3, 1, 1,
-    1.5, 1.5, 1,
-    0.5, 0.5, 1, 0.5, 0.5, 1, 1, 1, 1, 1,
-  ];
-  // the path: tile 0 is the start; tile k (k >= 1) is landed on at beat hits[k]. Laid out once: each bend goes the way
-  // that keeps the path heading on (never back to the left), off every earlier tile, with as few swirls as it can
-  const OB = (() => {
-    const n = OB_BEATS.length, B = ORB_BEAT();
-    const hits = [0, 4]; for (let k = 1; k <= n; k++) hits.push(+(hits[k] + OB_BEATS[k - 1]).toFixed(6));
+  // the path of a song: tile 0 is the start; tile k (k >= 1) is landed on at beat hits[k] (tile 1 on the song's first
+  // note, after the intro). Laid out once: each bend goes the way that keeps the path heading on (never back to the
+  // left), off every earlier tile, with as few swirls as it can
+  function planOrbit(song) {
+    const beats = song.beats, n = beats.length, B = 60 / song.bpm;
+    const hits = [0, song.first]; for (let k = 1; k <= n; k++) hits.push(+(hits[k] + beats[k - 1]).toFixed(6));
     const P = [[0, 0], [OB_L, 0]], head = [0], dir = [1];
     const segDist = (p, a, b) => {
       const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy;
@@ -868,7 +883,7 @@
     };
     const solve = (k) => {                                 // choose the way out of tile k (tiles 0..k are placed)
       if (k > n) return true;
-      const b = OB_BEATS[k - 1], back = head[k - 1] + Math.PI, opts = [];
+      const b = beats[k - 1], back = head[k - 1] + Math.PI, opts = [];
       for (const d of [dir[k - 1], -dir[k - 1]]) {
         if (d !== dir[k - 1] && Math.abs(b - 1) < 1e-6) continue;          // straight on goes the same either way
         let h = back + d * Math.PI * b; h = Math.atan2(Math.sin(h), Math.cos(h));
@@ -888,49 +903,59 @@
     const ok = solve(1);
     const N = P.length - 1;                                // the last tile
     const swirl = dir.map((d, k) => k > 0 && d !== dir[k - 1]);
-    return { ok, P, head, dir, swirl, hits, T: hits.map((h) => h * B), N };
-  })();
-  function ORB_BEAT() { return (window.BodySound && window.BodySound.ORB_BEAT) || 0.5; }
+    return { song, B, ok, P, head, dir, swirl, hits, T: hits.map((h) => h * B), N };
+  }
+  const OB_PLANS = {};                                     // laid out once per song, when first needed
+  const orbPlan = (song) => OB_PLANS[song.id] || (OB_PLANS[song.id] = planOrbit(song));
+  let OB = orbPlan(songFor('orb'));                        // the path of the stage on now (or of the next one)
   const busy = () => !!(G.rh || G.orb);
   function otime() {
     const o = G.orb;
+    if (o.wait !== null) return -OB_LEAD;                    // the song still on its way
     return o.a0 !== null && SND.ctx ? SND.ctx.currentTime - SND.latency() - o.a0 : G.t - o.gt0;
   }
   // the swinging body's angle round tile k at time t, over the next tile at time `next` (y down: + is clockwise on screen)
-  function obAngle(k, t, next) { return OB.head[k] + OB.dir[k] * Math.PI * (t - next) / ORB_BEAT(); }
+  function obAngle(k, t, next) { return OB.head[k] + OB.dir[k] * Math.PI * (t - next) / OB.B; }
   function obTarget(k) {                                   // where the camera looks: the tile and the next two
     const a = OB.P[k], b = OB.P[Math.min(OB.N, k + 1)], c = OB.P[Math.min(OB.N, k + 2)];
     return [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3];
   }
   const obAnchor = () => [NWf * 0.42, NH * 0.53];
   function startOrbit() {
-    G.boost = 0;
+    holdBoost();
+    OB = orbPlan(takeSong('orb'));
     G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
     G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
     const A = obAnchor(), h = SH('ch_' + G.char) * OB_CS;
     const cam0 = [OB.P[0][0] - (PX - A[0]), OB.P[0][1] - (GY + 1 - G.y - h / 2 - A[1])];    // tile 0 where the runner is
     const audio = !CAPTURE && SND.live();
-    G.orb = { gx0: G.x, cam0, cam: cam0.slice(), gt0: G.t + OB_LEAD, a0: audio ? SND.ctx.currentTime + OB_LEAD : null, k: 0, st: 'play', stT: G.t,
+    G.orb = { gx0: G.x, cam0, cam: cam0.slice(), gt0: G.t + OB_LEAD, a0: null, wait: audio ? G.t : null, k: 0, st: 'play', stT: G.t,
       res: { perfect: 0, early: 0, late: 0, miss: 0 }, pops: [], landT: -9, inT: G.t, off: 0, next: OB.T[1] };
     G.slideHeld = false; held.clear(); pressed.jump = false;
     for (const id of ['lj', 'ls']) document.getElementById(id).hidden = true;
-    if (audio) { SND.ambience(false); SND.startOrb(G.orb.a0, OB.hits.slice(1)); }
+    if (audio) SND.ambience(false);
+  }
+  // the song is in: start it (and the stage's clock with it); or it did not come: go on by the game's clock, silent
+  function orbStartSong() {
+    const o = G.orb;
+    if (SND.ready(OB.song) && SND.live()) { o.a0 = SND.ctx.currentTime + OB_LEAD; SND.playSong(OB.song, o.a0); o.wait = null; }
+    else if (G.t - o.wait > SONG_WAIT) { o.gt0 = G.t + OB_LEAD; o.wait = null; }
   }
   function endOrbit() {
-    G.orb = null; G.orbits = (G.orbits || 0) + 1;
-    SND.stopTrack(); SND.ambience(true);
+    G.orb = null; G.orbits = (G.orbits || 0) + 1; resumeBoost();
+    SND.stopSong(0.5); SND.ambience(true);
     G.genX = Math.max(G.genX, G.x + NW * 0.8);
     G.banner = G.t;
     for (const id of ['lj', 'ls']) document.getElementById(id).hidden = false;
   }
   // a miss: the swing carries on round and the same tile comes up again two beats later (and so does all after it);
-  // the stand-in track is laid again from the new tile times (what has played already is skipped)
+  // the song goes back two beats, so the tile and its note come round together again
   function orbMiss(why) {
-    const o = G.orb, B = ORB_BEAT();
+    const o = G.orb, B = OB.B;
     o.res.miss++; o.off += 2 * B; o.next += 2 * B;
     o.pops.push({ k: o.k + 1, res: 'miss', s: why === 'early' ? '빨라요' : '놓침', t: G.t });
     SND.play('miss');
-    if (o.a0 !== null) SND.startOrb(o.a0, OB.hits.slice(1).map((h, i) => (i + 1 > o.k ? h + o.off / B : h)), OB.hits[1]);
+    if (o.a0 !== null) SND.playSong(OB.song, o.a0 + o.off);
   }
   function orbTap() {
     const o = G.orb; if (!o || o.st !== 'play') return;
@@ -949,9 +974,10 @@
   }
   function stepOrbit(dt) {
     const o = G.orb;
+    if (o.wait !== null) orbStartSong();
     if (o.st === 'play') {
       const t = otime();
-      if (AUTO && t >= o.next) orbLand('perfect');
+      if (AUTO && !window.__noAuto && t >= o.next) orbLand('perfect');           // (__noAuto: a test letting tiles go by)
       else if (t > o.next + OB_WIN) orbMiss('late');
     } else if (o.st === 'done' && G.t - o.stT > OB_DONE) { endOrbit(); return; }
     {
@@ -1031,13 +1057,14 @@
     }
     ctx.restore();
     ctx.globalAlpha = 1;
-    // words
-    const B = ORB_BEAT();
+    // words: the title and the song's name until the first tile; a count of three into it
+    const B = OB.B;
     if (o.st === 'play' && t < OB.T[1]) {
       const a = Math.min(1, (G.t - o.stT) / 0.3) * Math.min(1, (OB.T[1] - t) / 0.3);
       label('박자 맞춰 빙글빙글!', NWf / 2, 46, 15, 'center', a, '#ffe0a8');
       label('돌던 쪽이 다음 칸에 닿을 때 터치 · 놓치면 한 바퀴 더 돌고 그 칸부터', NWf / 2, 64, 7, 'center', a, '#ffffff');
-      if (t > 0) { const c = 4 - Math.floor(t / B); if (c >= 1 && c <= 3) label(String(c), NWf / 2, 136, 20, 'center', a * (1 - 0.7 * ((t / B) % 1)), '#ffffff'); }
+      label(OB.song.name, NWf / 2, 77, 7.5, 'center', a * 0.9, '#ffe0a8');
+      if (t > 0) { const c = OB.hits[1] - Math.floor(t / B); if (c >= 1 && c <= 3) label(String(c), NWf / 2, 136, 20, 'center', a * (1 - 0.7 * ((t / B) % 1)), '#ffffff'); }
     }
     if (o.st === 'done') {
       const u = G.t - o.stT, a = Math.min(1, u / 0.25) * Math.max(0, Math.min(1, (OB_DONE - u) / 0.35));
@@ -1226,7 +1253,15 @@
     return G.slide ? [x - SLW, GY - SLH, x + SLW, GY] : [x - PW, feet - PH, x + PW, feet];
   }
   function startBoost() {
-    G.boost = BOOST_T; G.o2n = 0; G.boosts++; G.slow = 1; G.nudge = 0;
+    G.boost = BOOST_T; G.boostT0 = G.t; G.o2n = 0; G.boosts++; G.slow = 1; G.nudge = 0;
+    if (AUTO) G.slideHeld = false;
+    for (let i = 0; i < 16; i++) addSpark(true);
+  }
+  // a mini-game (rhythm, orbit) arriving mid-boost: what is left of the boost is kept, and lit again when it ends
+  function holdBoost() { if (G.boost > 0) G.boostHeld = G.boost; G.boost = 0; }
+  function resumeBoost() {
+    if (!(G.boostHeld > 0)) return;
+    G.boost = G.boostHeld; G.boostHeld = 0; G.boostT0 = G.t; G.slow = 1; G.nudge = 0;
     if (AUTO) G.slideHeld = false;
     for (let i = 0; i < 16; i++) addSpark(true);
   }
@@ -1324,7 +1359,7 @@
   function rbFrame(since) { return since < 0.3 ? Math.min(4, Math.floor(since / 0.075)) : RB_LOOP[Math.floor((since - 0.3) * 14) % RB_LOOP.length]; }
   function drawRainbow(sx, feet, w, h, k, ax, cy, ph) {
     const s0 = M.sprites.fx_rb0; if (!s0) return;
-    const since = BOOST_T - G.boost, fade = Math.min(1, G.boost / 0.35);
+    const since = G.t - G.boostT0, fade = Math.min(1, G.boost / 0.35);
     const Wd = w * 3.8, Hd = Wd * (s0.h / s0.w) * 0.6, headY = 0.44;
     const tilt = G.onGround ? 0 : Math.max(-0.4, Math.min(0.4, -G.vy / 900 * 0.6));
     const draw = (fr, x, y, a, th) => { ctx.save(); ctx.translate(x, y); ctx.rotate(th); spr('fx_rb' + fr, -Wd, -Hd * headY, a, Wd, Hd); ctx.restore(); };
@@ -1348,7 +1383,7 @@
   // rim, glossy highlights, little stars twinkling round it and a glint running along the rim
   function drawField(sx, feet, w, h) {
     if (!(G.boost > 0)) return;
-    const k = Math.min(1, (BOOST_T - G.boost) / 0.2) * Math.min(1, G.boost / 0.35);
+    const k = Math.min(1, (G.t - G.boostT0) / 0.2) * Math.min(1, G.boost / 0.35);
     const cy = feet - h * 0.5, R = Math.max(w, h) * 0.62 + 0.4 * Math.sin(G.t * 6);
     const g = ctx.createRadialGradient(sx, cy, R * 0.3, sx, cy, R);
     g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.8, `rgba(255,255,255,${0.05 * k})`); g.addColorStop(1, `rgba(255,255,255,${0.16 * k})`);
@@ -1393,7 +1428,7 @@
     }
   }
   function drawFire(sx, feet, w, h) {
-    const on = G.boost > 0, k = on ? Math.min(1, (BOOST_T - G.boost) / 0.15) * Math.min(1, G.boost / 0.35) : 0;
+    const on = G.boost > 0, k = on ? Math.min(1, (G.t - G.boostT0) / 0.15) * Math.min(1, G.boost / 0.35) : 0;
     const st = FIRE_STYLE, cy = feet - h * 0.5, ph = G.t * 22;
     if (k > 0 && (st === 1 || st === 5)) speedLines(k);
     // smoke behind everything (the warm looks only)
@@ -1794,7 +1829,7 @@
   function soundLabel() { const b = document.getElementById('bSound'); if (b) b.textContent = SND.muted ? '소리 켜기' : '소리 끄기'; }
   function gameOver() {
     G.mode = 'over'; show('overBox', true);
-    if (busy()) { G.rh = null; G.orb = null; SND.stopTrack(); SND.spin(null); for (const id of ['lj', 'ls']) document.getElementById(id).hidden = false; }
+    if (busy()) { G.rh = null; G.orb = null; SND.stopSong(0.3); SND.spin(null); for (const id of ['lj', 'ls']) document.getElementById(id).hidden = false; }
     SND.ambience(false); SND.play('over');
     document.getElementById('overMsg').textContent = `점수 ${G.score.toLocaleString('en-US')} · ${Math.floor(G.t / 60)}분 ${Math.floor(G.t % 60)}초 · ${COURSE[G.station][1]}까지`;
   }
@@ -1802,7 +1837,7 @@
     try { localStorage.setItem('bodyrun.char', c); } catch (e) { /* storage off */ }
     show('select', false); show('pauseBox', false); show('overBox', false); show('hudText', true);
     for (const id of ['lj', 'ls']) document.getElementById(id).hidden = false;
-    if (!CAPTURE) { SND.unlock(); SND.stopTrack(); SND.spin(null); SND.play('ui'); SND.ambience(true); }
+    if (!CAPTURE) { SND.unlock(); SND.stopSong(0.2); SND.spin(null); SND.play('ui'); SND.ambience(true); getReady(); }
     newRun(c); G.station = -1; step(0); last = performance.now();
     try { if (!CAPTURE && document.documentElement.requestFullscreen && matchMedia('(pointer: coarse)').matches) document.documentElement.requestFullscreen().then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {})).catch(() => {}); } catch (e) { /* not allowed here */ }
   }
@@ -1822,7 +1857,7 @@
   }
   document.getElementById('bResume').onclick = resume;
   document.getElementById('bRestart').onclick = () => startGame(G.char);
-  document.getElementById('bChar').onclick = () => { G.mode = 'select'; G.rh = null; G.orb = null; SND.unlock(); SND.stopTrack(); SND.spin(null); SND.ambience(false); show('pauseBox', false); show('overBox', false); show('hudText', false); show('select', true); };
+  document.getElementById('bChar').onclick = () => { G.mode = 'select'; G.rh = null; G.orb = null; SND.unlock(); SND.stopSong(0.2); SND.spin(null); SND.ambience(false); show('pauseBox', false); show('overBox', false); show('hudText', false); show('select', true); };
   document.getElementById('bSound').onclick = () => { SND.setMuted(!SND.muted); soundLabel(); };
   document.getElementById('bAgain').onclick = () => startGame(G.char);
   document.getElementById('bChar2').onclick = () => { G.mode = 'select'; SND.ambience(false); show('overBox', false); show('hudText', false); show('select', true); };
@@ -1852,6 +1887,7 @@
       return;
     }
     buildSelect();
+    getReady();                                              // the songs' files, while you pick
     document.getElementById('loading').hidden = true;
     const auto = qs.get('char');
     if (CAPTURE || AUTO || auto) startGame(auto && M.chars.includes(auto) ? auto : 'tardigrade');
@@ -1864,11 +1900,12 @@
     window.__settle = async () => { while (Object.keys(pending).length) await Promise.all(Object.values(pending)).catch(() => {}); render(); return Object.keys(bmp).length; };
     window.__state = () => ({ mode: G.mode, t: +G.t.toFixed(2), x: Math.round(G.x), v: +G.v.toFixed(1), hp: +G.hp.toFixed(1), score: G.score, eaten: G.eaten, hits: G.hits,
       station: COURSE[Math.max(0, G.station)][0], seg: G.station, theme: G.theme, lid: +lidAmount().toFixed(2), lastHit: G.lastHit, rot, lap: stationAt(G.x).lap, y: +G.y.toFixed(1), slide: G.slide, obs: G.obs.length, items: G.items.length,
-      NW, RS: +RS.toFixed(3), GW, GH, o2n: G.o2n, boost: +G.boost.toFixed(2), boosts: G.boosts, decoded: Object.keys(bmp).length, atp: G.atp || 0, orbits: G.orbits || 0, orb: G.orb ? G.orb.st : null, huge: G.obs.filter((o) => o.kind === 'huge').length });
+      NW, RS: +RS.toFixed(3), GW, GH, rhSong: G.rh ? G.rh.song.id : null, orbSong: G.orb ? OB.song.id : null, rotation: { ...ROT }, o2n: G.o2n, boost: +G.boost.toFixed(2), boostHeld: +G.boostHeld.toFixed(2), boosts: G.boosts, decoded: Object.keys(bmp).length, atp: G.atp || 0, orbits: G.orbits || 0, orb: G.orb ? G.orb.st : null, huge: G.obs.filter((o) => o.kind === 'huge').length });
     window.__G = G;
     window.__orb = () => { const o = G.orb; if (!o) return null; const t = otime();
       return { t: +t.toFixed(3), clock: o.a0 !== null ? 'sound' : 'game', k: o.k, N: OB.N, st: o.st, res: o.res, th: o.st === 'play' ? +(((obAngle(o.k, t, o.next) % 6.2832) + 6.2832) % 6.2832).toFixed(3) : null, off: +o.off.toFixed(3), next: +o.next.toFixed(3), cam: o.cam.map((v) => +v.toFixed(1)) }; };
-    window.__orbPlan = () => ({ ok: OB.ok, N: OB.N, P: OB.P, T: OB.T, hits: OB.hits, swirl: OB.swirl.map((v, i) => v ? i : -1).filter((i) => i >= 0), dir: OB.dir });
+    window.__orbPlan = (id) => { const pl = id ? orbPlan(STAGES.orb.find((s) => s.id === id)) : OB; return { id: pl.song.id, B: pl.B, ok: pl.ok, N: pl.N, P: pl.P, T: pl.T, hits: pl.hits, swirl: pl.swirl.map((v, i) => v ? i : -1).filter((i) => i >= 0), dir: pl.dir }; };
+    window.__stages = STAGES;
     window.__orbTap = orbTap;
     window.__boost = startBoost;
     window.__rh = () => { const r = G.rh; if (!r) return null; const t = rtime();

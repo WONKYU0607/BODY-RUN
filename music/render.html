@@ -1,0 +1,45 @@
+<!doctype html><html><head><meta charset="utf-8"><title>chip render</title></head><body>
+<script src="chip.js"></script><script src="songlib.js"></script><script src="songs.js"></script><script src="songs_rh.js"></script><script src="songs_epic.js"></script><script src="gamesongs.js"></script>
+<script>
+// render song i -> 16-bit stereo WAV (base64), plus some numbers about it
+window.renderSong = async (i, set) => {
+  const song = set === 'grh' ? GameSongs.rh[i]() : set === 'gorb' ? GameSongs.orb[i]() : (set === 'rh' ? SongsRH : Songs).all[i]();
+  if (window.SOLO) { for (const [k, ch] of Object.entries(song.ch)) if (!SOLO.includes(k)) ch.notes = []; if (!SOLO.includes('drums')) song.drums = []; }
+  const [L, R] = await Chip.render(song);
+  let peak = 0, nan = 0; for (const a of [L, R]) for (const v of a) { if (Number.isNaN(v)) nan++; else if (Math.abs(v) > peak) peak = Math.abs(v); }
+  const norm = peak > 0 ? 0.891 / peak : 1;                // -1 dBFS
+  const n = L.length, buf = new ArrayBuffer(44 + n * 4), dv = new DataView(buf);
+  const w = (o, s) => [...s].forEach((ch, k) => dv.setUint8(o + k, ch.charCodeAt(0)));
+  w(0, 'RIFF'); dv.setUint32(4, 36 + n * 4, true); w(8, 'WAVE'); w(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 2, true);
+  dv.setUint32(24, 44100, true); dv.setUint32(28, 44100 * 4, true); dv.setUint16(32, 4, true); dv.setUint16(34, 16, true); w(36, 'data'); dv.setUint32(40, n * 4, true);
+  let sq = 0;
+  for (let k = 0; k < n; k++) { const l = Math.max(-1, Math.min(1, L[k] * norm)), r = Math.max(-1, Math.min(1, R[k] * norm)); sq += l * l + r * r; dv.setInt16(44 + k * 4, l * 32767, true); dv.setInt16(46 + k * 4, r * 32767, true); }
+  let bin = ''; const u8 = new Uint8Array(buf); for (let k = 0; k < u8.length; k += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(k, k + 0x8000));
+  return { name: song.name, en: song.en, bpm: song.bpm, secs: +(n / 44100).toFixed(1), rawPeak: +peak.toFixed(3), nan, rmsDb: +(10 * Math.log10(sq / (2 * n))).toFixed(1), wav: btoa(bin) };
+};
+// raw numbers (no normalising) for one part of a song: its RMS and peak, and the RMS of each second
+window.stats = async (i, set, keep) => {
+  const song = set === 'grh' ? GameSongs.rh[i]() : GameSongs.orb[i]();
+  if (keep) { for (const [k, ch] of Object.entries(song.ch)) if (!keep.includes(k)) ch.notes = []; if (!keep.includes('drums')) song.drums = []; }
+  const [L, R] = await Chip.render(song);
+  let sq = 0, pk = 0; const per = []; let acc = 0, cnt = 0;
+  for (let k = 0; k < L.length; k++) { const e = (L[k] * L[k] + R[k] * R[k]) / 2; sq += e; acc += e; cnt++; pk = Math.max(pk, Math.abs(L[k]), Math.abs(R[k])); if (cnt === 44100) { per.push(+(10 * Math.log10(acc / cnt + 1e-12)).toFixed(1)); acc = 0; cnt = 0; } }
+  return { chans: Object.keys(song.ch), rms: +(10 * Math.log10(sq / L.length + 1e-12)).toFixed(1), peak: +pk.toFixed(3), per };
+};
+// a part of a song as it comes out (not normalised, x0.5), for comparing the parts' loudness
+window.renderRaw = async (i, set, keep) => {
+  const song = set === 'grh' ? GameSongs.rh[i]() : GameSongs.orb[i]();
+  if (keep) { for (const [k, ch] of Object.entries(song.ch)) if (!keep.includes(k)) ch.notes = []; if (!keep.includes('drums')) song.drums = []; }
+  const t0 = performance.now();
+  const [L, R] = await Chip.render(song);
+  const ms = performance.now() - t0;
+  const n = L.length, buf = new ArrayBuffer(44 + n * 4), dv = new DataView(buf);
+  const w = (o, s) => [...s].forEach((ch, k) => dv.setUint8(o + k, ch.charCodeAt(0)));
+  w(0, 'RIFF'); dv.setUint32(4, 36 + n * 4, true); w(8, 'WAVE'); w(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 2, true);
+  dv.setUint32(24, 44100, true); dv.setUint32(28, 44100 * 4, true); dv.setUint16(32, 4, true); dv.setUint16(34, 16, true); w(36, 'data'); dv.setUint32(40, n * 4, true);
+  for (let k = 0; k < n; k++) { dv.setInt16(44 + k * 4, Math.max(-1, Math.min(1, L[k] * 0.5)) * 32767, true); dv.setInt16(46 + k * 4, Math.max(-1, Math.min(1, R[k] * 0.5)) * 32767, true); }
+  let bin = ''; const u8 = new Uint8Array(buf); for (let k = 0; k < u8.length; k += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(k, k + 0x8000));
+  return { chans: Object.keys(song.ch), ms: Math.round(ms), wav: btoa(bin) };
+};
+window.ready = true;
+</script></body></html>

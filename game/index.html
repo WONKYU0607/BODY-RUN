@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Body Run</title>
+<link rel="icon" href="data:,">
+<style>
+  :root { color-scheme: dark; --u: 2px; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; touch-action: none; -webkit-user-select: none; user-select: none; }
+  body { font-family: system-ui, -apple-system, "Noto Sans KR", "Apple SD Gothic Neo", sans-serif; }
+  #c { position: fixed; left: 0; top: 0; display: block; touch-action: none; }
+  #wrap { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); transform-origin: 50% 50%; pointer-events: none; }
+  #ov { position: absolute; inset: 0; pointer-events: none; }
+  .txt { color: #fff; font-weight: 900; paint-order: stroke; -webkit-text-stroke: calc(var(--u) * 1.3) #1a0a14; letter-spacing: 0.02em; }
+  #place { position: absolute; left: 0; right: 0; top: calc(var(--u) * 3); text-align: center; transition: transform 0.35s ease, top 0.35s ease; transform-origin: 50% 0; }
+  #place.big { transform: scale(1.35); top: calc(var(--u) * 6); }
+  #pname { font-size: calc(var(--u) * 11); line-height: 1.1; }
+  #pen { font-size: calc(var(--u) * 5); color: #ffd696; -webkit-text-stroke: calc(var(--u) * 0.9) #1a0a14; }
+  .btnlab { position: absolute; bottom: calc(var(--u) * 3); font-size: calc(var(--u) * 5.5); width: calc(var(--u) * 50); text-align: center; }
+  #lj { left: calc(var(--u) * 0); }
+  #ls { right: calc(var(--u) * 0); }
+  .panel { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(var(--u) * 6); background: rgba(10, 4, 12, 0.72); pointer-events: auto; }
+  .panel[hidden], #loading[hidden], #hudText[hidden] { display: none; }
+  .panel h1 { margin: 0; font-size: calc(var(--u) * 12); }
+  .panel p { margin: 0; color: #f4dce6; font-size: calc(var(--u) * 6); font-weight: 700; }
+  .row { display: flex; gap: calc(var(--u) * 5); }
+  .pb { pointer-events: auto; font: inherit; font-weight: 900; font-size: calc(var(--u) * 6.5); color: #fff; background: #e0506e; border: calc(var(--u) * 1) solid #1a0a14; border-radius: calc(var(--u) * 3); padding: calc(var(--u) * 3) calc(var(--u) * 8); box-shadow: 0 calc(var(--u) * 1.5) 0 #1a0a14; }
+  .pb.alt { background: #4a3a58; }
+  #select { background: radial-gradient(circle at 50% 30%, #3a1426, #10060c); }
+  #grid { display: grid; grid-template-columns: repeat(5, auto); gap: calc(var(--u) * 3); }
+  .card { pointer-events: auto; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: calc(var(--u) * 1.5); width: calc(var(--u) * 62); height: calc(var(--u) * 48); background: #2a1626; border: calc(var(--u) * 1) solid #1a0a14; border-radius: calc(var(--u) * 3); color: #fff; font: inherit; font-size: calc(var(--u) * 5); font-weight: 800; padding: calc(var(--u) * 2); }
+  .card canvas { width: auto; height: calc(var(--u) * 30); }
+  .card.last { border-color: #ffd696; }
+  #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 800; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="wrap">
+  <div id="ov">
+    <div id="hudText" hidden>
+      <div id="place" class="txt"><div id="pname"></div><div id="pen"></div></div>
+      <div id="lj" class="btnlab txt">점프</div>
+      <div id="ls" class="btnlab txt">슬라이드</div>
+    </div>
+    <div id="select" class="panel" hidden>
+      <h1 class="txt">캐릭터를 골라 주세요</h1>
+      <div id="grid"></div>
+    </div>
+    <div id="pauseBox" class="panel" hidden>
+      <h1 class="txt">일시정지</h1>
+      <div class="row"><button id="bResume" class="pb">계속</button><button id="bRestart" class="pb alt">처음부터</button><button id="bChar" class="pb alt">캐릭터 바꾸기</button></div>
+      <div class="row"><button id="bSound" class="pb alt">소리 끄기</button></div>
+    </div>
+    <div id="overBox" class="panel" hidden>
+      <h1 class="txt">체력이 다 떨어졌어요</h1>
+      <p id="overMsg"></p>
+      <div class="row"><button id="bAgain" class="pb">다시</button><button id="bChar2" class="pb alt">캐릭터 바꾸기</button></div>
+    </div>
+  </div>
+</div>
+<div id="loading">불러오는 중</div>
+<script src="sound.js"></script>
+<script src="game.js"></script>
+</body>
+</html>

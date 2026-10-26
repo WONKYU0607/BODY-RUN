@@ -1195,25 +1195,31 @@
   // A ballpark of the gut's own tissue, seen from behind home plate. A macrophage on the mound throws three pitches; the
   // runner stands up at the plate on two legs with a bat. Drag on the left to put the bat's ring where the ball will cross
   // (a white ring shows the spot once it is thrown, closing in as it comes), tap on the right as it gets there. The ball
-  // in the ring, on time, is a home run; anything else a miss (a swing: 헛스윙, none: 스트라이크); three misses, struck
-  // out. A home run in three pitches wins (points only, no harm either way). The swing button swings any time (a
+  // in the ring, on time, is a home run; in the ring but a little early or late, a foul (off to the left or right, a
+  // strike, but not the third, as in baseball); anything else a miss (a swing: 헛스윙, none: 스트라이크); three strikes,
+  // out. A home run before that wins (points only, no harm either way). The swing button swings any time (a
   // practice swing before the throw, to get the feel; only a swing at the ball in flight counts). The game's own clock
   // (no song here; the run's music goes on).
   const BBF = M.bb || { mound: [210, 100], plate: [210, 172] };                 // the field picture's numbers (baseball.py)
   const BB_N = 3;                                                               // pitches
   const BB_ZW = 44, BB_ZH = 50, BB_ZY = 128;                                    // the strike zone: width, height, centre y
   const BB_CR = 9, BB_BR = 4.6;                                                 // the bat's ring, the ball at the plate
-  const BB_WIN = 0.12;                                                          // timing (s) for a home run: this early or late
+  const BB_WIN = 0.12, BB_FOUL = 0.2;                                           // timing (s): a home run this early or late; a foul
   const BB_INTRO = 2.2, BB_WIND = 1.0, BB_AFTER = 1.5, BB_AFTER_HR = 2.4, BB_END = 2.2;
-  const BB_TYPES = [                                                            // name, flight time, break (units, at the plate)
-    { name: '직구', T: 0.31, bx: 0, by: 0 }, { name: '커브', T: 0.41, bx: 4, by: 14 },
-    { name: '슬라이더', T: 0.36, bx: 13, by: 3 }, { name: '체인지업', T: 0.45, bx: 2, by: 6 },
+  // the pitches: flight time, the break at the plate (units; sideways ones go either way), how late it comes (the
+  // power of the flight it grows with: 2 early and long, 6 all at the end), and a rise on the way (the curve's arc)
+  const BB_TYPES = [
+    { name: '직구', T: 0.31, bx: 0, by: 0, pw: 3, rise: 0 },
+    { name: '커브', T: 0.44, bx: 14, by: 26, pw: 2, rise: 16 },              // up first, then a long drop
+    { name: '포크볼', T: 0.35, bx: 0, by: 34, pw: 7, rise: 0 },             // looks straight, falls off the table at the end
+    { name: '슬라이더', T: 0.36, bx: 32, by: 4, pw: 3, rise: 0 },           // late, sideways
+    { name: '체인지업', T: 0.45, bx: 3, by: 9, pw: 2, rise: 0 },            // slow, sinking a little
   ];
   const BB_PTS = { hr: 1000 };
   // the hit: the bat meets the ball BB_DS after the tap (the swing down), the game stops a moment there (hit-stop,
   // longer for a home run) while a crack bursts out of the meeting point with rings spreading like a sound wave, and the
-  // ball flies off: to the left, the middle or the right at random
-  const BB_DS = 0.035, BB_HOLD = { hr: 0.15 }, BB_FX = 0.55;
+  // ball flies off: to the left, the middle or the right at random (a foul: off to the side, left if early, right if late)
+  const BB_DS = 0.035, BB_HOLD = { hr: 0.15, foul: 0.08 }, BB_FX = 0.55;
   const BB_SWING = 0.65;                                                        // a whole swing, down, round and back
   const BB_PS = 1.45;                                                           // the pitcher's picture, scaled
   // the batter: the runner's own pictures from six sides (front 0, front-right 45, right 90, back-right 135, back 180,
@@ -1227,7 +1233,7 @@
     holdBoost();
     G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
     G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
-    G.bb = { st: 'intro', stT: G.t, inT: G.t, k: 0, res: [], hr: false, cur: [0, 0], drag: null, p: null, swingT: -9, gain: 0, msg: null, ball: null, pend: null, hold: 0, fx: null };
+    G.bb = { st: 'intro', stT: G.t, inT: G.t, k: 0, res: [], hr: false, cur: [0, 0], drag: null, p: null, swingT: -9, gain: 0, msg: null, ball: null, pend: null, hold: 0, fx: null, strikes: 0 };
     G.slideHeld = false; held.clear(); pressed.jump = false; bbKeys.clear();
   }
   function endBaseball() {
@@ -1262,7 +1268,8 @@
     const [rx, ry] = bbHand(2), [zx, zy] = bbZone(), P = [zx + p.tx, zy + p.ty];
     const e = s * s * 0.35 + s * 0.65;                                         // a little faster as it comes
     const ax = P[0] - p.bx, ay = P[1] - p.by;                                  // aimed off by the break, which comes late
-    const x = rx + (ax - rx) * e + p.bx * s * s * s, y = ry + (ay - ry) * e + p.by * s * s * s;
+    const pw = p.type.pw, f = s <= 1 ? Math.pow(s, pw) : 1 + pw * (s - 1);     // (past the plate: on in a line)
+    const x = rx + (ax - rx) * e + p.bx * f, y = ry + (ay - ry) * e + p.by * f - p.type.rise * Math.sin(Math.PI * Math.min(1, s));
     return { x, y, r: 1.3 + (BB_BR - 1.3) * Math.pow(s, 1.6), s };
   }
   function bbSwing() {
@@ -1274,8 +1281,8 @@
     }
     p.swung = true; b.swingT = G.t; SND.play('bbSwing');
     const dt = G.t - p.arr, d = Math.hypot(b.cur[0] - p.tx, b.cur[1] - p.ty);
-    if (Math.abs(dt) > BB_WIN || d > BB_CR) return;                            // a miss is told when the ball goes by
-    b.pend = { res: 'hr', dt, d, t: G.t + BB_DS };
+    if (Math.abs(dt) > BB_FOUL || d > BB_CR) return;                           // a miss is told when the ball goes by
+    b.pend = { res: Math.abs(dt) <= BB_WIN ? 'hr' : 'foul', dt, d, t: G.t + BB_DS };
   }
   // where the ball is met: at the plate, or where it was at the tap if that was late; it waits there for the bat
   const bbMeetT = () => Math.min(G.t, Math.max(G.bb.p.arr, G.bb.swingT));
@@ -1291,11 +1298,14 @@
     b.ball = null;
     if (at) {
       const fly = { from: at, t0: G.t, res }, [zx] = bbZone(), dir = [-1, 0, 1][Math.floor(Math.random() * 3)];
-      fly.to = [zx + dir * 125 + (Math.random() * 2 - 1) * 12, -24]; fly.dur = 0.85; fly.h = 60; fly.dir = dir;
+      if (res === 'hr') { fly.to = [zx + dir * 125 + (Math.random() * 2 - 1) * 12, -24]; fly.dur = 0.85; fly.h = 60; fly.dir = dir; }
+      else { const sd = dt < 0 ? -1 : 1; fly.to = [at[0] + sd * (190 + Math.random() * 40), 40 + Math.random() * 30]; fly.dur = 0.4; fly.h = 22; }
       b.ball = fly;
     }
-    b.msg = { s: { hr: '홈런!', whiff: '헛스윙', strike: '스트라이크' }[res], t: G.t, res };
+    b.msg = { s: { hr: '홈런!', foul: '파울', whiff: '헛스윙', strike: '스트라이크' }[res], t: G.t, res };
+    if (res !== 'hr' && !(res === 'foul' && b.strikes >= BB_N - 1)) b.strikes++;      // (a foul is never the third strike)
     if (res === 'hr') { G.score += BB_PTS.hr; b.gain += BB_PTS.hr; b.hr = true; SND.play('bbHR'); buzz([40, 30, 70]); }
+    else if (res === 'foul') { SND.play('bbHit'); buzz(35); }
     else SND.play('bbMitt');
   }
   function stepBaseball(dt) {                                                 // (each check reads the clock afresh: one step can change the state)
@@ -1315,10 +1325,10 @@
         if (G.t >= p.arr) bbSwing();
       }
       if (b.pend && G.t >= b.pend.t) bbContact();
-      if (!p.done && !b.pend && G.t > p.arr + BB_WIN) bbResult(p.swung ? 'whiff' : 'strike', null);
+      if (!p.done && !b.pend && G.t > p.arr + BB_FOUL) bbResult(p.swung ? 'whiff' : 'strike', null);
     }
     if (b.st === 'after' && G.t - b.stT > (b.hr ? BB_AFTER_HR : BB_AFTER)) {
-      if (b.hr || b.k + 1 >= BB_N) { b.st = 'done'; b.stT = G.t; if (!b.hr) SND.play('bbOut'); }
+      if (b.hr || b.strikes >= BB_N) { b.st = 'done'; b.stT = G.t; if (!b.hr) SND.play('bbOut'); }
       else { b.k++; bbPitch(); }
     }
     if (b.st === 'done' && G.t - b.stT > BB_END) endBaseball();
@@ -1330,7 +1340,7 @@
   }
   function bbMove(id, x, y) {
     const b = G.bb; if (!b || !b.drag || b.drag.id !== id) return;
-    const k = 1.15, mx = BB_ZW / 2 + 6, my = BB_ZH / 2 + 6;
+    const k = 1.725, mx = BB_ZW / 2 + 6, my = BB_ZH / 2 + 6;              // (1.15 at first; half again as quick)
     b.cur[0] = Math.max(-mx, Math.min(mx, b.cur[0] + (x - b.drag.x) * k));
     b.cur[1] = Math.max(-my, Math.min(my, b.cur[1] + (y - b.drag.y) * k));
     b.drag.x = x; b.drag.y = y;
@@ -1436,6 +1446,7 @@
     const f = b.p ? bbPitcherFrame() : 0, ps = M.sprites['bb_p' + f], [mx, my] = bbPitcherAt();
     if (ps) spr('bb_p' + f, mx - ps.foot[0] * BB_PS, my - ps.foot[1] * BB_PS, 1, ps.w * BB_PS, ps.h * BB_PS);
     if (b.st === 'intro' || b.st === 'wind' || (b.st === 'after' && G.t - b.stT > 0.6)) { const [hx, hy] = bbHand(f); drawBall(hx, hy, 1.4); }
+
     // the strike zone: a frame with thirds
     ctx.globalAlpha = al * 0.9;
     rrect(zx - BB_ZW / 2, zy - BB_ZH / 2, BB_ZW, BB_ZH, 2); ctx.fillStyle = 'rgba(255,240,246,0.07)'; ctx.fill();
@@ -1481,7 +1492,7 @@
     }
     // the hit's burst: a jagged crack popping out of where bat met ball, and rings spreading from it like a sound wave
     if (b.fx && b.fx.age < BB_FX) {
-      const f = b.fx, a = f.age, big = true, [cx, cy] = f.at, n = 4;
+      const f = b.fx, a = f.age, big = f.res === 'hr', [cx, cy] = f.at, n = big ? 4 : 2;
       for (let i = 0; i < n; i++) {
         const u = (a - i * 0.06) / 0.42; if (u <= 0 || u >= 1) continue;
         const R = 5 + (big ? 48 : 32) * (1 - (1 - u) * (1 - u));
@@ -1490,7 +1501,7 @@
       }
       const u = a / 0.28;
       if (u < 1) {
-        const sc = (u < 0.25 ? 0.55 + 0.65 * u / 0.25 : 1.2 - 0.55 * (u - 0.25) / 0.75) * 1.35;
+        const sc = (u < 0.25 ? 0.55 + 0.65 * u / 0.25 : 1.2 - 0.55 * (u - 0.25) / 0.75) * (big ? 1.35 : 0.8);
         const SP = [15, 10, 17, 11, 14, 9, 18, 12, 13, 10, 16, 11];
         const star = (k0) => { ctx.beginPath(); for (let k = 0; k < 24; k++) { const ang = k * Math.PI / 12 + 0.25, rr = (k % 2 ? 4.6 : SP[(k / 2) % 12]) * sc * k0;
           const x = cx + Math.cos(ang) * rr, y = cy + Math.sin(ang) * rr; if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y); } ctx.closePath(); };
@@ -1529,11 +1540,11 @@
       label('스윙', bxr, by + 0.5, 9, 'center', al, '#ffffff');
     }
     // the count: three balls, used ones dimmed
-    for (let i = 0; i < BB_N; i++) { ctx.globalAlpha = al * (i < b.res.length ? 0.28 : 1); drawBall(20 + i * 10, 44, 3.4); }
+    for (let i = 0; i < BB_N; i++) { ctx.globalAlpha = al * (i < b.strikes ? 0.28 : 1); drawBall(20 + i * 10, 44, 3.4); }
     ctx.globalAlpha = al;
     if (b.st === 'intro') {
       const a = Math.min(1, u / 0.3) * Math.max(0, Math.min(1, (BB_INTRO - u) / 0.3));
-      label('3구 안에 홈런!', NWf / 2, 62, 16, 'center', a, '#ffe0a8');
+      label('삼진 전에 홈런!', NWf / 2, 62, 16, 'center', a, '#ffe0a8');
       label('왼쪽을 끌어 노란 고리를 공이 올 자리(흰 고리)에', NWf / 2, 80, 7.5, 'center', a, '#ffffff');
       label('흰 고리가 공만큼 줄어들 때 오른쪽 터치', NWf / 2, 91, 7.5, 'center', a, '#ffffff');
     }
@@ -1541,13 +1552,14 @@
       const v = G.t - b.msg.t, big = b.msg.res === 'hr', a = Math.min(1, v / 0.12) * Math.max(0, Math.min(1, ((big ? 2.2 : 1.3) - v) / 0.3));
       label(b.msg.s, NWf / 2, big ? 54 : 60, big ? 26 + 8 * Math.max(0, 1 - v * 4) : 15, 'center', a, big ? '#ffe68a' : '#ffffff');
       if (big) label(`+${BB_PTS.hr.toLocaleString('en-US')}점`, NWf / 2, 75, 9, 'center', a, '#ffe68a');
+      if (b.msg.res === 'whiff') label(b.p.type.name, NWf / 2, 76, 9, 'center', a, '#ffe0a8');      // what got past you
     }
     if (b.st === 'done') {
       const v = G.t - b.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (BB_END - v) / 0.35));
       ctx.globalAlpha = a * 0.78; rrect(NWf / 2 - 110, 54, 220, 60, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = 1;
       label(b.hr ? '홈런 성공!' : '삼진 아웃!', NWf / 2, 70, 14, 'center', a, b.hr ? '#ffe68a' : '#ffd0dc');
       const n = (q) => b.res.filter((r) => r === q).length;
-      label(`홈런 ${n('hr')} · 헛스윙 ${n('whiff')} · 스트라이크 ${n('strike')}`, NWf / 2, 90, 7.5, 'center', a, '#ffffff');
+      label(`홈런 ${n('hr')} · 파울 ${n('foul')} · 헛스윙 ${n('whiff')} · 스트라이크 ${n('strike')}`, NWf / 2, 90, 7.5, 'center', a, '#ffffff');
       label(`+${b.gain.toLocaleString('en-US')}점`, NWf / 2, 104, 8.5, 'center', a, '#ffe68a');
     }
     ctx.globalAlpha = 1;
@@ -2388,6 +2400,7 @@
     window.__bb = () => { const b = G.bb; if (!b) return null;
       return { st: b.st, k: b.k, res: b.res.slice(), hr: b.hr, gain: b.gain, cur: b.cur.slice(), p: b.p && { type: b.p.type.name, tx: +b.p.tx.toFixed(1), ty: +b.p.ty.toFixed(1), rel: +(b.p.rel - G.t).toFixed(3), arr: +(b.p.arr - G.t).toFixed(3), dt: b.p.dt, d: b.p.d, res: b.p.res } }; };
     window.__bbSwing = () => bbSwing();
+    window.__bbTypes = BB_TYPES; window.__bbBallAt = (t) => bbBallAt(t);
     window.__bbAim = (x, y) => { if (G.bb) G.bb.cur = [x, y]; };
     window.__rh = () => { const r = G.rh; if (!r) return null; const t = rtime();
       return { t: +t.toFixed(3), n: r.n, combo: r.combo, maxCombo: r.maxCombo, done: r.done, gain: r.gain,

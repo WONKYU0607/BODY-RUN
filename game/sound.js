@@ -7,7 +7,7 @@
 // The voices take any audio context, so a test can render them offline and measure them.
 window.BodySound = (() => {
   'use strict';
-  let ctx = null, master = null, buses = null, noiseBuf = null;
+  let ctx = null, master = null, buses = null, noiseBuf = null, outNode = null;
   // the settings' sound switches: the effects, and the music (the running music and the mini-games' songs), each kept
   // in this browser (the old one switch for everything, if it was on, turns both off)
   const mute = { sfx: false, music: false }, mutes = {};
@@ -53,6 +53,14 @@ window.BodySound = (() => {
     s.start(t, Math.random() * 0.5); s.stop(t + a + dur + 0.05);
   }
   const NOTE = (n) => 440 * Math.pow(2, (n - 69) / 12);  // MIDI note number -> Hz
+  // a wooden bat's crack (k: how hard): click, ring, thump
+  function crack(c, out, t, k) {
+    burst(c, out, t, 'highpass', 3600, 3600, 0.8, 0.012, 0.55 * k, 0.0005);
+    burst(c, out, t, 'bandpass', 1850, 1700, 6, 0.05, 0.6 * k, 0.0008);
+    tone(c, out, t, 'sine', 1080, 900, 0.04, 0.26 * k, 0.0008, 0.035);
+    tone(c, out, t, 'sine', 2350, 2200, 0.025, 0.12 * k, 0.0008, 0.02);
+    tone(c, out, t, 'sine', 170, 85, 0.08, 0.36 * k, 0.001, 0.07);
+  }
   // under water: a lowpass the sound goes through (muffled), and a bubble (a sine whose pitch flies up as it forms)
   function water(c, out, f) { const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = f; lp.Q.value = 0.7; lp.connect(out); return lp; }
   function bubble(c, out, t, f, peak) { tone(c, out, t, 'sine', f, f * 2.3, 0.055, peak, 0.003, 0.04); }
@@ -104,17 +112,14 @@ window.BodySound = (() => {
     bbPitch: (c, o, t) => burst(c, o, t, 'bandpass', 520, 1500, 1.3, 0.3, 0.5, 0.03),
     bbSwing: (c, o, t) => { burst(c, o, t, 'bandpass', 600, 2300, 1.5, 0.17, 0.55, 0.012); tone(c, o, t, 'sine', 240, 140, 0.12, 0.05, 0.01, 0.12); },
     bbMitt: (c, o, t) => { burst(c, o, t, 'lowpass', 1100, 320, 0.8, 0.07, 0.42, 0.001); tone(c, o, t, 'sine', 160, 90, 0.09, 0.3, 0.002, 0.08); },
-    bbHit: (c, o, t) => {
-      burst(c, o, t, 'bandpass', 2100, 1300, 1.6, 0.05, 0.42, 0.001);
-      tone(c, o, t, 'triangle', 1180, 720, 0.06, 0.26, 0.001, 0.05);
-      tone(c, o, t, 'sine', 190, 95, 0.12, 0.3, 0.002, 0.1);
-    },
+    // bat on ball: a wooden crack - a sharp click, the wood ringing (a couple of resonances), a low thump
+    bbHit: (c, o, t) => { crack(c, o, t, 0.8); burst(c, o, t + 0.12, 'bandpass', 700, 900, 0.7, 0.55, 0.05, 0.18); },   // a foul: the crowd's "ooh"
     bbHR: (c, o, t) => {
-      burst(c, o, t, 'highpass', 2600, 2600, 0.7, 0.07, 0.36, 0.001);
-      tone(c, o, t, 'triangle', 1500, 800, 0.07, 0.26, 0.001, 0.06);
-      tone(c, o, t, 'sine', 210, 55, 0.3, 0.32, 0.002, 0.26);
+      crack(c, o, t, 1);
+      const w = water(c, o, 2600); crack(c, w, t + 0.13, 0.22);                                        // its echo round the ballpark
       [72, 76, 79, 84, 88].forEach((n, i) => tone(c, o, t + 0.28 + i * 0.075, 'triangle', NOTE(n), null, i === 4 ? 0.7 : 0.3, 0.12, 0.006));
-      burst(c, o, t + 0.15, 'bandpass', 900, 1300, 0.6, 1.6, 0.12, 0.45);
+      burst(c, o, t + 0.08, 'bandpass', 800, 1400, 0.6, 1.8, 0.16, 0.35);                               // the crowd's roar, rising
+      burst(c, o, t + 0.1, 'bandpass', 2200, 2600, 0.8, 1.5, 0.05, 0.4);
     },
     bbOut: (c, o, t) => { [67, 63, 60].forEach((n, i) => tone(c, o, t + i * 0.16, 'triangle', NOTE(n), null, 0.24, 0.18, 0.01)); },
   };
@@ -128,7 +133,7 @@ window.BodySound = (() => {
         ctx = new AC({ latencyHint: 'interactive' });
         master = ctx.createGain(); master.gain.value = 1;
         const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -10; comp.ratio.value = 4; comp.attack.value = 0.003; comp.release.value = 0.15;
-        master.connect(comp); comp.connect(ctx.destination);
+        master.connect(comp); comp.connect(ctx.destination); outNode = comp;
         buses = { sfx: ctx.createGain(), music: ctx.createGain(), amb: ctx.createGain() };
         buses.sfx.gain.value = 0.85; buses.music.gain.value = 0.8; buses.amb.gain.value = 0.0001;
         for (const k of ['sfx', 'music']) { mutes[k] = ctx.createGain(); mutes[k].gain.value = mute[k] ? 0 : 1; mutes[k].connect(master); }
@@ -171,29 +176,56 @@ window.BodySound = (() => {
     return p;
   }
   const ready = (song) => !!(songs[song.file] && songs[song.file].ready);
+  // a decoded song is big (35 s of stereo ~12 MB): let go of one not wanted soon (its file's bytes are kept, small)
+  function release(song) { if (song && songs[song.file] && !(cur && cur.song.file === song.file) && !(loopCur && loopCur.song.file === song.file)) delete songs[song.file]; }
+  const audioMB = () => Object.values(songs).reduce((s, p) => s + (p.ready ? p.ready.buf.length * p.ready.buf.numberOfChannels * 4 : 0), 0) / 1e6;
   let cur = null;
   // play `song` so that its time 0 (the first beat of its first bar) sounds at context time t0; when it is already
   // playing, it goes over with a quick crossfade (the orbit stage going back two beats)
   function playSong(song, t0) {
     if (!ctx || !ready(song)) return false;
     const S = songs[song.file].ready, now = ctx.currentTime, fade = cur ? 0.03 : 0;
-    stopSong(0.03);
+    let when = t0, off = S.zero;                       // where song time 0 is in the buffer
+    // a start already past (the orbit going back mid-song) goes a moment ahead: a source started "now" begins at the
+    // sound card's next block, late by up to that block (measured: 2.9 ms here, a phone's blocks are bigger)
+    const soon = now + 0.03;
+    if (when < soon) { off += soon - when; when = soon; }
+    stopSong(0.03, when);                              // the one playing goes out as this comes in
     const src = ctx.createBufferSource(); src.buffer = S.buf;
     const g = ctx.createGain(); src.connect(g); g.connect(buses.music);
-    let when = t0, off = S.zero;                       // where song time 0 is in the buffer
-    if (when < now) { off += now - when; when = now; }
     if (off < 0) { when -= off; off = 0; }
     if (fade) { g.gain.setValueAtTime(0.0001, when); g.gain.linearRampToValueAtTime(song.gain, when + fade); } else g.gain.value = song.gain;
     src.start(when, off);
     cur = { src, g, song, when, off, zero: S.zero };
     return true;
   }
-  function stopSong(fade = 0.4) {
+  function stopSong(fade = 0.4, at = 0) {
     if (!cur || !ctx) { cur = null; return; }
-    const { src, g } = cur, t = ctx.currentTime;
+    const { src, g } = cur, t = Math.max(ctx.currentTime, at);
     g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), t); g.gain.linearRampToValueAtTime(0.0001, t + fade);
     try { src.stop(t + fade + 0.02); } catch (e) { /* not started */ }
     cur = null;
+  }
+  // ---------------------------------------------------------------- a stage's own looping music (the baseball stage's):
+  // song: { file, gain, loop: [start, end] s }, on the music bus, in softly; stopLoop fades it out
+  let loopCur = null;
+  function playLoop(song, fadeIn = 0.8) {
+    if (!ctx || !ready(song)) return false;
+    stopLoop(0.1);
+    const S = songs[song.file].ready, src = ctx.createBufferSource();
+    src.buffer = S.buf; src.loop = true; src.loopStart = song.loop[0]; src.loopEnd = song.loop[1];
+    const g = ctx.createGain(), t0 = ctx.currentTime + 0.03; src.connect(g); g.connect(buses.music);
+    g.gain.setValueAtTime(0.0001, t0); g.gain.linearRampToValueAtTime(song.gain, t0 + fadeIn);
+    src.start(t0, song.loop[0]);
+    loopCur = { src, g, song };
+    return true;
+  }
+  function stopLoop(fade = 0.6) {
+    if (!loopCur || !ctx) { loopCur = null; return; }
+    const { src, g } = loopCur, t = ctx.currentTime;
+    g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), t); g.gain.linearRampToValueAtTime(0.0001, t + fade);
+    try { src.stop(t + fade + 0.02); } catch (e) { /* not started */ }
+    loopCur = null;
   }
   // ---------------------------------------------------------------- the running music: one source looping the file's
   // loop (bgm: { file, gain, loop: [start, end] s }); it plays on (silent) through the mini-games, and comes back up
@@ -251,8 +283,37 @@ window.BodySound = (() => {
     return buf.getChannelData(0);
   }
 
+  // ---------------------------------------------------------------- tests: record what goes out (after the master
+  // compressor), each block stamped with its frame in the context's own time (an AudioWorklet), so where a sound is in
+  // the recording says exactly when the game played it
+  let tapNode = null, tapChunks = [];
+  async function tapStart() {
+    if (!ctx) return false;
+    const code = `class Tap extends AudioWorkletProcessor { constructor() { super(); this.b = new Float32Array(8192); this.n = 0; this.f = -1; }
+      process(ins) { const i = ins[0]; if (!i || !i[0]) return true; const L = i[0], R = i[1] || i[0];
+        if (this.f < 0) this.f = currentFrame;
+        for (let k = 0; k < L.length; k++) this.b[this.n++] = (L[k] + R[k]) / 2;
+        if (this.n >= 8192 - 128) { this.port.postMessage({ f: this.f, d: this.b.slice(0, this.n) }); this.n = 0; this.f = -1; }
+        return true; } }
+      registerProcessor('tap', Tap);`;
+    await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([code], { type: 'application/javascript' })));
+    tapChunks = [];
+    tapNode = new AudioWorkletNode(ctx, 'tap', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+    tapNode.port.onmessage = (e) => tapChunks.push(e.data);
+    const z = ctx.createGain(); z.gain.value = 0; outNode.connect(tapNode); tapNode.connect(z); z.connect(ctx.destination);
+    return true;
+  }
+  function tapTake() {                                      // the recording so far: { sr, f0, data: Float32Array }
+    if (!tapChunks.length) return null;
+    const f0 = tapChunks[0].f, end = tapChunks[tapChunks.length - 1].f + tapChunks[tapChunks.length - 1].d.length, out = new Float32Array(end - f0);
+    for (const c of tapChunks) out.set(c.d, c.f - f0);
+    return { sr: ctx.sampleRate, f0, data: out };
+  }
+
   return {
-    unlock, play, fetchSong, prepare, ready, playSong, stopSong, setBGM, ambience, spin, setMute, renderOffline,
+    tapStart, tapTake,
+    unlock, play, fetchSong, prepare, ready, playSong, stopSong, setBGM, ambience, spin, setMute, renderOffline, release, audioMB, playLoop, stopLoop,
+    get looping() { return loopCur ? loopCur.song : null; },
     get bgmOn() { return !!bgmSrc; },
     get playing() { return cur ? cur.song : null; },
     songTime: () => (cur && ctx ? ctx.currentTime - cur.when + cur.off - cur.zero : null),   // where the song is now (tests)

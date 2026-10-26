@@ -15,7 +15,12 @@ from art import SC, px, hexc, ramp, ramp_col, dome_shade, outline, highlight, pa
 
 FW, FH = 420, 180                       # the field picture (units)
 CX, HZ = 210.0, -17.4                   # the plate's x; the horizon (above the picture: a long lens from high behind)
-K, V0, S = 5682.0, 30.0, 1116.0         # ground y = HZ + K / (v + V0); x = CX + S * u / (v + V0) (the plate at y 172, the mound 100)
+# ground y = HZ + K / (v + V0); x = CX + S * u / (v + V0). The camera V0 metres behind the plate; the plate stays at
+# y 172 and its width on the screen the same whatever V0 (K, S follow it). V0 30 at first (the mound at y 100); 23 now:
+# the camera nearer the plate, so the mound and the pitcher sit farther off (y 88, 0.9 the size)
+V0 = 23.0
+K, S = (172.0 - HZ) * V0, 1116.0 / 30.0 * V0
+MV = 18.4                                # the mound's distance from the plate (m)
 RF, WALL = 104.0, 1.5                   # the outfield wall: distance (m), height (m)
 OUT = '/home/claude/runner_hd/assets'
 PRE = '/tmp/claude-0/-home-claude/3a779e8a-891a-5a91-a306-4a5325e0d53e/scratchpad/bb'
@@ -183,7 +188,9 @@ def field():
     # a soft darkening at the bottom corners (the near tissue)
     vig = np.clip(((x - CX) / 240) ** 2 + ((y - 190) / 110) ** 2 - 0.3, 0, 1) * np.clip((y - 110) / 60, 0, 1)
     can[..., :3] = can[..., :3] * (1 - 0.45 * vig[..., None])
-    return can, {'mound': [CX, round(my, 2)], 'plate': [CX, round(HZ + K / V0, 2)], 'horizon': HZ, 'K': K, 'V0': V0, 'S': S}
+    # the pitcher's picture scale in the game: 1.45 with the first camera, and as the mound's scale on the screen goes
+    pscale = round(1.45 * (S / (MV + V0)) / (1116.0 / (18.4 + 30.0)), 3)
+    return can, {'mound': [CX, round(my, 2)], 'plate': [CX, round(HZ + K / V0, 2)], 'horizon': HZ, 'K': K, 'V0': V0, 'S': S, 'pscale': pscale}
 
 
 # ---------------------------------------------------------------- the pitcher: a macrophage, facing us

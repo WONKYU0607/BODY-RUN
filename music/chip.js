@@ -42,6 +42,12 @@ window.Chip = (() => {
       for (let n = 1; n < H; n++) { let a = 0, b = 0; for (let i = 0; i < N; i++) { const ph = 2 * Math.PI * n * i / N; a += x[i] * Math.cos(ph); b += x[i] * Math.sin(ph); } re[n] = a / N; im[n] = b / N; }
       w.tri = c.createPeriodicWave(re, im);
     }
+    {                                                     // a stadium organ: drawbars on the fundamental and its harmonics
+      const amp = { 1: 1, 2: 0.85, 3: 0.65, 4: 0.55, 5: 0.25, 6: 0.38, 8: 0.32 };
+      const re = new Float32Array(H), im = new Float32Array(H);
+      for (const [n, a] of Object.entries(amp)) im[+n] = a;
+      w.organ = c.createPeriodicWave(re, im);
+    }
     for (const [name, tap, len] of [['nlong', 1, 32767], ['nshort', 6, 93 * 64]]) {   // the noise channel's two modes
       const b = c.createBuffer(1, len, c.sampleRate), d = b.getChannelData(0);
       let r = 1;
@@ -236,6 +242,17 @@ window.Chip = (() => {
     else if (kind === 'x') noise('nlong', 2, 9000, 'highpass', 0.5, 0.018, 0.12 * v);         // a shaker tick
     // the big drums (for the epic songs): a taiko, its rim, floor toms that ring, a big snare, an impact
     // water: a bubble (a little sine whose pitch flies up as it forms) and a drip (a plink falling in pitch)
+    else if (kind === 'crowd') {                           // a crowd's murmur over `len`: band noise, in and out slowly, swaying
+      const L = d.len || 2, a = Math.min(0.8, L / 4), vol = 0.035 * v;   // (a murmur under the music: 0.2 was the whole mix)
+      for (const [rate, f0, q, k, pan] of [[0.31, 900, 0.7, 1, -0.3], [0.37, 1250, 0.8, 0.8, 0.3], [0.5, 2300, 1.0, 0.35, 0]]) {
+        const s = c.createBufferSource(); s.buffer = W.nlong; s.loop = true; s.playbackRate.value = rate;
+        const fl = c.createBiquadFilter(); fl.type = 'bandpass'; fl.frequency.value = f0; fl.Q.value = q;
+        const g = c.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol * k, t + a); g.gain.setValueAtTime(vol * k, t + L - a); g.gain.linearRampToValueAtTime(0, t + L);
+        const sway = c.createOscillator(), sg = c.createGain(); sway.frequency.value = 0.21 + rate * 0.3; sg.gain.value = vol * k * 0.35;
+        sway.connect(sg); sg.connect(g.gain); sway.start(t); sway.stop(t + L + 0.05);
+        s.connect(fl); fl.connect(g); sendTo(g, pan, 0); s.start(t, (t * 3.1) % 0.5); s.stop(t + L + 0.05);
+      }
+    }
     else if (kind === 'bub') {
       const f = d.f || 520, o = c.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * 2.4, t + 0.045);
       const g = c.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.16 * v, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0008, t + 0.07);
@@ -267,7 +284,7 @@ window.Chip = (() => {
     for (const ch of Object.values(song.ch)) {
       for (const nt of ch.notes) ev.push({ t: nt.step * st, kind: 'tone', ch, nt, dur: nt.len * st * (ch.gate || 0.92) });
     }
-    for (const d of song.drums) ev.push({ t: d.step * st, kind: 'drum', d: d.k === 'up' || d.k === 'down' ? { ...d, len: (d.len || 16) * st } : d });
+    for (const d of song.drums) ev.push({ t: d.step * st, kind: 'drum', d: d.k === 'up' || d.k === 'down' || d.k === 'crowd' ? { ...d, len: (d.len || 16) * st } : d });
     return ev.sort((a, b) => a.t - b.t);
   }
   function play(c, B, e, t0) {

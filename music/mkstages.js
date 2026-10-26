@@ -6,9 +6,9 @@
 //    longer get tiles on the beat in between; then thinned (the weakest notes first) to about 50 tiles
 // node mkstages.js [--meta music_meta.json]
 global.window = {};
-for (const [f, g] of [['chip', 'Chip'], ['songlib', 'SongLib'], ['songs', 'Songs'], ['songs_rh', 'SongsRH'], ['songs_epic', 'SongsEpic'], ['gamesongs', 'GameSongs']]) { require(__dirname + '/' + f + '.js'); global[g] = window[g]; }
+for (const [f, g] of [['chip', 'Chip'], ['songlib', 'SongLib'], ['songs', 'Songs'], ['songs_rh', 'SongsRH'], ['songs_epic', 'SongsEpic'], ['gamesongs', 'GameSongs']]) { require('/home/claude/chip/' + f + '.js'); global[g] = window[g]; }
 const fs = require('fs');
-const META = fs.existsSync(__dirname + '/music_meta.json') ? JSON.parse(fs.readFileSync(__dirname + '/music_meta.json', 'utf8')) : {};
+const META = fs.existsSync('/home/claude/work/music_meta.json') ? JSON.parse(fs.readFileSync('/home/claude/work/music_meta.json', 'utf8')) : {};
 
 // ---------------------------------------------------------------- shared
 const strength = (s) => (s % 16 === 0 ? 4 : s % 8 === 0 ? 3 : s % 4 === 0 ? 2 : s % 2 === 0 ? 1 : 0);   // where in the bar
@@ -218,6 +218,7 @@ GameSongs.orb.forEach((f, i) => {
   console.log(`${id} ${s.en.padEnd(24)} ${s.bpm} BPM  ${t.tiles} tiles (${t.fillers} off the tune), first at beat ${t.first}, ${t.beats.reduce((a, b) => a + b, 0)} beats = ${(t.beats.reduce((a, b) => a + b, 0) * 60 / s.bpm).toFixed(1)}s, gaps ${JSON.stringify(hist)}, path ${p.ok ? 'ok' : 'FAILED'} (${p.swirls} swirls)`);
 });
 { const m = META.bgm || {}; out.bgm = { id: 'bgm', name: '몸속 물결', en: 'Inner Tide', file: 'assets/bgm.mp3', gain: m.gain ?? 0.5, lead: 0, loop: m.loop || [0.25, 57.85] }; }
+{ const m = META.bb || {}; if (META.bb) out.bb = { id: 'bb', name: '몸속 야구장', en: 'Inner Ballpark', file: 'assets/bbmusic.mp3', gain: m.gain ?? 0.7, lead: 0, loop: m.loop || [0.25, 29.3409] }; }   // the baseball stage's loop
 const js = '// made by work/mkstages.js from the game songs (chip/gamesongs.js): the rhythm maps and the orbit tiles, per song\nwindow.BodyStages = ' + JSON.stringify(out) + ';\n';
-if (process.argv.includes('--write')) { fs.writeFileSync(__dirname + '/../game/stages.js', js); console.log('wrote stages.js', js.length); }
+if (process.argv.includes('--write')) { fs.writeFileSync('/home/claude/runner_hd/stages.js', js); console.log('wrote stages.js', js.length); }
 module.exports = { rhythmChart, orbitTiles, planOK };

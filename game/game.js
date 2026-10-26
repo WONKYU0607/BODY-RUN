@@ -11,6 +11,7 @@
   const AUTO = qs.has('auto');                  // test hook: the game plays itself
   const NO_DEATH = !qs.has('death');            // debugging: health 0 does not end the run (?death turns it on)
   const PRELOAD = qs.has('preload');            // test hook: decode every picture up front
+  const PROF = qs.has('prof') ? {} : null;      // test hook: time each part of drawing (window.__prof)
 
   // ---------------------------------------------------------------- world constants (units, seconds)
   const NH = 180, GY = 150, CEIL = 14, PX = 84;
@@ -103,15 +104,33 @@
   }
   function release(fn) { const b = bmp[fn]; if (b) { if (b.close) b.close(); delete bmp[fn]; } }
   const themeFiles = (t) => { const th = M.themes[t]; return [th.far, th.mid, th.fx].filter(Boolean); };
-  // the looks of the stations around the player (one back, three ahead) are kept; the rest let go
-  function manageThemes(i) {
-    const want = new Set();
-    for (let k = -1; k <= 3; k++) want.add(COURSE[mod(i + k, COURSE.length)][3]);
-    if (G.prevTheme) want.add(G.prevTheme);
-    const files = new Set();
+  // what is kept decoded (a background picture is 14-21 MB once decoded, so not many at a time): the look you are in,
+  // the one you just left while it fades, and the looks ahead as far as about MEM_LEAD seconds of running at the speed
+  // now (three times that when a boost is on or near); the booster fire only near and during a boost; the baseball
+  // pictures only near the jejunum and in its stage. The rest let go. Called on each new place and twice a second.
+  const MEM_LEAD = 4, MEM_MIN = 1200;
+  const JEJ = PLACES.findIndex((p) => p[0] === 'jejunum');
+  function manageThemes() {
+    if (G.station < 0) return;
+    const i = G.station, s = stationAt(G.x), want = new Set([COURSE[i][3]]);
+    if (G.prevTheme && G.fade < 1) want.add(G.prevTheme);
+    const boosty = G.boost > 0 || G.boostHeld > 0 || G.o2n >= BOOST_N - 10;
+    const reach = Math.max(MEM_MIN, G.v * (boosty ? BOOST_K : 1) * MEM_LEAD + NW);
+    for (let k = i + 1, n = 0; n < COURSE.length; k++, n++) {          // the looks starting within reach
+      const kk = k % COURSE.length, d = (k >= COURSE.length ? LAP : 0) + STARTS[kk] - s.lx;
+      if (d > reach) break;
+      want.add(COURSE[kk][3]);
+    }
+    const files = new Set(['common.webp']);
     for (const t of want) for (const f of themeFiles(t)) files.add(f);
+    if (G.boost > 0 || G.boostHeld > 0 || G.o2n >= BOOST_N - 25) files.add('fx_fire.webp');
+    const jx = STARTS[COURSE.findIndex((st) => st[5] === JEJ)], dj = ((jx - s.lx) % LAP + LAP) % LAP;
+    const nearBB = G.bb || dj < Math.max(2500, G.v * 8);
+    if (nearBB) { files.add('bb_field.webp'); files.add('bb.webp'); files.add(`bat_${G.char}.webp`); }
+    if (STAGES.bb && !CAPTURE) { if (nearBB) { SND.fetchSong(STAGES.bb).catch(() => {}); if (SND.ctx) SND.prepare(STAGES.bb).catch(() => {}); } else SND.release(STAGES.bb); }
     for (const f of files) decode(f).catch(() => {});
-    if (!PRELOAD) for (const f of Object.keys(bmp)) if (f.startsWith('th_') && !files.has(f)) release(f);
+    if (!PRELOAD) for (const f of Object.keys(bmp)) if (!files.has(f) && /^(th_|fx_fire|bb|bat_)/.test(f)) release(f);
+    manageSongs();
   }
 
   // ---------------------------------------------------------------- screen
@@ -605,15 +624,24 @@
   const ROT = { rh: 0, orb: 0 }, FIX = { rh: +qs.get('rhsong') || 0, orb: +qs.get('orbsong') || 0 };
   for (const k of ['rh', 'orb']) { try { ROT[k] = (+localStorage.getItem('bodyrun.' + k + 'Song') || 0) % STAGES[k].length; } catch (e) { /* storage off */ } }
   const songFor = (k) => STAGES[k][FIX[k] ? (FIX[k] - 1) % STAGES[k].length : ROT[k]];
-  function getReady() {
-    if (CAPTURE) return;
-    for (const k of ['rh', 'orb']) { const s = songFor(k); SND.fetchSong(s).catch(() => {}); if (SND.ctx) SND.prepare(s).catch(() => {}); }
+  // the songs come on the way: a mini-game's next song is fetched when its place is about SONG_FETCH s of running off,
+  // decoded at SONG_DECODE s off, and let go once it is behind (a decoded song is ~12 MB); see manageThemes
+  const SONG_FETCH = 25, SONG_DECODE = 12;
+  function getReady() { if (!CAPTURE) manageSongs(); }
+  function manageSongs() {
+    if (CAPTURE || G.station < 0) return;
+    const lx = stationAt(G.x).lx;
+    for (const [k, id, on] of [['rh', 'ra', !!G.rh], ['orb', 'vertebral', !!G.orb]]) {
+      const s = songFor(k), d = ((STARTS[COURSE.findIndex((st) => st[0] === id)] - lx) % LAP + LAP) % LAP;
+      if (on) continue;                                     // (in the stage: its song is playing)
+      if (d < Math.max(6000, G.v * SONG_FETCH)) SND.fetchSong(s).catch(() => {});
+      if (d < Math.max(3000, G.v * SONG_DECODE)) { if (SND.ctx) SND.prepare(s).catch(() => {}); } else SND.release(s);
+    }
   }
   function takeSong(k) {
     const s = songFor(k);
     if (!FIX[k]) { ROT[k] = (ROT[k] + 1) % STAGES[k].length; try { localStorage.setItem('bodyrun.' + k + 'Song', String(ROT[k])); } catch (e) { /* storage off */ } }
-    if (SND.ctx) SND.prepare(s).catch(() => {});
-    getReady();
+    SND.fetchSong(s).catch(() => {}); if (SND.ctx) SND.prepare(s).catch(() => {});
     return s;
   }
   const SONG_WAIT = 4;                                     // a song not decoded yet: wait this long for it, then go on without
@@ -681,11 +709,13 @@
   function rhStartSong() {
     const r = G.rh;
     if (SND.ready(r.song) && SND.live()) { r.a0 = SND.ctx.currentTime + RH_LEAD; SND.playSong(r.song, r.a0); r.wait = null; }
-    else if (G.t - r.wait > SONG_WAIT) { r.gt0 = G.t + RH_LEAD; r.wait = null; }
+    else if (G.t - r.wait > SONG_WAIT) { r.gt0 = G.t + RH_LEAD; r.wait = null; G.silent = (G.silent || 0) + 1; }
   }
   function endRhythm() {
+    const played = G.rh.song;
     G.rh = null; resumeBoost();
     SND.stopSong(0.5); SND.spin(null); SND.ambience(true);
+    if (songFor('rh').file !== played.file) SND.release(played);   // (its decoded sound is big; the next is ready)
     G.genX = Math.max(G.genX, G.x + NW * 0.8);              // a moment to get going again
     G.banner = G.t;                                          // and where you are now
   }
@@ -991,11 +1021,13 @@
   function orbStartSong() {
     const o = G.orb;
     if (SND.ready(OB.song) && SND.live()) { o.a0 = SND.ctx.currentTime + OB_LEAD; SND.playSong(OB.song, o.a0); o.wait = null; }
-    else if (G.t - o.wait > SONG_WAIT) { o.gt0 = G.t + OB_LEAD; o.wait = null; }
+    else if (G.t - o.wait > SONG_WAIT) { o.gt0 = G.t + OB_LEAD; o.wait = null; G.silent = (G.silent || 0) + 1; }
   }
   function endOrbit() {
+    const played = OB.song;
     G.orb = null; G.orbits = (G.orbits || 0) + 1; resumeBoost();
     SND.stopSong(0.5); SND.ambience(true);
+    if (songFor('orb').file !== played.file) SND.release(played);
     G.genX = Math.max(G.genX, G.x + NW * 0.8);
     G.banner = G.t;
   }
@@ -1206,14 +1238,15 @@
   const BB_CR = 9, BB_BR = 4.6;                                                 // the bat's ring, the ball at the plate
   const BB_WIN = 0.12, BB_FOUL = 0.2;                                           // timing (s): a home run this early or late; a foul
   const BB_INTRO = 2.2, BB_WIND = 1.0, BB_AFTER = 1.5, BB_AFTER_HR = 2.4, BB_END = 2.2;
-  // the pitches: flight time, the break at the plate (units; sideways ones go either way), how late it comes (the
+  // the pitches (thrown from the mound farther off: 1.1 times the way on the screen at the same speed): flight time,
+  // the break at the plate (units; sideways ones go either way), how late it comes (the
   // power of the flight it grows with: 2 early and long, 6 all at the end), and a rise on the way (the curve's arc)
   const BB_TYPES = [
-    { name: '직구', T: 0.31, bx: 0, by: 0, pw: 3, rise: 0 },
-    { name: '커브', T: 0.44, bx: 14, by: 26, pw: 2, rise: 16 },              // up first, then a long drop
-    { name: '포크볼', T: 0.35, bx: 0, by: 34, pw: 7, rise: 0 },             // looks straight, falls off the table at the end
-    { name: '슬라이더', T: 0.36, bx: 32, by: 4, pw: 3, rise: 0 },           // late, sideways
-    { name: '체인지업', T: 0.45, bx: 3, by: 9, pw: 2, rise: 0 },            // slow, sinking a little
+    { name: '직구', T: 0.34, bx: 0, by: 0, pw: 3, rise: 0 },
+    { name: '커브', T: 0.48, bx: 14, by: 26, pw: 2, rise: 16 },              // up first, then a long drop
+    { name: '포크볼', T: 0.38, bx: 0, by: 34, pw: 7, rise: 0 },             // looks straight, falls off the table at the end
+    { name: '슬라이더', T: 0.39, bx: 32, by: 4, pw: 3, rise: 0 },           // late, sideways
+    { name: '체인지업', T: 0.49, bx: 3, by: 9, pw: 2, rise: 0 },            // slow, sinking a little
   ];
   const BB_PTS = { hr: 1000 };
   // the hit: the bat meets the ball BB_DS after the tap (the swing down), the game stops a moment there (hit-stop,
@@ -1221,7 +1254,7 @@
   // ball flies off: to the left, the middle or the right at random (a foul: off to the side, left if early, right if late)
   const BB_DS = 0.035, BB_HOLD = { hr: 0.15, foul: 0.08 }, BB_FX = 0.55;
   const BB_SWING = 0.65;                                                        // a whole swing, down, round and back
-  const BB_PS = 1.45;                                                           // the pitcher's picture, scaled
+  const BB_PS = BBF.pscale || 1.45;                                            // the pitcher's picture, scaled (as far off as the mound)
   // the batter: the runner's own pictures from six sides (front 0, front-right 45, right 90, back-right 135, back 180,
   // back-left 225; 270 and 315 are 90 and 45 turned over), standing on its feet left of the plate. It waits turned
   // towards the pitcher (135) and turns with the swing (180 at the hit, 225 after), the bat in two fists of its colour
@@ -1235,8 +1268,16 @@
     G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
     G.bb = { st: 'intro', stT: G.t, inT: G.t, k: 0, res: [], hr: false, cur: [0, 0], drag: null, p: null, swingT: -9, gain: 0, msg: null, ball: null, pend: null, hold: 0, fx: null, strikes: 0 };
     G.slideHeld = false; held.clear(); pressed.jump = false; bbKeys.clear();
+    bbMusic();
+  }
+  // the stage's music: the running music fades, the ballpark's comes in (when its file is decoded; tried again each step)
+  function bbMusic() {
+    const b = G.bb; if (!b || b.music || CAPTURE || !STAGES.bb || !SND.live()) return;
+    if (!SND.ready(STAGES.bb)) { SND.prepare(STAGES.bb).catch(() => {}); return; }
+    b.music = SND.playLoop(STAGES.bb); SND.ambience(false);
   }
   function endBaseball() {
+    if (G.bb && G.bb.music) { SND.stopLoop(0.8); SND.ambience(true); }
     G.bb = null; G.games = (G.games || 0) + 1; resumeBoost();
     G.genX = Math.max(G.genX, G.x + NW * 0.8);
     G.banner = G.t;
@@ -1310,6 +1351,7 @@
   }
   function stepBaseball(dt) {                                                 // (each check reads the clock afresh: one step can change the state)
     const b = G.bb;
+    if (!b.music && b.st !== 'done') bbMusic();
     if (bbKeys.size) {                                                         // the arrow keys move the bat's ring
       const k = 95 * dt, mx = BB_ZW / 2 + 6, my = BB_ZH / 2 + 6;
       if (bbKeys.has('L')) b.cur[0] -= k; if (bbKeys.has('R')) b.cur[0] += k;
@@ -1665,10 +1707,12 @@
       G.station = s.i;
       const th = s.st[3];
       if (th !== G.theme) { G.prevTheme = G.theme; G.theme = th; G.fade = 0; }
+      if (!themeFiles(th).every((f) => bmp[f])) { G.missing = (G.missing || 0) + 1; (G.missList = G.missList || []).push(th); }   // (tests: a look not ready on arrival)
       if (arrived) { if (!busy()) G.banner = G.t; setLabel(s.st, s.lap); if (s.st[0] === 'ra' && !busy()) startRhythm(); if (s.st[0] === 'vertebral' && !busy()) startOrbit(); if (s.st[0] === 'jejunum' && !busy()) startBaseball(); }
-      manageThemes(s.i);
+      manageThemes(); G.memT = G.t;
     }
     G.fade = Math.min(1, G.fade + dt / 0.7);
+    if (!(G.t - G.memT < 0.5)) { G.memT = G.t; manageThemes(); }
     // passing the cornea the eye blinks now and then (sometimes twice quickly); its own random, so the course is unchanged
     if (COURSE[G.station][0] === 'cornea') {
       if (G.blinkAt < 0) G.blinkAt = G.t + 0.6;
@@ -2159,11 +2203,24 @@
   function miniMark(kind, x, y, alpha) {
     ctx.globalAlpha = alpha;
     ctx.beginPath(); ctx.arc(x, y, 4.6, 0, 6.29); ctx.fillStyle = '#1a0a14'; ctx.fill();
-    if (kind === 'bb') {                                    // a baseball: white, with its two red seams
-      ctx.beginPath(); ctx.arc(x, y, 3.7, 0, 6.29); ctx.fillStyle = '#f6f0ea'; ctx.fill();
-      ctx.lineWidth = 0.6; ctx.strokeStyle = '#d23a3a';
-      ctx.beginPath(); ctx.arc(x - 4.6, y, 3.5, -0.34 * Math.PI, 0.34 * Math.PI); ctx.stroke();
-      ctx.beginPath(); ctx.arc(x + 4.6, y, 3.5, 0.66 * Math.PI, 1.34 * Math.PI); ctx.stroke();
+    if (kind === 'bb') {                                    // a baseball: shaded white, two curved red seams with their stitches
+      const R = 4.1;
+      ctx.beginPath(); ctx.arc(x, y, R + 0.9, 0, 6.29); ctx.fillStyle = '#1a0a14'; ctx.fill();
+      const g = ctx.createRadialGradient(x - R * 0.35, y - R * 0.4, R * 0.15, x, y, R);
+      g.addColorStop(0, '#ffffff'); g.addColorStop(0.65, '#f1ebe2'); g.addColorStop(1, '#c9bdb0');
+      ctx.beginPath(); ctx.arc(x, y, R, 0, 6.29); ctx.fillStyle = g; ctx.fill();
+      ctx.save(); ctx.beginPath(); ctx.arc(x, y, R - 0.2, 0, 6.29); ctx.clip();
+      for (const sd of [-1, 1]) {                          // each seam: an arc bowing in from one side
+        const cx = x + sd * R * 1.32, rr = R * 0.98, a0 = sd < 0 ? -0.42 * Math.PI : 0.58 * Math.PI, a1 = a0 + 0.84 * Math.PI;
+        ctx.beginPath(); ctx.arc(cx, y, rr, a0, a1); ctx.lineWidth = 0.5; ctx.strokeStyle = '#d4202c'; ctx.stroke();
+        ctx.lineWidth = 0.38; ctx.beginPath();
+        for (let k = 1; k <= 5; k++) {                     // the stitches: little ticks across the seam
+          const a = a0 + (a1 - a0) * k / 6, px = cx + Math.cos(a) * rr, py = y + Math.sin(a) * rr, tx = -Math.sin(a), ty = Math.cos(a), nx = Math.cos(a), ny = Math.sin(a);
+          ctx.moveTo(px - nx * 0.75 - tx * 0.3, py - ny * 0.75 - ty * 0.3); ctx.lineTo(px + nx * 0.75 + tx * 0.3, py + ny * 0.75 + ty * 0.3);
+        }
+        ctx.stroke();
+      }
+      ctx.restore();
       ctx.globalAlpha = 1; return;
     }
     ctx.beginPath(); ctx.arc(x, y, 3.7, 0, 6.29); ctx.fillStyle = kind === 'rh' ? '#ff5a8a' : '#9a6cff'; ctx.fill();
@@ -2284,12 +2341,19 @@
   function render() {
     device();
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, GW, GH);
-    drawScene();
-    drawLids();
-    drawRhythm();
-    drawOrbit();
-    drawBaseball();
-    drawHud();
+    if (PROF) {
+      for (const [k, f] of [['scene', drawScene], ['lids', drawLids], ['rhythm', drawRhythm], ['orbit', drawOrbit], ['baseball', drawBaseball], ['hud', drawHud]]) {
+        const t0 = performance.now(); f(); PROF[k] = (PROF[k] || 0) + performance.now() - t0;
+      }
+      PROF.n = (PROF.n || 0) + 1;
+    } else {
+      drawScene();
+      drawLids();
+      drawRhythm();
+      drawOrbit();
+      drawBaseball();
+      drawHud();
+    }
     // the place's name grows in for a moment when you arrive
     const u = (G.t - G.banner);
     document.getElementById('place').classList.toggle('big', u < 1.6);
@@ -2313,15 +2377,14 @@
   }
   function gameOver() {
     G.mode = 'over'; show('overBox', true);
-    if (busy()) { G.rh = null; G.orb = null; G.bb = null; SND.stopSong(0.3); SND.spin(null); }
+    if (busy()) { G.rh = null; G.orb = null; G.bb = null; SND.stopSong(0.3); SND.stopLoop(0.3); SND.spin(null); }
     SND.ambience(false); SND.play('over');
     document.getElementById('overMsg').textContent = `점수 ${G.score.toLocaleString('en-US')} · ${Math.floor(G.t / 60)}분 ${Math.floor(G.t % 60)}초 · ${COURSE[G.station][1]}까지`;
   }
   function startGame(c) {
     try { localStorage.setItem('bodyrun.char', c); } catch (e) { /* storage off */ }
     show('select', false); show('pauseBox', false); show('setBox', false); show('overBox', false); show('hudText', true);
-    if (!CAPTURE) { SND.unlock(); SND.stopSong(0.2); SND.spin(null); SND.play('ui'); SND.ambience(true); getReady(); }
-    decode(`bat_${c}.webp`).catch(() => {});                // its batter pictures (the baseball stage), in the background
+    if (!CAPTURE) { SND.unlock(); SND.stopSong(0.2); SND.stopLoop(0.2); SND.spin(null); SND.play('ui'); SND.ambience(true); getReady(); }
     newRun(c); G.station = -1; step(0); last = performance.now();
     try { if (!CAPTURE && document.documentElement.requestFullscreen && matchMedia('(pointer: coarse)').matches) document.documentElement.requestFullscreen().then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {})).catch(() => {}); } catch (e) { /* not allowed here */ }
   }
@@ -2341,7 +2404,7 @@
   }
   document.getElementById('bResume').onclick = resume;
   document.getElementById('bRestart').onclick = () => startGame(G.char);
-  document.getElementById('bChar').onclick = () => { G.mode = 'select'; G.rh = null; G.orb = null; G.bb = null; SND.unlock(); SND.stopSong(0.2); SND.spin(null); SND.ambience(false); show('pauseBox', false); show('overBox', false); show('hudText', false); show('select', true); };
+  document.getElementById('bChar').onclick = () => { G.mode = 'select'; G.rh = null; G.orb = null; G.bb = null; SND.unlock(); SND.stopSong(0.2); SND.stopLoop(0.2); SND.spin(null); SND.ambience(false); show('pauseBox', false); show('overBox', false); show('hudText', false); show('select', true); };
   document.getElementById('bSetBack').onclick = resume;
   document.getElementById('bSwap').onclick = () => { SET.swap = !SET.swap; try { localStorage.setItem('bodyrun.swap', SET.swap ? '1' : '0'); } catch (e) { /* storage off */ } setLabels(); render(); };
   document.getElementById('bSfx').onclick = () => { SND.setMute('sfx', !SND.muted('sfx')); setLabels(); };
@@ -2364,7 +2427,6 @@
     resize();
     const at = qs.has('at') ? COURSE.findIndex((s) => s[0] === qs.get('at')) : -1;
     try {
-      for (const f of (M.extra || [])) decode(f).catch(() => {});      // the HD booster fire: needed only after 100 items
       const first = [decode('common.webp')];
       for (let k = -1; k <= 2; k++) for (const f of themeFiles(COURSE[mod(Math.max(at, 0) + k, COURSE.length)][3])) first.push(decode(f));
       if (PRELOAD) for (const t of Object.keys(M.themes)) for (const f of themeFiles(t)) first.push(decode(f));
@@ -2390,11 +2452,14 @@
       station: COURSE[Math.max(0, G.station)][0], seg: G.station, theme: G.theme, lid: +lidAmount().toFixed(2), lastHit: G.lastHit, rot, lap: stationAt(G.x).lap, y: +G.y.toFixed(1), slide: G.slide, obs: G.obs.length, items: G.items.length,
       NW, RS: +RS.toFixed(3), GW, GH, rhSong: G.rh ? G.rh.song.id : null, orbSong: G.orb ? OB.song.id : null, rotation: { ...ROT }, o2n: G.o2n, boost: +G.boost.toFixed(2), boostHeld: +G.boostHeld.toFixed(2), boosts: G.boosts, decoded: Object.keys(bmp).length, atp: G.atp || 0, orbits: G.orbits || 0, orb: G.orb ? G.orb.st : null, bb: G.bb ? G.bb.st : null, games: G.games || 0, huge: G.obs.filter((o) => o.kind === 'huge').length });
     window.__G = G;
+    window.__mem = () => { let px = 0; const files = {}; for (const [f, b] of Object.entries(bmp)) { const n = b.width * b.height; px += n; files[f] = +(n * 4 / 1e6).toFixed(1); } return { MB: +(px * 4 / 1e6).toFixed(1), files }; };
+    window.__prof = PROF;
     window.__orb = () => { const o = G.orb; if (!o) return null; const t = otime();
       return { t: +t.toFixed(3), clock: o.a0 !== null ? 'sound' : 'game', k: o.k, N: OB.N, st: o.st, res: o.res, th: o.st === 'play' ? +(((obAngle(o.k, t, o.next) % 6.2832) + 6.2832) % 6.2832).toFixed(3) : null, off: +o.off.toFixed(3), next: +o.next.toFixed(3), cam: o.cam.map((v) => +v.toFixed(1)) }; };
     window.__orbPlan = (id) => { const pl = id ? orbPlan(STAGES.orb.find((s) => s.id === id)) : OB; return { id: pl.song.id, B: pl.B, ok: pl.ok, N: pl.N, P: pl.P, T: pl.T, hits: pl.hits, swirl: pl.swirl.map((v, i) => v ? i : -1).filter((i) => i >= 0), dir: pl.dir }; };
     window.__stages = STAGES;
     window.__marks = MINI_MARKS; window.__lap = LAP;
+    window.__goTo = (kind) => goToPlace(MINI_MARKS.find((m) => m.kind === kind).i);   // (as tapping its mark on the bar)
     window.__orbTap = orbTap;
     window.__boost = startBoost;
     window.__bb = () => { const b = G.bb; if (!b) return null;

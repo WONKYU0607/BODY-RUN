@@ -64,7 +64,17 @@
     ['rectum', '직장', 'Rectum', ['rectum', 1100]], ['anus', '항문', 'Anus', ['anus', 900]],
   ];
   const STAGE2 = PLACES.length;                     // the first place of stage 2
-  PLACES.push(['toiletBowl', '변기 물속', 'Toilet bowl', ['toilet', 1500]]);
+  PLACES.push(['toiletBowl', '변기 물속', 'Toilet bowl', ['toilet', 1500]],
+    // down the drains, the way the water really goes: out of the building, the sewers, the treatment works, the river
+    ['trap', 'S자 트랩', 'S-trap', ['trap', 1200]], ['soilStack', '오수 수직관', 'Soil stack', ['stack', 1200]],
+    ['drainPipe', '집 배수관', 'Drain pipe', ['drain', 1200]], ['septic', '정화조', 'Septic tank', ['septic', 1200]],
+    ['chamber', '오수받이', 'Inspection chamber', ['chamber', 1200]], ['sewerPipe', '하수관', 'Sewer pipe', ['sewer', 1200]],
+    ['manhole', '맨홀 아래', 'Manhole', ['manhole', 1200]], ['trunkSewer', '하수 간선', 'Trunk sewer', ['trunk', 1200]],
+    ['combined', '빗물 합류', 'Combined sewer', ['combined', 1200]], ['interceptor', '차집관로', 'Interceptor', ['interceptor', 1200]],
+    ['pumpStation', '중계펌프장', 'Pumping station', ['pump', 1200]], ['barScreen', '유입 스크린', 'Bar screen', ['screen', 1200]],
+    ['grit', '침사지', 'Grit chamber', ['grit', 1200]], ['clarifier1', '1차 침전지', 'Primary clarifier', ['clarifier1', 1200]],
+    ['aeration', '포기조', 'Aeration tank', ['aeration', 1200]], ['clarifier2', '2차 침전지', 'Secondary clarifier', ['clarifier2', 1200]],
+    ['uv', '소독조', 'UV disinfection', ['uv', 1200]], ['outfall', '방류구', 'Outfall', ['outfall', 1200]]);
   // the course as stretches of one look: id, Korean name, English name, look, length, place number
   const COURSE = [];
   PLACES.forEach((p, k) => { for (const [look, len] of p.slice(3)) COURSE.push([p[0], p[1], p[2], look, len, k]); });
@@ -255,9 +265,16 @@
   const VES_L = new Set(['artery', 'vein', 'ivc', 'atrium', 'ventricle', 'pulmart', 'pulmvein', 'latrium', 'lventricle', 'carotid', 'vertebral', 'renalart', 'efferent', 'sma']);
   const BRAIN_L = new Set(['arach', 'pyramidal', 'hippo', 'purkinje', 'fibres', 'temporal', 'parietal', 'occipital', 'medulla', 'opticnerve']);
   const EYE_L = new Set(['retina', 'vitreous', 'lens', 'iris', 'cornea']);
-  const S2_L = new Set(['toilet']);                // stage 2: a falling wad of paper, limescale, a cleaner tablet flying
+  // stage 2 (all under water): in the building a falling wad of paper, limescale, a cleaner tablet flying; in the sewers
+  // sludge, a broken rebar, a nut; at the treatment works a floc, a shard of grit, a pebble
+  const S2_HOUSE = new Set(['toilet', 'trap', 'stack', 'drain']);
+  const S2_SEWER = new Set(['septic', 'chamber', 'sewer', 'manhole', 'trunk', 'combined', 'interceptor', 'pump']);
+  const S2_WORKS = new Set(['screen', 'grit', 'clarifier1', 'aeration', 'clarifier2', 'uv', 'outfall']);
+  const S2_L = new Set([...S2_HOUSE, ...S2_SEWER, ...S2_WORKS]);
   function hzFam(look) {
-    if (S2_L.has(look)) return { drop: 'paper', spike: 'scale', door: null, shot: 'tablet' };
+    if (S2_HOUSE.has(look)) return { drop: 'paper', spike: 'scale', door: null, shot: 'tablet' };
+    if (S2_SEWER.has(look)) return { drop: 'sludge', spike: 'rebar', door: null, shot: 'nut' };
+    if (S2_WORKS.has(look)) return { drop: 'floc', spike: 'grit', door: null, shot: 'pebble' };
     if (GI_L.has(look)) return { drop: look === 'duodenum' ? 'bile' : 'mucus', spike: 'flesh', door: 'sph' };
     if (look === 'liver' || look === 'gallbladder') return { drop: 'bile', spike: 'flesh', door: 'sph' };
     if (VES_L.has(look)) return { drop: 'blood', spike: 'plaque', door: 'valve' };
@@ -400,8 +417,9 @@
   function spawnAhead() {
     const horizon = G.x + NW + 200;
     while (G.genX < horizon) {
-      { const lx = mod(G.genX, LAP), q0 = S2_X - CUT_FACE - Math.min(CUT_BRAKE, Math.max(90, curSpeed() * 0.55)) - CUT_CLEAR;   // the cut scene's stretch
-        if (lx > q0 && lx < S2_X + CUT_AFTER) { G.genX += S2_X + CUT_AFTER - lx; continue; } }
+      { const lx = mod(G.genX, LAP), q0 = S2_X - CUT_FACE - Math.max(90, curSpeed() * CUT_TJ * 1.2) - CUT_CLEAR;   // the cut scene's stretch
+        const q1 = S2_X + Math.max(CUT_AFTER, G.v * 1.5);            // (and after it, time to swim up from the bottom)
+        if (lx > q0 && lx < q1) { G.genX += q1 - lx; continue; } }
       const theme = themeAt(G.genX), th = M.themes[theme], fam = hzFam(theme);
       const coin = th.coin, special = th.special;
       // how hard: from the speed (0 at the start .. 1 at 460/s, about 5 minutes in), then a little more up to 900
@@ -412,7 +430,7 @@
       if (S2_L.has(theme)) {                                   // stage 2: under water
         const used = spawnSwim(G.genX, theme, fam, coin, special, v, d, d2, R);
         if (G.genX > G.nextHeal) { addItem(G.genX + used / 2, 50 + R() * 70, 'heal'); G.nextHeal = G.genX + 2200 + R() * 1200; }
-        G.genX += Math.max(used, 60) + v * gapT * (0.85 + 0.3 * R());
+        G.genX += Math.max(used, 60) + v * Math.max(gapT, 0.9) * (0.85 + 0.3 * R());     // (swimming up or down takes longer than a jump)
         continue;
       }
       // weights for the next pattern
@@ -1357,14 +1375,16 @@
     G.banner = G.t;
   }
   // ---------------------------------------------------------------- the end of the body (stage 1 to 2): the end of the
-  // anus is packed full of stool, floor to roof; the runner brakes and goes head first into it, stuck; the whole lot is
-  // pushed out (to the right) and straight into the toilet: under its water the runner comes in from the top left with a
-  // lump of it (plop), sinks to the bottom, the lumps drift off and stage 2 begins. Times (s) from the moment it stops
+  // anus is packed full of stool, floor to roof; the runner, at full speed, jumps and goes smack into its middle, stuck
+  // (v37: no braking); the whole lot is pushed out (to the right) and straight into the toilet: under its water the
+  // runner comes in from the top left with a lump of it (plop), sinks to the bottom, the lumps drift off and stage 2
+  // begins. Times (s) from the moment it sticks
   const CUT_FACE = 200;                              // the packed stool's face: this far before the end of the anus
   const CUT_PAD = 44;                                // (its picture starts this far left of the face: the front logs' ends at the floor)
   const CUT_IN = 3;                                  // how far past the face the runner's middle goes in (about half of it in)
-  const CUT_CLEAR = 150, CUT_AFTER = 300;           // nothing set out from the braking's start (less this) to this far into stage 2
-  const CUT_BRAKE = 560;                             // the braking is at most this long (at a booster's speed, short and hard)
+  const CUT_CLEAR = 150, CUT_AFTER = 300;           // nothing set out from the jump's start (less this) to this far into stage 2
+  const CUT_TJ = JUMP / GRAV;                        // the jump into it: a single jump's way up (0.36 s), at whatever speed
+  const CUT_Y = JUMP * JUMP / (2 * GRAV);            // ... its top (59): the runner's middle at the wall's middle
   const CUT_PUSH = [0.3, 0.95], CUT_SWAP = 0.9, CUT_DIVE = [0.95, 1.0], CUT_HIT = 0.08, CUT_END = 2.0;
   // the big chunk that comes into the toilet with the runner, stuck on its back (x, up: in the runner's size; turn)
   const CUT_STUCK = [['cut_chunk', -0.75, 0.5, 0.12]];
@@ -1372,14 +1392,18 @@
   const cutFaceX = () => (G.cut ? G.cut.faceX : Math.floor(G.x / LAP) * LAP + S2_X - CUT_FACE);
   function cutCheck() {
     const s = stationAt(G.x), stopLx = S2_X - CUT_FACE + CUT_IN, sp = curSpeed();
-    if (stopLx - s.lx <= Math.min(CUT_BRAKE, Math.max(90, sp * 0.55))) startCut(s.lap * LAP + stopLx, sp);
+    if (stopLx - s.lx <= Math.max(4, sp * CUT_TJ)) startCut(s.lap * LAP + stopLx, sp);
   }
   function startCut(stopX, sp) {
     holdBoost();
     const faceX = stopX - CUT_IN;
     stopX = Math.max(stopX, G.x);
-    const v0 = Math.max(sp, 60), d = stopX - G.x;
-    G.cut = { t0: G.t, x0: G.x, stopX, faceX, td: d > 0.5 ? 2 * d / v0 : 0, ts: 0, lap: Math.floor(faceX / LAP), swap: 0, splash: 0, landed: 0 };
+    const v0 = Math.max(sp, 60), d = stopX - G.x, th = d / v0;
+    // the way there: on at the same speed, up and (wherever it is now, on the floor or in the air) into the middle
+    const y0 = Math.max(0, G.y), vy = th > 0.02 ? (CUT_Y - y0 + 0.5 * GRAV * th * th) / th : 0;
+    G.cut = { t0: G.t, x0: G.x, y0, vy, v0, th, stopX, faceX, ts: 0, lap: Math.floor(faceX / LAP), swap: 0, splash: 0, landed: 0 };
+    if (G.onGround) SND.play('jump1');
+    G.onGround = false; G.slide = false; G.jumps = 1; G.pitObj = null;
     G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
     G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
     G.slideHeld = false; held.clear(); pressed.jump = false;
@@ -1387,16 +1411,18 @@
   function stepCut() {
     const c = G.cut;
     pressed.jump = false; G.slideHeld = false;
-    if (!c.ts) {                                              // braking, evenly, to a stop in the stool
-      const k = c.td > 0 ? Math.min(1, (G.t - c.t0) / c.td) : 1;
-      G.x = c.x0 + (c.stopX - c.x0) * (1 - (1 - k) * (1 - k));
-      if (k >= 1) c.ts = G.t;
+    if (!c.ts) {                                              // the jump, at full speed, to the stool's middle
+      const t = G.t - c.t0;
+      if (t >= c.th) { G.x = c.stopX; G.y = CUT_Y; G.vy = 0; c.ts = G.t; SND.play('splat'); }   // smack: stuck in it
+      else { G.x = c.x0 + c.v0 * t; G.y = c.y0 + c.vy * t - 0.5 * GRAV * t * t; G.vy = c.vy - GRAV * t; }
+      G.onGround = false;
       return;
     }
     const u = G.t - c.ts;
+    if (!c.swap) { G.y = CUT_Y; G.vy = 0; G.onGround = false; }       // held there while it is all pushed out
     if (!c.swap && u >= CUT_SWAP) {                           // out of the screen: on to the start of stage 2
       c.swap = G.t;
-      G.x = c.lap * LAP + S2_X + 1;
+      G.x = c.lap * LAP + S2_X + 1; G.y = 0; G.vy = 0; G.onGround = true; G.jumps = 0;
       G.obs = []; G.items = []; G.genX = G.x + NW * 0.8;
     }
     if (c.swap && !c.banner) { c.banner = true; G.banner = G.t; }
@@ -1411,7 +1437,7 @@
   }
   function cutDone() {                                        // stage 2 goes on (the lumps drift off a moment longer)
     const c = G.cut; if (!c) return;
-    if (!c.swap) { G.x = c.lap * LAP + S2_X + 1; G.obs = []; G.items = []; G.genX = G.x + NW * 0.8; }
+    if (!c.swap) { G.x = c.lap * LAP + S2_X + 1; G.y = 0; G.vy = 0; G.onGround = true; G.obs = []; G.items = []; G.genX = G.x + NW * 0.8; }
     G.cut = null; G.cutTail = { landed: c.landed || G.t, splash: c.splash, bub: c.bub || [], drops: c.drops || [] };
     if (G.theme !== COURSE[S2_I][3]) G.station = -1;
     G.slow = 0; resumeBoost();
@@ -1816,11 +1842,10 @@
       label('왼쪽을 끌어 노란 고리를 공이 올 자리(흰 고리)에', NWf / 2, 80, 7.5, 'center', a, '#ffffff');
       label('흰 고리가 공만큼 줄어들 때 오른쪽 터치', NWf / 2, 91, 7.5, 'center', a, '#ffffff');
     }
-    if (b.msg && b.st !== 'done') {
-      const v = G.t - b.msg.t, big = b.msg.res === 'hr', a = Math.min(1, v / 0.12) * Math.max(0, Math.min(1, ((big ? 2.2 : 1.3) - v) / 0.3));
-      label(b.msg.s, NWf / 2, big ? 54 : 60, big ? 26 + 8 * Math.max(0, 1 - v * 4) : 15, 'center', a, big ? '#ffe68a' : '#ffffff');
-      if (big) label(`+${BB_PTS.hr.toLocaleString('en-US')}점`, NWf / 2, 75, 9, 'center', a, '#ffe68a');
-      if (b.msg.res === 'whiff') label(b.p.type.name, NWf / 2, 76, 9, 'center', a, '#ffe0a8');      // what got past you
+    if (b.msg && b.st !== 'done') {                       // the result: small, just over the zone (under the pitcher), briefly
+      const v = G.t - b.msg.t, big = b.msg.res === 'hr', a = Math.min(1, v / 0.08) * Math.max(0, Math.min(1, ((big ? 1.3 : 0.95) - v) / 0.25));
+      const s = big ? `${b.msg.s} +${BB_PTS.hr.toLocaleString('en-US')}점` : b.msg.res === 'whiff' ? `${b.msg.s} · ${b.p.type.name}` : b.msg.s;   // (a miss: what got past you)
+      label(s, zx, zy - BB_ZH / 2 - 5, 7, 'center', a, big ? '#ffe68a' : '#ffffff');
     }
     if (b.st === 'done') {
       const v = G.t - b.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (BB_END - v) / 0.35));
@@ -1885,7 +1910,7 @@
       const o = addObs(x + 40, 'float', theme, pat === 'float' ? null : pat); if (o) {
         const yTop = 30 + R() * (GY - 30 - o.h - 6);              // anywhere in the water
         o.y = yTop;
-        if (pat === 'bob') { const amp = 40 + R() * 40; o.bob = { y0: Math.max(28, Math.min(GY - o.h - amp, yTop)), amp, w: 2 * Math.PI / (2 + R() * 0.8), ph: R() * 6.28 }; o.y = o.bob.y0; }
+        if (pat === 'bob') { const amp = Math.max(20, Math.min(40 + R() * 40, GY - 28 - o.h - PH - 30)); o.bob = { y0: yTop < (28 + GY - o.h - amp) / 2 ? 28 : GY - o.h - amp, amp, w: 2 * Math.PI / (2 + R() * 0.8), ph: R() * 6.28 }; o.y = o.bob.y0; }
         if (pat === 'swim') o.vx = 50 + 45 * d;
         const above = yTop > 80;                                   // coins on the open side
         coinsAt(o.x - 10, 4, above ? yTop - 22 : yTop + o.h + 18, 15);
@@ -1965,6 +1990,7 @@
     G.nudge = Math.max(0, G.nudge - dt * 30);
     moveObs(dt);
     if (inWater()) stepSwim(dt);
+    else if (G.cut) { pressed.jump = false; G.slide = false; }     // (the cut scene moves the runner itself)
     else {
     // jump / double jump / slide
     if (pressed.jump) {

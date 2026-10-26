@@ -130,6 +130,11 @@ window.BodySound = (() => {
       const w = water(c, o, 1600);
       [[0.16, 640], [0.24, 820], [0.31, 560], [0.4, 980], [0.5, 700], [0.62, 880]].forEach(([d, f]) => bubble(c, w, t + d, f, 0.1));
     },
+    splat: (c, o, t) => {                                                 // smack into the stool: a soft, wet thud
+      tone(c, o, t, 'sine', 150, 48, 0.2, 0.6, 0.002, 0.17);
+      burst(c, o, t, 'lowpass', 900, 260, 0.9, 0.14, 0.5, 0.002);
+      burst(c, o, t + 0.012, 'bandpass', 700, 380, 2.2, 0.12, 0.22, 0.004);
+    },
     bbOut: (c, o, t) => { [67, 63, 60].forEach((n, i) => tone(c, o, t + i * 0.16, 'triangle', NOTE(n), null, 0.24, 0.18, 0.01)); },
   };
 

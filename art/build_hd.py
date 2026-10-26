@@ -18,7 +18,11 @@ THEMES = ['eso', 'stomach', 'gut', 'colon', 'artery', 'vein', 'atrium', 'ventric
           'retina', 'vitreous', 'lens', 'iris', 'cornea',
           'renalart', 'carotid', 'vertebral', 'sma', 'efferent', 'pulmvein', 'ivc', 'pulmart', 'latrium', 'lventricle', 'bronchiole',
           'temporal', 'parietal', 'occipital', 'medulla', 'opticnerve', 'duodenum', 'ileum', 'cecum', 'rectum', 'anus',
-          'toilet']                                                   # stage 2
+          'toilet',                                                   # stage 2: the toilet, then down the drains (drains.py,
+          'trap', 'stack', 'drain', 'septic',                         #  sewer.py, plant.py)
+          'chamber', 'sewer', 'manhole', 'trunk', 'combined', 'interceptor', 'pump',
+          'screen', 'grit', 'clarifier1', 'aeration', 'clarifier2', 'uv', 'outfall']
+S2_MODULES = ['drains', 'sewer', 'plant']
 TALL_K = 1.10            # tall obstacles drawn this much taller than designed: the jump is 10% higher (v17)
 CHARS = ['tardigrade', 'lacto', 'paramecium', 'amoeba', 'daphnia', 'pillbug', 'ladybug', 'jelly', 'sub', 'phage']
 CHAR_PX = 8.0            # source px per unit: the sheet's characters at 0.8 of their first size
@@ -31,7 +35,11 @@ BG = {'eso': '#40101c', 'stomach': '#3a0a1c', 'gut': '#3a0c1a', 'colon': '#3a161
       'renalart': '#42120c', 'carotid': '#4e0e2a', 'vertebral': '#3c0a1a', 'sma': '#3e1014', 'efferent': '#52201e', 'pulmvein': '#520a0c',
       'ivc': '#1c0e2c', 'pulmart': '#2e0e2c', 'latrium': '#420816', 'lventricle': '#4c0a16', 'bronchiole': '#341824', 'temporal': '#10282a',
       'parietal': '#201c2a', 'occipital': '#24162c', 'medulla': '#1c1228', 'opticnerve': '#101628', 'duodenum': '#3a1216', 'ileum': '#3e0e20',
-      'cecum': '#401a12', 'rectum': '#341010', 'anus': '#3a1618', 'toilet': '#6fa6ac'}
+      'cecum': '#401a12', 'rectum': '#341010', 'anus': '#3a1618', 'toilet': '#6fa6ac',
+      'trap': '#4e7e80', 'stack': '#7a9ca2', 'drain': '#6a847c', 'septic': '#3a4428', 'chamber': '#5c7064', 'sewer': '#4c5c54',
+      'manhole': '#5a7672', 'trunk': '#463a30', 'combined': '#665e46', 'interceptor': '#3e4c54', 'pump': '#40565e',
+      'screen': '#5a5c4a', 'grit': '#6a6650', 'clarifier1': '#56543e', 'aeration': '#66502e', 'clarifier2': '#5a8a84',
+      'uv': '#3a6a96', 'outfall': '#4e8a6a'}
 
 
 def chunks(arr):
@@ -106,7 +114,14 @@ def floor_colours(floor_arr):
 
 def build_theme(name, manifest):
     t0 = time.time()
-    th = getattr(T, 'T_' + name)()
+    fn = getattr(T, 'T_' + name, None)
+    if fn is None:                                              # stage 2's places
+        import importlib
+        for mod in S2_MODULES:
+            fn = getattr(importlib.import_module(mod), 'T_' + name, None)
+            if fn:
+                break
+    th = fn()
     entry = {'coin': th['coin'], 'special': th['special'], 'obs': {}, 'bg': BG.get(name, '#2a0c14')}
     entry['fc'], entry['fk'] = floor_colours(th['floor'])
     far = chunks(th['far']); far[..., 3] = 255
@@ -169,6 +184,8 @@ def build_common(manifest):
     hz = HZ.all_sprites()
     import toilet as TT
     hz.update(TT.stage2_sprites())                          # stage 2's coin, special and hazards (it_*, hz_*)
+    import sewer as SWR, plant as PLT
+    hz.update(SWR.hazards()); hz.update(PLT.hazards())      # (the sewers': sludge, rebar, a nut; the works': floc, grit, a pebble)
     allspr = dict(spr); allspr.update(chars); allspr.update(hz)
     rects, total = pack(allspr, 1600)
     atlas = np.zeros((total, 1600, 4), np.float32)

@@ -35,7 +35,8 @@ const dense = (P, step = 2) => { const o = [P[0]]; for (let i = 1; i < P.length;
 function rhythmChart(song) {
   const g = song.game, beat = 60 / song.bpm, fast = song.bpm >= 150;
   const spin = g.build ? { s: g.build[1] - 16, e: g.build[1] - 2 } : null;
-  const cand = onsets(song, g.first, g.last).filter((n) => !(spin && n.step >= spin.s - 2 && n.step < g.build[1]));
+  const SPIN_GAP = Math.ceil(1.1 / (beat / 4));                      // after the spinner, 1.1 s before the next note (the hand comes off it)
+  const cand = onsets(song, g.first, g.last).filter((n) => !(spin && n.step >= spin.s - 2 && n.step < spin.e + SPIN_GAP));
   // pick the notes: no 16ths, eighths only as a pair (a triple when slower), a slider where a note is held 1.5 beats+
   const kept = []; let run = 0;
   for (let i = 0; i < cand.length; i++) {
@@ -55,11 +56,31 @@ function rhythmChart(song) {
   for (let i = 0; i + 1 < kept.length; i++) {
     const a = kept[i], b = kept[i + 1], end = a.kind === 's' ? a.e : a.s;
     if (b.s - end <= 12) continue;
-    const add = [...accents].filter((s) => s >= end + 4 && s <= b.s - 4 && !(spin && s >= spin.s - 2 && s <= spin.e + 2)).sort((x, y) => x - y);
+    const add = [...accents].filter((s) => s >= end + 4 && s <= b.s - 4 && !(spin && s >= spin.s - 2 && s < spin.e + SPIN_GAP)).sort((x, y) => x - y);
     let last = end; const ins = [];
     for (const s of add) if (s - last >= 4) { ins.push({ kind: 'c', s, n: a.n, drum: true }); last = s; }
     if (ins.length) { kept.splice(i + 1, 0, ...ins); i += ins.length; }
   }
+  // a balloon to burst (tap, tap, tap, anywhere) on the longest held note before the spinner, and two balls to follow
+  // at once, one each side (both hands) on the longest after it; nothing else up on the screen with either
+  const stepsOf = (sec) => Math.ceil(sec / (beat / 4));
+  const pick = (from, to, minLen) => kept.filter((k) => k.kind === 's' && k.s >= from && k.e <= to && k.e - k.s >= minLen).sort((a, b) => (b.e - b.s) - (a.e - a.s))[0];
+  const clearRound = (k, pre, post) => {
+    for (let i = kept.length - 1; i >= 0; i--) {
+      const q = kept[i]; if (q === k) continue;
+      const qe = q.kind === 's' ? q.e : q.s;
+      if ((qe >= k.s - stepsOf(pre) && q.s < k.s) || (q.s >= k.s && q.s <= k.e + stepsOf(post))) kept.splice(i, 1);
+    }
+  };
+  const midS = spin ? spin.s - 2 : (g.first + g.last) / 2, midE = spin ? spin.e + SPIN_GAP : midS;
+  {                                                                 // the balloon: a whole bar (less half a beat), half way to the spinner
+    const rs = Math.round((spin ? (g.first + spin.s) / 2 : g.first + (g.last - g.first) / 4) / 16) * 16;
+    const roll = { kind: 'r', s: rs, e: rs + 14, n: 60 };
+    roll.need = Math.max(6, Math.round((roll.e - roll.s) / 4 * beat * 6));      // six taps a second
+    kept.push(roll); kept.sort((a, b) => a.s - b.s); clearRound(roll, 0.65, 1.25);
+  }
+  const dual = pick(midE, g.last - 16, 4);
+  if (dual) { dual.kind = 'd'; dual.e = Math.max(dual.e, dual.s + 12); clearRound(dual, 1.25, 1.2); }     // (three beats at least)
   if (spin) {
     const at = kept.findIndex((k) => k.s > spin.s);
     kept.splice(at < 0 ? kept.length : at, 0, { kind: 'p', s: spin.s, e: spin.e, turns: Math.max(2, Math.round((spin.e - spin.s) / 4 * beat * 1.25)) });
@@ -68,7 +89,7 @@ function rhythmChart(song) {
   let grp = -1, inG = 0, lastBar = -99, prevEnd = -99;
   for (const k of kept) {
     const bar = Math.floor(k.s / 16);
-    if (k.kind === 'p') { grp++; inG = 0; k.g = grp; prevEnd = k.e; lastBar = bar; continue; }
+    if (k.kind === 'p' || k.kind === 'r' || k.kind === 'd') { grp++; inG = 0; k.g = grp; prevEnd = k.e; lastBar = bar - 2; continue; }
     const pause = k.s - prevEnd >= 8;
     if (grp < 0 || pause || inG >= 8 || (bar - lastBar >= 2 && inG >= 3) || kept[kept.indexOf(k) - 1]?.kind === 'p') { grp++; inG = 0; lastBar = bar; }
     k.g = grp; inG++; prevEnd = k.kind === 's' ? k.e : k.s;
@@ -82,11 +103,13 @@ function rhythmChart(song) {
   const placed = [];
   // centre to centre (units, at the narrowest screen): an eighth pair just touching, then further for longer gaps
   const spacing = (gb) => (gb <= 0.5 ? 29 : gb <= 0.75 ? 31 : gb <= 1 ? 37 : gb <= 1.5 ? 44 : 52) / (NWmin - 104);
+  // when a placed thing is on the screen: a circle or a ball from AR + 0.15 before its time (the balloon from 0.4 before),
+  // to a little after its time or its end
+  const visFrom = (q) => tOf(q.s) - (q.kind === 'r' ? 0.4 : AR + 0.15), visTo = (q) => (q.kind === 'c' ? tOf(q.s) : tOf(q.e)) + RH_TAIL;
   const clash = (x, y, t0) => {                                       // the nearest thing up at the same time
     let m = 1e9;
     for (const q of placed) {
-      const qEnd = q.kind === 's' ? tOf(q.e) : tOf(q.s);
-      if (qEnd + RH_TAIL < t0 - AR - 0.15) continue;
+      if (visTo(q) < t0 - AR - 0.15) continue;
       for (const [qx, qy] of q.pts) m = Math.min(m, Math.hypot(qx - x, qy - y));
     }
     return m;
@@ -104,6 +127,17 @@ function rhythmChart(song) {
   let prevK = null;
   for (const k of kept) {
     if (k.kind === 'p') { placed.push({ kind: 'p', s: k.s, e: k.e, pts: [] }); u = 0.5; prevK = null; continue; }
+    if (k.kind === 'r') {                                           // the balloon: in the middle, up to 30 across
+      const pts = [[X(0.5), Y(0.5)]]; for (let a = 0; a < 24; a++) for (const rr of [15, 30]) pts.push([X(0.5) + Math.cos(a / 24 * 6.283) * rr, Y(0.5) + Math.sin(a / 24 * 6.283) * rr]);
+      placed.push({ kind: 'r', s: k.s, e: k.e, pts }); u = 0.5; prevK = null; continue;
+    }
+    if (k.kind === 'd') {                                           // the two balls: each from its side in towards the middle
+      const v = Math.max(0.2, Math.min(0.8, vOf(k.n))), v2 = v < 0.5 ? v + 0.26 : v - 0.26, side = v < 0.5 ? -1 : 1;
+      k.ctrlL = [[0.1, v], [0.23, Math.max(0.06, Math.min(0.94, (v + v2) / 2 + side * 0.15))], [0.36, v2]].map(([a, b]) => [+a.toFixed(3), +b.toFixed(3)]);
+      k.ctrlR = k.ctrlL.map(([a, b]) => [+(1 - a).toFixed(3), b]);
+      for (const c of [k.ctrlL, k.ctrlR]) placed.push({ kind: 's', s: k.s, e: k.e, pts: dense(catmull(c.map(([a, b]) => [X(a), Y(b)]), 14)) });
+      u = 0.5; prevK = null; continue;
+    }
     if (k.g !== curG) { if (curG >= 0) d = -d; curG = k.g; }
     const gb = prevK ? (k.s - (prevK.kind === 's' ? prevK.e : prevK.s)) / 4 : 1;
     let best = null;
@@ -142,13 +176,14 @@ function rhythmChart(song) {
   let worst = 1e9;
   for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
     const A = placed[i], Bq = placed[j]; if (!A.pts.length || !Bq.pts.length) continue;
-    const aEnd = A.kind === 's' ? tOf(A.e) : tOf(A.s); if (aEnd + RH_TAIL < tOf(Bq.s) - AR - 0.15) continue;
-    for (const [x1, y1] of A.pts) for (const [x2, y2] of Bq.pts) worst = Math.min(worst, Math.hypot(x1 - x2, y1 - y2));
+    if (visTo(A) < visFrom(Bq) || visTo(Bq) < visFrom(A)) continue;
+    for (const [x1, y1] of A.pts) for (const [x2, y2] of Bq.pts) { const dd = Math.hypot(x1 - x2, y1 - y2); if (dd < worst) worst = dd; if (dd < 2 * RH_R && process.env.DEBUG) console.log('  touch', song.en, A.kind, A.s, Bq.kind, Bq.s, dd.toFixed(1)); }
   }
   // the map: [beat, group, kind, ...] as the game reads it
   const B = (s) => +(s / 4).toFixed(4);
-  const map = kept.map((k) => (k.kind === 'c' ? [B(k.s), k.g, 'c', +k.u.toFixed(3), +k.v.toFixed(3)]
-    : k.kind === 's' ? [B(k.s), k.g, 's', B(k.e), k.ctrl] : [B(k.s), k.g, 'p', B(k.e), k.turns]));
+  const map = kept.flatMap((k) => (k.kind === 'c' ? [[B(k.s), k.g, 'c', +k.u.toFixed(3), +k.v.toFixed(3)]]
+    : k.kind === 's' ? [[B(k.s), k.g, 's', B(k.e), k.ctrl]] : k.kind === 'p' ? [[B(k.s), k.g, 'p', B(k.e), k.turns]]
+      : k.kind === 'r' ? [[B(k.s), k.g, 'r', B(k.e), k.need]] : [[B(k.s), k.g, 's', B(k.e), k.ctrlL], [B(k.s), k.g, 's', B(k.e), k.ctrlR]]));
   // the closest two circles up at once (beyond an eighth pair), as a check
   return { map, end: B(g.last) + 1, first: B(g.first), worst: +worst.toFixed(1), notes: map.length, sliders: map.filter((m) => m[2] === 's').length, drumNotes: kept.filter((k) => k.drum).length,
     secs: +(tOf(g.last) - tOf(g.first)).toFixed(1) };

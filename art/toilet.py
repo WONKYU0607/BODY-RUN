@@ -610,35 +610,58 @@ def bowl_water():
 
 
 def cut_sprites():
-    lumps = {f'cut_lump{i}': poop_log(L, T, 50 + i, a, b) for i, (L, T, a, b) in enumerate([(30, 12, 0.15, 2), (24, 11, -0.3, -1.5), (34, 13, 0.0, 2.5), (20, 10, 0.5, 1)])}
-    return dict(cut_wall=poop_wall(), **lumps)           # (v2: the anus packed full; the bowl in section is not used)
+    # (v3: the anus packed full of a few huge logs; one big chunk comes into the toilet with the runner)
+    return dict(cut_wall=poop_wall(), cut_chunk=big_log(58, 26, 77, 0.0, 3.0))
 
 
-def poop_wall(seed=61, w=350, h=142):
-    """the end of the anus packed full of stool, from the floor to the roof: logs crammed in every which way, the nearer
-    ones lit, the ones behind in shadow, no gap between; lumpy at its face (the left, where the runner goes in) and
-    along its top"""
+def big_log(L, T, seed, ang=0.0, bend=4.0, shade=1.0):
+    """a big log of stool (poop_log's look, its bumps, creases, fibre bits and shine grown with its size)"""
     R = RS(seed)
+    k = T / 11.0
+    pad = 2 + 0.25 * T                                     # (its knobs reach past T / 2)
+    ca, sa = np.cos(ang), np.sin(ang)
+    W_ = abs(L * ca) + abs(T * sa) + 2 * pad + 2 * bend; H_ = abs(L * sa) + abs(T * ca) + 2 * pad + 2 * bend
+    y, x = grid(H_, W_)
+    u = (x - W_ / 2) * ca + (y - H_ / 2) * sa
+    v = -(x - W_ / 2) * sa + (y - H_ / 2) * ca
+    v = v - bend * (1 - (2 * u / L) ** 2)
+    half = T / 2 * (1 + 0.13 * np.sin(u * 0.5 / k + R.uniform(0, 6)) + 0.07 * np.sin(u * 1.3 / k + R.uniform(0, 6))
+                    + 0.04 * np.sin(u * 3.1 / k + R.uniform(0, 6))) * (1 - 0.16 * (2 * u / L) ** 2)     # knobby, thinner to its ends
+    endw = np.where(np.abs(u) > L / 2 - T / 2, np.sqrt(np.clip(1 - ((np.abs(u) - (L / 2 - T / 2)) / (T / 2)) ** 2, 0, 1)), 1.0)
+    m = (np.abs(v) <= half * endw) & (np.abs(u) <= L / 2)
+    spr = A.mask_sprite(m, ramp('#2a1404', '#4c2a0e', '#704418', '#925e28', '#b47e40'), '#140a02', soft=1.4 * k, hl=shade > 0.9, hl_t=0.993)
+    I = inner(spr)
+    cr = np.clip(1 - np.abs(np.mod(u + 1.5 * k * np.sin(v * 0.6 / k), 5.5 * k) - 2.75 * k) / (0.35 * k), 0, 1) * m * (np.abs(v) < half * 0.85)
+    I[..., :3] *= (1 - 0.2 * cr[..., None])
+    I[..., :3] *= shade
+    A.grain(spr, seed, 0.09, 0.6 * k)
+    for j in range(int(L * T / 260)):
+        gx, gy = R.uniform(2, W_ - 2), R.uniform(2, H_ - 2)
+        if A.on(spr, gx, gy):
+            ellipse_soft(spr, gx + 1, gy + 1, 1.2 * k ** 0.5, 0.38 * k ** 0.5, '#c8a050', 200, R.uniform(-0.6, 0.6) + ang)
+    return spr
+
+
+def poop_wall(seed=61, w=350, h=146):
+    """the end of the anus packed full of stool, from the floor to the roof: a few huge logs jammed in, in three rows,
+    the ones behind darker, the dark of the mass between them; its face (the left, where the runner goes in) the round
+    ends of the front ones"""
     out = canvas(w, h)
-    y, x = grid(h, w)
-    face = 20 + 3 * np.sin(y * 0.08 + 1) + 2 * np.sin(y * 0.21 + 2)        # (room on the left and the top for the
-    m = (x >= face) & (y >= 12)                                                 #  lumps to stick out unclipped)
-    base = np.zeros(m.shape + (4,), np.float32)                # the dark mass behind (fills every gap)
-    base[..., :3] = hexc('#1c0d05'); base[..., 3] = ndimage.gaussian_filter(m.astype(np.float32), 1.0) * 255
-    out[:base.shape[0], :base.shape[1]] = base
-    logs = []
-    sp = 9.0
-    for gy in np.arange(13, h + 4, sp * 0.8):
-        for gx in np.arange(22, w + 6, sp * 1.6):
-            xx, yy = gx + R.uniform(-6, 6), gy + R.uniform(-5, 4)
-            d = R.uniform(0, 1)                                # how near (1: the front)
-            if xx < 44 or yy < 26: d = 0.55 + 0.45 * d         # the face and the top: all near
-            logs.append((d, xx, yy, R.uniform(16, 30), R.uniform(9, 13), R.uniform(-1.5, 1.5), R.uniform(-2.5, 2.5)))
-    logs.sort(key=lambda t: t[0])
-    for k, (d, xx, yy, L, T, a, bnd) in enumerate(logs):
-        f = poop_log(L, T, seed + 1000 + k, a, bnd)
-        fi = inner(f); fi[..., :3] *= 0.42 + 0.58 * d
-        paste(out, f, xx - f.shape[1] / SC / 2 + 1, yy - f.shape[0] / SC / 2 + 1)
+    # (centre x, centre y, length, thickness, angle, bend, shade): behind first, the face's last
+    logs = [(300, 36, 210, 54, 0.06, -6, 0.62), (310, 80, 210, 56, -0.08, 7, 0.6), (300, 120, 210, 52, 0.04, -5, 0.62),
+            (232, 56, 130, 50, 0.42, 7, 0.74), (238, 104, 130, 50, -0.38, -7, 0.74),
+            (122, 35, 175, 52, -0.07, 6, 0.95), (140, 78, 195, 56, 0.06, -7, 1.0), (124, 120, 165, 50, -0.04, 6, 0.97)]
+    tmp = canvas(w, h)
+    for i, (cx, cy, L, T, a, bnd, sh) in enumerate(logs):
+        f = big_log(L, T, seed + 10 * i, a, bnd, sh)
+        paste(tmp, f, cx - f.shape[1] / SC / 2, cy - f.shape[0] / SC / 2)
+    # the dark of the mass in between (where the logs close round, not outside them)
+    al = tmp[..., 3] > 128
+    closed = ndimage.binary_fill_holes(ndimage.binary_closing(al, iterations=px(10)))
+    base = np.zeros_like(out); base[..., :3] = hexc('#1c0d05'); base[..., 3] = ndimage.gaussian_filter(closed.astype(np.float32), 1.0) * 255
+    out[:] = base
+    over(out, tmp[..., :3], tmp[..., 3] / 255.0)
+    out[..., 3] = np.maximum(out[..., 3], tmp[..., 3])
     out[px(h + 1):, :, 3] = 0                                   # nothing below the floor
     return out
 

@@ -409,6 +409,12 @@
       const d = Math.min(1, Math.max(0, (v - V0) / 300)), d2 = Math.min(1, Math.max(0, (v - 460) / 440));
       const gapT = 1.45 - 0.65 * d - 0.15 * d2;          // seconds between patterns
       const R = G.R;
+      if (S2_L.has(theme)) {                                   // stage 2: under water
+        const used = spawnSwim(G.genX, theme, fam, coin, special, v, d, d2, R);
+        if (G.genX > G.nextHeal) { addItem(G.genX + used / 2, 50 + R() * 70, 'heal'); G.nextHeal = G.genX + 2200 + R() * 1200; }
+        G.genX += Math.max(used, 60) + v * gapT * (0.85 + 0.3 * R());
+        continue;
+      }
       // weights for the next pattern
       const W = [['rest', 0.14 - 0.08 * d], ['low', 0.28], ['float', 0.15], ['hang', 0.08 + 0.06 * d], ['tall', 0.08 + 0.08 * d], ['lowlow', 0.04 + 0.08 * d], ['lowfloat', 0.02 + 0.06 * d],
         // a triple jump starts ~0.6 s before the tower: above ~480/s that is off the screen, so no towers then
@@ -599,7 +605,7 @@
   }
   function doJump() { if (G.mode === 'play' && !busy()) pressed.jump = true; }
   function setSlide() { G.slideHeld = [...held.values()].includes('slide') || keySlide; }
-  let keySlide = false;
+  let keySlide = false, keyJump = false;
   cv.addEventListener('pointerdown', (e) => {
     SND.unlock();
     if (G.mode !== 'play') return;
@@ -627,11 +633,11 @@
       if (['Space', 'Enter', 'KeyJ', 'KeyF'].includes(e.code)) { bbSwing(); e.preventDefault(); return; }
     }
     if (G.orb && G.mode === 'play' && ['Space', 'ArrowUp', 'ArrowDown', 'KeyW', 'KeyS', 'Enter', 'KeyJ', 'KeyF'].includes(e.code)) { orbTap(); e.preventDefault(); return; }
-    if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') { doJump(); e.preventDefault(); }
+    if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') { keyJump = true; doJump(); e.preventDefault(); }
     if (e.code === 'ArrowDown' || e.code === 'KeyS') { keySlide = true; setSlide(); e.preventDefault(); }
     if (e.code === 'Escape' || e.code === 'KeyP') { if (G.mode === 'play') pause(); else if (G.mode === 'pause') resume(); }
   });
-  addEventListener('keyup', (e) => { if (BB_KEY[e.code]) bbKeys.delete(BB_KEY[e.code]); if (e.code === 'ArrowDown' || e.code === 'KeyS') { keySlide = false; setSlide(); } });
+  addEventListener('keyup', (e) => { if (BB_KEY[e.code]) bbKeys.delete(BB_KEY[e.code]); if (e.code === 'ArrowDown' || e.code === 'KeyS') { keySlide = false; setSlide(); } if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') keyJump = false; });
 
   // ---------------------------------------------------------------- the mini-games' songs (stages.js): five each, in turn
   // Each go of a mini-game takes the next of its songs; the turn is kept (the next run goes on from it). The songs are
@@ -713,7 +719,12 @@
       if (n.kind === 'c') { n.u = m[3]; n.v = m[4]; }
       if (n.kind === 's') { n.te = m[3] * B; n.ctrl = m[4]; n.u = m[4][0][0]; n.v = m[4][0][1]; n.inT = 0; n.allT = 0; n.start = null; n.ticks = 0; }
       if (n.kind === 'p') { n.te = m[3] * B; n.need = m[4]; n.turns = 0; n.ang = 0; n.rate = 0; }
+      if (n.kind === 'r') { n.te = m[3] * B; n.need = m[4]; n.hits = 0; n.popT = null; n.hitT = -9; }
       notes.push(n);
+    }
+    for (const n of notes) {                                 // two balls at once, one each side: both hands
+      const mate = n.kind === 's' && notes.find((q) => q !== n && q.kind === 's' && q.tn === n.tn);
+      if (mate) { n.dual = true; n.lead = n.u < mate.u; n.mate = mate; }
     }
     const secs = RH_LEAD + song.end * B + RH_DONE;
     G.rh = { song, B, first: song.first, end: song.end, speed: Math.max(30, Math.min(60, RH_ROOM / secs)),
@@ -747,7 +758,7 @@
     if (res === 'miss') { r.combo = 0; G.hp = Math.max(0, G.hp - 3); }
     else {
       r.combo++; r.maxCombo = Math.max(r.maxCombo, r.combo);
-      const base = n.kind === 'p' ? (res === 'perfect' ? 100 : 40) : n.kind === 's' ? (res === 'perfect' ? 50 : 20) : (res === 'perfect' ? 30 : 10);
+      const base = n.kind === 'p' || n.kind === 'r' ? (res === 'perfect' ? 100 : 40) : n.kind === 's' ? (res === 'perfect' ? 50 : 20) : (res === 'perfect' ? 30 : 10);
       const pts = Math.round(base * (1 + Math.min(r.combo, 40) / 25));
       G.score += pts; r.gain += pts;
       G.hp = Math.min(HP_MAX, G.hp + (res === 'perfect' ? 1.5 : 0.5));
@@ -756,11 +767,18 @@
     SND.play(res);
   }
   // a touch on the stage
+  // a tap on the balloon (anywhere, while it is up): it swells; enough of them and it bursts (perfect)
+  function rhRollHit(n) {
+    n.hits++; n.hitT = G.t; SND.play('tick'); if (!AUTO) buzz(BUZZ_TAP);
+    if (n.hits >= n.need && !n.res) { n.popT = G.t; SND.play('spinDone'); rhJudge(n, 'perfect', NWf / 2, 98); }
+  }
   function rhDown(id, x, y) {
     const r = G.rh; if (!r) return;
     r.ptr.set(id, { x, y, ang: null });
     if (r.done) return;
     const t = rtime();
+    const roll = r.notes.find((n) => n.kind === 'r' && !n.res && t >= n.tn - 0.06 && t <= n.te);
+    if (roll) { rhRollHit(roll); return; }
     for (const n of r.notes) {
       if (n.res || n.kind === 'p') continue;
       if (n.kind === 's' && n.start) continue;
@@ -821,6 +839,9 @@
           const ratio = n.allT > 0 ? n.inT / n.allT : 0, [ex, ey] = rhBall(path, 1);
           rhJudge(n, ratio >= 0.85 && n.start === 'perfect' ? 'perfect' : ratio >= 0.5 && n.start ? 'good' : ratio >= 0.75 ? 'good' : 'miss', ex, ey);
         }
+      } else if (n.kind === 'r') {                            // the balloon: tap, tap, tap (the pilot: 7.5 a second)
+        if (AUTO && t >= n.tn && t <= n.te && t - (n.autoT ?? -9) >= 1 / 7.5) { n.autoT = t; rhRollHit(n); }
+        if (!n.res && t > n.te) rhJudge(n, n.hits >= n.need * 0.6 ? 'good' : 'miss', NWf / 2, 98);
       } else {                                               // the spinner
         if (t >= n.tn && t <= n.te) {
           if (AUTO) n.turns += 3.6 * dt, n.ang += 3.6 * dt * 2 * Math.PI;
@@ -856,7 +877,7 @@
     if (t < f0) {
       const a = Math.min(1, (t + RH_LEAD) / 0.3) * Math.min(1, (f0 - t) / 0.4);
       label('심장이 두근두근!', NWf / 2, 66, 17, 'center', a, '#ffd0dc');
-      label('원은 고리가 겹칠 때 터치 · 공은 잡고 따라가기 · 원판은 빙빙', NWf / 2, 86, 7, 'center', a, '#ffffff');
+      label('원은 고리가 겹칠 때 터치 · 공은 잡고 따라가기 · 풍선은 연타 · 원판은 빙빙', NWf / 2, 86, 6.5, 'center', a, '#ffffff');
       label(r.song.name, NWf / 2, 100, 7.5, 'center', a * 0.9, '#ffe0a8');
       const c = r.first - Math.floor(t / B);
       if (t > 0 && c >= 1 && c <= 4) label(String(c), NWf / 2, 126, 16, 'center', a * (1 - (t / B) % 1), '#ffffff');
@@ -865,12 +886,17 @@
     for (let i = r.notes.length - 1; i >= 0; i--) {
       const n = r.notes[i];
       if (n.kind === 'p') { if (!n.res && t >= n.tn - 0.4) drawSpinner(n, t); continue; }
+      if (n.kind === 'r') { if (t >= n.tn - 0.4 && (!n.res || (n.popT !== null && G.t - n.popT < 0.45))) drawRoll(n, t); continue; }
       const show = t >= n.tn - RH_AR - 0.15;
       if (!show) continue;
       const fade = Math.min(1, (t - (n.tn - RH_AR - 0.15)) / 0.25);
       if (n.kind === 's') {
         if (n.res && t > n.te + 0.15) continue;
         drawSlider(n, t, fade);
+        if (n.dual && n.lead && t < n.tn + 0.3) {             // both hands: a word over the pair as it comes
+          const [x1, y1] = rhPos(n.u, n.v), [x2, y2] = rhPos(n.mate.u, n.mate.v);
+          label('양손!', (x1 + x2) / 2, Math.min(y1, y2) - 4, 10, 'center', fade * Math.min(1, (n.tn + 0.3 - t) / 0.3), '#ffe68a');
+        }
       } else {
         if (n.res) continue;
         const [x, y] = rhPos(n.u, n.v);
@@ -909,6 +935,35 @@
     ctx.lineWidth = 3.2; ctx.strokeStyle = '#1a0a14'; ctx.beginPath(); ctx.arc(x, y, R, 0, 6.29); ctx.stroke();
     ctx.lineWidth = 2.0; ctx.strokeStyle = col[1]; ctx.beginPath(); ctx.arc(x, y, R, 0, 6.29); ctx.stroke();
     ctx.globalAlpha = 1;
+  }
+  // the balloon: a red cell that swells with every tap, the taps still to go on it, the time left in a ring round it; when
+  // it bursts, its bits fly off
+  function drawRoll(n, t) {
+    const cx = NWf / 2, cy = 98, a = Math.min(1, (t - (n.tn - 0.4)) / 0.3);
+    if (n.popT !== null) {
+      const u = (G.t - n.popT) / 0.45;
+      ctx.globalAlpha = Math.max(0, 1 - u);
+      for (let k = 0; k < 12; k++) {
+        const ang = k / 12 * 6.283 + 0.3, d = 22 + 42 * u;
+        ctx.beginPath(); ctx.arc(cx + Math.cos(ang) * d, cy + Math.sin(ang) * d * 0.85, 1 + 4 * (1 - u), 0, 6.29); ctx.fillStyle = '#e8304a'; ctx.fill();
+        ctx.lineWidth = 0.8; ctx.strokeStyle = '#3a0610'; ctx.stroke();
+      }
+      ctx.beginPath(); ctx.arc(cx, cy, 24 + 30 * u, 0, 6.29); ctx.lineWidth = 2.6 * (1 - u); ctx.strokeStyle = '#ffe68a'; ctx.stroke();
+      ctx.globalAlpha = 1; return;
+    }
+    const k = Math.min(1, n.hits / n.need), R = 16 + 12 * k + (G.t - n.hitT < 0.08 ? 1.6 : 0);
+    ctx.globalAlpha = a;
+    ctx.beginPath(); ctx.ellipse(cx, cy, R + 1.2, R * 0.86 + 1.2, 0, 0, 6.29); ctx.fillStyle = '#3a0610'; ctx.fill();
+    const g = ctx.createRadialGradient(cx - R * 0.3, cy - R * 0.35, R * 0.1, cx, cy, R);
+    g.addColorStop(0, '#ff8a96'); g.addColorStop(0.55, '#e8304a'); g.addColorStop(1, '#a8122a');
+    ctx.beginPath(); ctx.ellipse(cx, cy, R, R * 0.86, 0, 0, 6.29); ctx.fillStyle = g; ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx, cy + 1, R * 0.5, R * 0.38, 0, 0, 6.29); ctx.fillStyle = 'rgba(120,10,30,0.45)'; ctx.fill();   // its middle, dipped in
+    ctx.beginPath(); ctx.ellipse(cx - R * 0.4, cy - R * 0.42, R * 0.22, R * 0.11, -0.5, 0, 6.29); ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.fill();
+    const left = Math.max(0, Math.min(1, (n.te - t) / (n.te - n.tn)));
+    ctx.beginPath(); ctx.arc(cx, cy, 36, -Math.PI / 2, -Math.PI / 2 + left * 2 * Math.PI); ctx.lineWidth = 1.8; ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.stroke();
+    ctx.globalAlpha = 1;
+    label(t < n.tn ? '준비' : '연타!', cx, cy - 45, 11, 'center', a, '#ffffff');
+    label(String(Math.max(0, n.need - n.hits)), cx, cy + 0.5, 12, 'center', a, '#ffffff');
   }
   function drawSlider(n, t, alpha) {
     const path = rhPath(n), P = path.P;
@@ -1190,6 +1245,8 @@
 
   // ---------------------------------------------------------------- the test pilot (?auto): looks a little ahead
   function pilot() {
+    if (inWater()) { pilotSwim(); return; }
+    G.pilotUp = false;
     const px = G.x;
     let jump = false, slide = false;
     for (const o of G.obs) {
@@ -1241,16 +1298,16 @@
   }
 
   // ---------------------------------------------------------------- the baseball stage (in the jejunum)
-  // A ballpark of the gut's own tissue, seen from behind home plate. A macrophage on the mound throws three pitches; the
+  // A ballpark of the gut's own tissue, seen from behind home plate. A macrophage on the mound throws five pitches; the
   // runner stands up at the plate on two legs with a bat. Drag on the left to put the bat's ring where the ball will cross
   // (a white ring shows the spot once it is thrown, closing in as it comes), tap on the right as it gets there. The ball
-  // in the ring, on time, is a home run; in the ring but a little early or late, a foul (off to the left or right, a
-  // strike, but not the third, as in baseball); anything else a miss (a swing: 헛스윙, none: 스트라이크); three strikes,
-  // out. A home run before that wins (points only, no harm either way). The swing button swings any time (a
+  // in the ring, on time, is a home run (points: each one); in the ring but a little early or late, a foul (off to the
+  // left or right); anything else a miss (a swing: 헛스윙, none: 스트라이크). Five pitches, whatever happens (no
+  // strike-outs); only the home runs score (no harm either way). The swing button swings any time (a
   // practice swing before the throw, to get the feel; only a swing at the ball in flight counts). The game's own clock
   // (no song here; the run's music goes on).
   const BBF = M.bb || { mound: [210, 100], plate: [210, 172] };                 // the field picture's numbers (baseball.py)
-  const BB_N = 3;                                                               // pitches
+  const BB_N = 5;                                                               // pitches
   const BB_ZW = 44, BB_ZH = 50, BB_ZY = 128;                                    // the strike zone: width, height, centre y
   const BB_CR = 9, BB_BR = 4.6;                                                 // the bat's ring, the ball at the plate
   const BB_WIN = 0.12, BB_FOUL = 0.2;                                           // timing (s): a home run this early or late; a foul
@@ -1283,7 +1340,7 @@
     holdBoost();
     G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
     G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
-    G.bb = { st: 'intro', stT: G.t, inT: G.t, k: 0, res: [], hr: false, cur: [0, 0], drag: null, p: null, swingT: -9, gain: 0, msg: null, ball: null, pend: null, hold: 0, fx: null, strikes: 0 };
+    G.bb = { st: 'intro', stT: G.t, inT: G.t, k: 0, res: [], hr: false, cur: [0, 0], drag: null, p: null, swingT: -9, gain: 0, msg: null, ball: null, pend: null, hold: 0, fx: null };
     G.slideHeld = false; held.clear(); pressed.jump = false; bbKeys.clear();
     bbMusic();
   }
@@ -1304,15 +1361,13 @@
   // pushed out (to the right) and straight into the toilet: under its water the runner comes in from the top left with a
   // lump of it (plop), sinks to the bottom, the lumps drift off and stage 2 begins. Times (s) from the moment it stops
   const CUT_FACE = 200;                              // the packed stool's face: this far before the end of the anus
-  const CUT_PAD = 20;                                // (its picture starts this far left of the face)
-  const CUT_IN = 7;                                  // how far past the face the runner's middle goes in
+  const CUT_PAD = 44;                                // (its picture starts this far left of the face: the front logs' ends at the floor)
+  const CUT_IN = 3;                                  // how far past the face the runner's middle goes in (about half of it in)
   const CUT_CLEAR = 150, CUT_AFTER = 300;           // nothing set out from the braking's start (less this) to this far into stage 2
   const CUT_BRAKE = 560;                             // the braking is at most this long (at a booster's speed, short and hard)
   const CUT_PUSH = [0.3, 0.95], CUT_SWAP = 0.9, CUT_DIVE = [0.95, 1.0], CUT_HIT = 0.08, CUT_END = 2.0;
-  // lumps of it in front of the runner stuck in it (from the face: x, up from the floor, turn), and the two that come
-  // into the toilet on the runner (x, up: in the runner's size; turn)
-  const CUT_FRONT = [['cut_lump2', 6, 6, 0.1], ['cut_lump1', 3, 17, -0.5], ['cut_lump3', 10, 27, 0.35]];
-  const CUT_STUCK = [['cut_lump0', 0.32, 0.72, -0.35], ['cut_lump3', -0.3, 0.98, 0.45]];
+  // the big chunk that comes into the toilet with the runner, stuck on its back (x, up: in the runner's size; turn)
+  const CUT_STUCK = [['cut_chunk', -0.75, 0.5, 0.12]];
   const cutOn = () => G.cut || (G.station >= 0 && COURSE[G.station][5] === STAGE2 - 1);      // in the anus, or in the cut
   const cutFaceX = () => (G.cut ? G.cut.faceX : Math.floor(G.x / LAP) * LAP + S2_X - CUT_FACE);
   function cutCheck() {
@@ -1371,19 +1426,12 @@
   const cutDX = () => (G.cut && G.cut.ts && !G.cut.swap ? cutPush(G.t - G.cut.ts) : 0);
   // stuck: a little shake as it goes in
   const cutShake = () => { if (!G.cut || !G.cut.ts || G.cut.swap) return 0; const u = G.t - G.cut.ts; return u < 0.25 ? 0.7 * Math.sin(u * 110) * (1 - u / 0.25) : 0; };
-  // the packed stool (world: drawn before the runner), pushed along with it
+  // the packed stool (world: drawn after the runner, so that going in, its front half is in it), pushed along with it
   function drawCutBack(cam) {
     if (!cutOn() || (G.cut && G.cut.swap) || !cutReady()) return;
     const x = cutFaceX() - CUT_PAD - cam + cutDX();
     if (x > NWf || x + SW('cut_wall') < 0) return;
     spr('cut_wall', x, GY + 2 - SH('cut_wall'));
-  }
-  // its lumps in front of the runner (world: drawn after the runner)
-  function drawCutFront(cam) {
-    if (!cutOn() || (G.cut && G.cut.swap) || !cutReady()) return;
-    const fx = cutFaceX() - cam + cutDX();
-    if (fx > NWf + 30) return;
-    for (const [n, dx, up, rot] of CUT_FRONT) sprRot(n, fx + dx, GY - up, rot);
   }
   // the runner with its lumps on, in one piece (into the toilet)
   function drawMass(cx, fy, rot) {
@@ -1454,12 +1502,12 @@
   function drawCutDrift() {
     const t0 = G.cut ? G.cut.landed : G.cutTail ? G.cutTail.landed : 0;
     if (!t0 || !cutReady()) return;
-    const v = G.t - t0, n = 'ch_' + G.char, w = SW(n), h = SH(n), D = 1.0;
+    const v = G.t - t0, n = 'ch_' + G.char, w = SW(n), h = SH(n), D = 1.1;
     if (v < 0 || v >= D) return;
-    CUT_STUCK.forEach(([ln, dx, up, r], i) => {
-      const k = v / D, dir = i ? -1 : 1;
-      sprRot(ln, PX - G.nudge + dx * w + dir * 26 * k, GY + 1 - G.y - up * h - (16 + 12 * i) * k, r + dir * 0.7 * k, 1 - k * k);
-    });
+    for (const [ln, dx, up, r] of CUT_STUCK) {            // the chunk lets go and floats up and back
+      const k = v / D;
+      sprRot(ln, PX - G.nudge + dx * w - 22 * k, GY + 1 - G.y - up * h - 26 * k, r - 0.5 * k, 1 - k * k);
+    }
   }
   const bbZone = () => [NWf / 2, BB_ZY];
   function bbPitch() {                                                         // the next pitch: its kind, where it crosses
@@ -1523,7 +1571,6 @@
       b.ball = fly;
     }
     b.msg = { s: { hr: '홈런!', foul: '파울', whiff: '헛스윙', strike: '스트라이크' }[res], t: G.t, res };
-    if (res !== 'hr' && !(res === 'foul' && b.strikes >= BB_N - 1)) b.strikes++;      // (a foul is never the third strike)
     if (res === 'hr') { G.score += BB_PTS.hr; b.gain += BB_PTS.hr; b.hr = true; SND.play('bbHR'); buzz([40, 30, 70]); }
     else if (res === 'foul') { SND.play('bbHit'); buzz(35); }
     else SND.play('bbMitt');
@@ -1548,8 +1595,8 @@
       if (b.pend && G.t >= b.pend.t) bbContact();
       if (!p.done && !b.pend && G.t > p.arr + BB_FOUL) bbResult(p.swung ? 'whiff' : 'strike', null);
     }
-    if (b.st === 'after' && G.t - b.stT > (b.hr ? BB_AFTER_HR : BB_AFTER)) {
-      if (b.hr || b.strikes >= BB_N) { b.st = 'done'; b.stT = G.t; if (!b.hr) SND.play('bbOut'); }
+    if (b.st === 'after' && G.t - b.stT > (b.p && b.p.res === 'hr' ? BB_AFTER_HR : BB_AFTER)) {
+      if (b.res.length >= BB_N) { b.st = 'done'; b.stT = G.t; if (!b.hr) SND.play('bbOut'); }      // (all five thrown)
       else { b.k++; bbPitch(); }
     }
     if (b.st === 'done' && G.t - b.stT > BB_END) endBaseball();
@@ -1760,12 +1807,12 @@
       ctx.lineWidth = 1.4; ctx.strokeStyle = 'rgba(255,240,200,0.95)'; ctx.stroke();
       label('스윙', bxr, by + 0.5, 9, 'center', al, '#ffffff');
     }
-    // the count: three balls, used ones dimmed
-    for (let i = 0; i < BB_N; i++) { ctx.globalAlpha = al * (i < b.strikes ? 0.28 : 1); drawBall(20 + i * 10, 44, 3.4); }
+    // the count: five balls, used ones dimmed
+    for (let i = 0; i < BB_N; i++) { ctx.globalAlpha = al * (i < b.res.length ? 0.28 : 1); drawBall(20 + i * 10, 44, 3.4); }
     ctx.globalAlpha = al;
     if (b.st === 'intro') {
       const a = Math.min(1, u / 0.3) * Math.max(0, Math.min(1, (BB_INTRO - u) / 0.3));
-      label('삼진 전에 홈런!', NWf / 2, 62, 16, 'center', a, '#ffe0a8');
+      label('공 5개, 홈런마다 점수!', NWf / 2, 62, 16, 'center', a, '#ffe0a8');
       label('왼쪽을 끌어 노란 고리를 공이 올 자리(흰 고리)에', NWf / 2, 80, 7.5, 'center', a, '#ffffff');
       label('흰 고리가 공만큼 줄어들 때 오른쪽 터치', NWf / 2, 91, 7.5, 'center', a, '#ffffff');
     }
@@ -1778,14 +1825,122 @@
     if (b.st === 'done') {
       const v = G.t - b.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (BB_END - v) / 0.35));
       ctx.globalAlpha = a * 0.78; rrect(NWf / 2 - 110, 54, 220, 60, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = 1;
-      label(b.hr ? '홈런 성공!' : '삼진 아웃!', NWf / 2, 70, 14, 'center', a, b.hr ? '#ffe68a' : '#ffd0dc');
       const n = (q) => b.res.filter((r) => r === q).length;
+      label(`홈런 ${n('hr')}개${n('hr') ? '!' : ''}`, NWf / 2, 70, 14, 'center', a, b.hr ? '#ffe68a' : '#ffd0dc');
       label(`홈런 ${n('hr')} · 파울 ${n('foul')} · 헛스윙 ${n('whiff')} · 스트라이크 ${n('strike')}`, NWf / 2, 90, 7.5, 'center', a, '#ffffff');
       label(`+${b.gain.toLocaleString('en-US')}점`, NWf / 2, 104, 8.5, 'center', a, '#ffe68a');
     }
     ctx.globalAlpha = 1;
   }
 
+  // ---------------------------------------------------------------- stage 2: under water
+  // Holding (either button, anywhere on the screen, the up key) swims up; let go and you sink slowly; you can rest on
+  // the bottom; the surface stops you. Things are in the water at every height: columns from the bottom and paper hung
+  // from the surface with a gap between to swim through, things floating, bobbing, coming at you
+  const SWIM_ACC = 600, SWIM_MAX = 135, SINK_ACC = 380, SINK_MAX = 105;
+  const inWater = () => S2_L.has(G.theme) && !G.cut;
+  const swimHeld = () => held.size > 0 || keyJump || keySlide || (AUTO && !!G.pilotUp);
+  function stepSwim(dt) {
+    pressed.jump = false;
+    const up = swimHeld();
+    G.vy = Math.max(-SINK_MAX, Math.min(SWIM_MAX, G.vy + (up ? SWIM_ACC : -SINK_ACC) * dt));
+    G.y += G.vy * dt;
+    if (G.y <= 0) { G.y = 0; if (G.vy < 0) G.vy = 0; G.onGround = true; } else G.onGround = false;
+    if (G.y >= MAXY) { G.y = MAXY; if (G.vy > 0) G.vy = 0; }
+    G.slide = false; G.jumps = 0; G.pitObj = null; G.bounce = false;
+    G.swimBub = (G.swimBub || []).filter((b) => G.t - b.t < 0.7);
+    if (up && G.t - (G.swimBubT || 0) > 0.12) {               // (looks only: Math.random, not the course's own random)
+      G.swimBubT = G.t; G.swimBub.push({ x: G.x - 5 + Math.random() * 3, y: GY - G.y - SH('ch_' + G.char) * 0.55, r: 0.8 + Math.random() * 1.1, t: G.t });
+    }
+  }
+  // a floor piece, its hit box's top above the floor (world y of it)
+  const hbTop = (o) => o.y + M.sprites[o.name].hb[1];
+  // one pattern under water at x; returns how far it reaches
+  function spawnSwim(x, theme, fam, coin, special, v, d, d2, R) {
+    const W = [['rest', 0.1], ['gate', 0.3 + 0.08 * d], ['gate2', 0.04 + 0.1 * d], ['float', 0.16], ['bob', 0.07 + 0.06 * d], ['swim', 0.06 + 0.06 * d],
+      ['tall', 0.07], ['drop', 0.04 + 0.05 * d + 0.03 * d2], ['spike', 0.04 + 0.05 * d + 0.03 * d2], ['shot', 0.04 + 0.07 * d + 0.04 * d2]];
+    let r = R() * W.reduce((a, b) => a + b[1], 0), pat = 'rest';
+    for (const [p, w] of W) { if ((r -= w) <= 0) { pat = p; break; } }
+    if (window.__patlog) window.__patlog['s2:' + pat] = (window.__patlog['s2:' + pat] || 0) + 1;
+    const clear = Math.max(24, 38 - 12 * d - 2 * d2);           // the gap: the body's height and this much
+    const midY = (y0, y1) => (y0 + y1) / 2;
+    const coinsAt = (x0, n, y, dx = 15) => { for (let i = 0; i < n; i++) addItem(x0 + i * dx, y, coin); };
+    const gate = (gx) => {                                      // a column from the bottom (or none) and paper from the surface: the gap between
+      const kinds = ['none', 'low', 'tall'], kind = kinds[Math.floor(R() * kinds.length)];      // (the gap low, middle or high)
+      let gBot = GY, w = 22, cx = gx + 11;
+      if (kind !== 'none') { const o = addObs(gx, kind, theme); if (o) { gBot = hbTop(o); w = o.w; cx = o.x + o.w / 2; } }
+      const gTop = gBot - PH - clear;
+      if (gTop > 26) {
+        const h = addObs(cx, 'hang', theme);
+        if (h) { h.x = cx - h.w / 2; h.y = gTop - M.sprites[h.name].hb[3]; }
+      }
+      coinsAt(cx - 34, 5, midY(Math.max(gTop, 20), gBot), 17);
+      return cx + w / 2 - x + 30;
+    };
+    let used = 60;
+    if (pat === 'rest') { const y = 40 + R() * 90; coinsAt(x, 6, y); used = 90; }
+    else if (pat === 'gate') used = gate(x + 40);
+    else if (pat === 'gate2') { const a = gate(x + 40); used = gate(x + a + Math.max(v * 0.85, 120)); }
+    else if (pat === 'float' || pat === 'bob' || pat === 'swim') {
+      const o = addObs(x + 40, 'float', theme, pat === 'float' ? null : pat); if (o) {
+        const yTop = 30 + R() * (GY - 30 - o.h - 6);              // anywhere in the water
+        o.y = yTop;
+        if (pat === 'bob') { const amp = 40 + R() * 40; o.bob = { y0: Math.max(28, Math.min(GY - o.h - amp, yTop)), amp, w: 2 * Math.PI / (2 + R() * 0.8), ph: R() * 6.28 }; o.y = o.bob.y0; }
+        if (pat === 'swim') o.vx = 50 + 45 * d;
+        const above = yTop > 80;                                   // coins on the open side
+        coinsAt(o.x - 10, 4, above ? yTop - 22 : yTop + o.h + 18, 15);
+        if (R() < 0.25) addItem(o.x + o.w / 2, above ? yTop - 40 : Math.min(GY - 12, yTop + o.h + 36), special);
+        used = o.w + (pat === 'swim' ? 200 : 80);
+      }
+    } else if (pat === 'tall') {
+      const o = addObs(x + 40, R() < 0.5 ? 'tall' : 'huge', theme);
+      if (o) { coinsAt(o.x - 15, 4, hbTop(o) - 20, 15); used = o.w + 70; }
+    } else if (pat === 'drop') {
+      const o = addDrop(x + 50, fam.drop, Math.max(0.33, 0.62 - 0.25 * d - 0.05 * d2));
+      coinsAt(x + 30, 4, 60 + R() * 30); used = (o ? o.w : 24) + 90;
+    } else if (pat === 'spike') {
+      const o = addSpike(x + 50, fam.spike, R() < 0.5, Math.max(0.36, 0.62 - 0.22 * d - 0.05 * d2), 0.5 - 0.12 * d);
+      coinsAt(x + 40, 4, GY - 50); used = (o ? o.w : 16) + 90;
+    } else if (pat === 'shot') {
+      const vx = 110 + 120 * d + 60 * d2, shift = vx * (NWf + 4 - PX) / (v + vx);
+      const o = addShot(x + 40 + shift, true, vx, fam.shot);
+      if (o) { o.y = 34 + R() * (GY - 40 - o.h); coinsAt(x + 40, 4, o.y > 90 ? o.y - 30 : o.y + o.h + 26); }
+      used = 120;
+    }
+    return used;
+  }
+  // the pilot under water: the clear heights (feet above the floor) at the nearest thing ahead; swim up while below
+  // the middle of the one it is in (or the nearest), as it will be in a moment
+  function pilotSwim() {
+    const px = G.x, look = Math.max(130, G.v * 0.95), m = 3.5;
+    let near = null;
+    const boxes = [];
+    for (const o of G.obs) {
+      let bx;
+      if (o.kind === 'door' || o.kind === 'spike' || o.kind === 'drop' || o.kind === 'shot') bx = obsBoxes(o);
+      else if (o.kind === 'pit') continue;
+      else { const hb = M.sprites[o.name].hb; bx = [[o.x + hb[0], o.y + hb[1], o.x + hb[2], o.y + hb[3]]]; }
+      if (o.kind === 'spike' && o.e <= 0.05 && o.x - px < look) bx = [[o.x, GY + 2 - (o.tall ? 34 : 22), o.x + o.w, GY + 2]];   // (coming up: keep off the bottom there)
+      if (o.kind === 'drop' && o.st === 'hang' && o.x - px < look) bx = [[o.x, GY - 12, o.x + o.w, GY + 2]];
+      if (o.kind === 'bob' && o.bob) bx = [[o.x + 2, o.bob.y0, o.x + o.w - 2, o.bob.y0 + o.bob.amp + o.h]];    // (its whole range)
+      for (const b of bx) { if (b[2] < px - PW - 1 || b[0] > px + PW + look) continue; boxes.push(b); if (!near || b[0] < near[0]) near = b; }
+    }
+    let target = 30;
+    if (near) {
+      const span = [near[0] - 4, near[2] + 4], blocked = [];
+      // the feet heights each blocks: the body (PH tall above the feet) would touch it between these
+      for (const b of boxes) if (b[0] < span[1] + 30 && b[2] > span[0]) blocked.push([GY - PH - b[3] - m, GY - b[1] + m]);
+      const free = []; let y0 = 0;
+      blocked.sort((a, b) => a[0] - b[0]);
+      for (const [a, b] of blocked) { if (a > y0) free.push([y0, a]); y0 = Math.max(y0, b); }
+      if (y0 < MAXY) free.push([y0, MAXY]);
+      let best = null;
+      for (const f of free) { const c = Math.max(f[0] + 2, Math.min(f[1] - 2, G.y)); const cost = Math.abs(c - G.y) - (f[1] - f[0]) * 0.05; if (f[1] - f[0] > 4 && (!best || cost < best.cost)) best = { cost, c: (f[0] + f[1]) / 2, f }; }
+      if (best) target = best.f[1] - best.f[0] > 40 ? Math.max(best.f[0] + 14, Math.min(best.f[1] - 14, G.y)) : best.c;
+    }
+    const yp = G.y + G.vy * 0.2;
+    G.pilotUp = yp < target;
+  }
   // ---------------------------------------------------------------- step
   function step(dt) {
     if (G.mode !== 'play') return;
@@ -1809,6 +1964,8 @@
     else if (!busy() && G.station >= 0 && COURSE[G.station][5] === STAGE2 - 1) cutCheck();
     G.nudge = Math.max(0, G.nudge - dt * 30);
     moveObs(dt);
+    if (inWater()) stepSwim(dt);
+    else {
     // jump / double jump / slide
     if (pressed.jump) {
       if (G.onGround || (G.jumps === 0 && G.y > -6)) { G.vy = JUMP; G.jumps = 1; G.onGround = false; SND.play('jump1'); }
@@ -1835,6 +1992,7 @@
     const wasSlide = G.slide;
     G.slide = G.slideHeld && G.onGround && !busy();
     if (G.slide && !wasSlide) SND.play('slide');
+    }
     // health
     if (!busy()) G.hp = Math.max(0, G.hp - DRAIN * dt);
     G.invul = Math.max(0, G.invul - dt);
@@ -1878,7 +2036,7 @@
         if (PTS[it.kind] >= 30 || it.kind === 'heal') G.pops.push({ x: it.x, y: it.y - 8, s: it.kind === 'heal' ? '+' + HEAL : '+' + PTS[it.kind], t: G.t });
       }
     }
-    if (G.onGround && !G.slide && Math.floor(G.t * 8) !== Math.floor((G.t - dt) * 8)) puff(G.x - 10, 1);
+    if (G.onGround && !G.slide && !inWater() && Math.floor(G.t * 8) !== Math.floor((G.t - dt) * 8)) puff(G.x - 10, 1);
     G.puffs = G.puffs.filter((p) => G.t - p.t < 0.45);
     G.pops = G.pops.filter((p) => G.t - p.t < 0.8);
     // where we are
@@ -2255,10 +2413,9 @@
       spr(n, sx - SW(n) / 2, it.y - SH(n) / 2 + Math.sin(G.t * 4 + it.ph));
     }
     // the player: a shadow, dust, the character (bobbing as it runs, squashed when sliding); not while on the orbit stage
-    drawCutBack(cam);
     if (G.cut && G.cut.swap) { if (!G.cut.landed) drawDive(); else drawPlayer(cam); }
     else if (!G.orb || (G.orb.st === 'done' && G.t - G.orb.stT > OB_DONE - 0.35)) drawPlayer(cam);
-    drawCutFront(cam);
+    drawCutBack(cam);
     if ((G.cut && G.cut.landed) || G.cutTail) drawCutDrift();
     drawShotWarnings(cam);
     for (const p of G.pops) { const u = (G.t - p.t) / 0.8; label(p.s, p.x - cam, Math.max(40, p.y - u * 14), 8, 'center', 1 - u * u); }
@@ -2276,7 +2433,15 @@
     const blink = G.invul > 0 && !(G.boost > 0) && Math.floor(G.t * 14) % 2 === 0;
     if (!blink) {
       if (G.slide) { const sh = h * 0.62, sw = w * 1.12; spr(n, sx - sw / 2, GY + 1 - sh, 1, sw, sh); }
-      else { const bob = G.onGround ? (Math.floor(G.t * 10) % 2) : 0; spr(n, sx - w / 2, GY + 1 - h - G.y - bob); }
+      else if (inWater()) {                               // swimming: tilted up as it rises, down as it sinks, a slow sway
+        const ang = -Math.max(-0.32, Math.min(0.32, G.vy / 330)), cy = GY + 1 - G.y - h / 2 + Math.sin(G.t * 3) * 0.6;
+        ctx.save(); ctx.translate(sx, cy); ctx.rotate(ang); spr(n, -w / 2, -h / 2); ctx.restore();
+      } else { const bob = G.onGround ? (Math.floor(G.t * 10) % 2) : 0; spr(n, sx - w / 2, GY + 1 - h - G.y - bob); }
+    }
+    for (const b of G.swimBub || []) {                        // the bubbles it leaves swimming up
+      const u = (G.t - b.t) / 0.7; if (u >= 1) continue;
+      ctx.globalAlpha = 1 - u; ctx.beginPath(); ctx.arc(b.x - cam + Math.sin(u * 8 + b.r * 5) * 0.8, b.y - u * 16, b.r, 0, 6.29);
+      ctx.fillStyle = 'rgba(235,252,252,0.55)'; ctx.fill(); ctx.lineWidth = 0.4; ctx.strokeStyle = '#2a5a62'; ctx.stroke(); ctx.globalAlpha = 1;
     }
     if (inPit) ctx.restore();
     drawField(sx, GY + 1 - G.y, w, G.slide ? h * 0.62 : h);
@@ -2509,8 +2674,9 @@
     }
     // buttons (not on the rhythm or orbit stage)
     if (busy()) return;
-    const jOn = [...held.values()].includes('jump') || (AUTO && !G.onGround);
     const by = NH - BTN_M - BTN_R, bl = BTN_M + BTN_R, br = NW - BTN_M - 2 - BTN_R;
+    if (inWater()) { const on = swimHeld(); button(bl, by, '헤엄', on); button(br, by, '헤엄', on); return; }     // (both swim)
+    const jOn = [...held.values()].includes('jump') || (AUTO && !G.onGround);
     button(SET.swap ? br : bl, by, '점프', jOn);
     button(SET.swap ? bl : br, by, '슬라이드', G.slideHeld);
   }
@@ -2675,7 +2841,7 @@
     window.__rh = () => { const r = G.rh; if (!r) return null; const t = rtime();
       return { t: +t.toFixed(3), n: r.n, combo: r.combo, maxCombo: r.maxCombo, done: r.done, gain: r.gain,
         notes: r.notes.map((n) => { const o = { b: n.b, kind: n.kind, tn: n.tn, te: n.te, res: n.res, num: n.num };
-          if (n.kind === 'p') { o.x = NWf / 2; o.y = 98; o.turns = +n.turns.toFixed(2); } else { const [x, y] = rhPos(n.u, n.v); o.x = x; o.y = y; }
+          if (n.kind === 'p' || n.kind === 'r') { o.x = NWf / 2; o.y = 98; if (n.kind === 'p') o.turns = +n.turns.toFixed(2); else { o.hits = n.hits; o.need = n.need; } } else { const [x, y] = rhPos(n.u, n.v); o.x = x; o.y = y; if (n.dual) o.dual = true; }
           if (n.kind === 's') { const p = rhPath(n); o.path = p.P.filter((_, i) => i % 3 === 0 || i === p.P.length - 1); o.len = p.len; o.inT = n.inT; o.allT = n.allT; o.start = n.start; if (t >= n.tn && t <= n.te) o.ball = rhBall(p, (t - n.tn) / (n.te - n.tn)); }
           return o; }) }; };
     window.__toClient = (x, y) => { const r = cv.getBoundingClientRect(); const X = x * RS, Y = y * RS; const cx = rot ? GH - Y : X, cy = rot ? X : Y;

@@ -152,7 +152,7 @@
     const near = (id) => { const d = ((STARTS[COURSE.findIndex((st) => st[0] === id)] - s.lx) % LAP + LAP) % LAP; return d < Math.max(2500, G.v * 8); };
     if (G.wm || near('spleen')) { files.add('wm_field.webp'); files.add('wm.webp'); }       // the germ game's, near the spleen
     if (G.mem || near('hippocampus')) files.add('mem.webp');                                // the memory game's
-    if (G.pk || near('manhole')) { files.add('pk_field.webp'); files.add('pk.webp'); }      // (v44) the penalty shoot-out's
+    if (G.pk || near('manhole')) { files.add('pk_field.webp'); files.add('pk.webp'); files.add(`bat_${G.char}.webp`); }      // (v44) the penalty shoot-out's (v46: the runner kicks)
     if (G.sl || near('toiletBowl')) files.add('sl.webp');                                   // (v44) the toilet jackpot's
     const dc = ((S2_X - s.lx) % LAP + LAP) % LAP;            // the flush cut scene's pictures, near the end of the body
     if (G.cut || G.cutTail || dc < Math.max(2500, G.v * 8)) files.add('cut_flush.webp');
@@ -685,14 +685,17 @@
     const dg = /^(Digit|Numpad)([0-9])$/.exec(e.code);                // the germ and memory games: the number keys
     if (dg && G.wm && G.mode === 'play') { if (WM_KEY[dg[2]] !== undefined) wmKey(WM_KEY[dg[2]]); e.preventDefault(); return; }
     if (dg && G.mem && G.mode === 'play') { memKey(+dg[2] - 1); e.preventDefault(); return; }
-    if (G.pk && G.mode === 'play' && PK_KEY[e.code]) { const [gx, gh] = PK_KEY[e.code]; pkKick(gx, gh, 0.5); e.preventDefault(); return; }   // (keys: a corner each)
+    if (G.pk && G.mode === 'play') {                        // the shoot-out: the arrows aim, space (or enter) shoots
+      const k = PK_KEYS[e.code]; if (k) { pkKeys.add(k); e.preventDefault(); return; }
+      if (['Space', 'Enter', 'KeyJ', 'KeyF'].includes(e.code)) { pkShoot(); e.preventDefault(); return; }
+    }
     if (G.sl && G.mode === 'play' && ['Space', 'Enter', 'ArrowUp', 'ArrowDown', 'KeyJ', 'KeyF'].includes(e.code)) { slTap(-99, -99); e.preventDefault(); return; }
     if (G.orb && G.mode === 'play' && ['Space', 'ArrowUp', 'ArrowDown', 'KeyW', 'KeyS', 'Enter', 'KeyJ', 'KeyF'].includes(e.code)) { orbTap(); e.preventDefault(); return; }
     if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') { keyJump = true; doJump(); e.preventDefault(); }
     if (e.code === 'ArrowDown' || e.code === 'KeyS') { keySlide = true; setSlide(); e.preventDefault(); }
     if (e.code === 'Escape' || e.code === 'KeyP') { if (G.mode === 'play') pause(); else if (G.mode === 'pause') resume(); }
   });
-  addEventListener('keyup', (e) => { if (BB_KEY[e.code]) bbKeys.delete(BB_KEY[e.code]); if (e.code === 'ArrowDown' || e.code === 'KeyS') { keySlide = false; setSlide(); } if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') keyJump = false; });
+  addEventListener('keyup', (e) => { if (BB_KEY[e.code]) bbKeys.delete(BB_KEY[e.code]); if (PK_KEYS[e.code]) pkKeys.delete(PK_KEYS[e.code]); if (e.code === 'ArrowDown' || e.code === 'KeyS') { keySlide = false; setSlide(); } if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') keyJump = false; });
 
   // ---------------------------------------------------------------- the mini-games' songs (stages.js): five each, in turn
   // Each go of a mini-game takes the next of its songs; the turn is kept (the next run goes on from it). The songs are
@@ -2320,49 +2323,75 @@
   }
   const hexRGB = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)).join(',');
 
-  // ---------------------------------------------------------------- the penalty shoot-out (under the manhole) (v44)
-  // Down in a round brick sewer, a goal of white pipes; the keeper is a sewer rat in a jersey and big gloves. Five
-  // kicks: swipe up from the bottom of the screen to shoot: the way you swipe (left, right) is where it goes, how far up
-  // you swipe is how high (too far: over the bar). The keeper guesses a side as you kick (more often right as it goes
-  // on); it cannot reach the top corners. A goal: 1000 points. (minigames2.py: the field, the keeper, the ball)
+  // ---------------------------------------------------------------- the penalty shoot-out (under the manhole) (v44, v46)
+  // Down in a round brick sewer, a goal of white pipes; the keeper is the user's mouse. Five kicks. (v46) The ball on the
+  // spot, your runner behind it: the left of the screen is a stick for the aim (a ring on the goal; it can be put off the
+  // goal too); the right is the shoot button, and the power bar under the ball has a needle running left and right in it:
+  // where the needle is when you press is how hard. Too soft (left of the green): a slow ball the keeper gets to and
+  // holds. In the green: it goes where you aimed (the keeper guesses a side as you kick; it cannot reach the top
+  // corners); in the bright middle of the green, a hard one it has no time for (unless straight at it). Too hard (past
+  // the green): over the bar. Then your runner runs up and kicks it. A goal: 1000 points.
   const PKF = M.pk || { goal: { l: 128, r: 292, bar: 58, line: 118 }, spot: [210, 160] };
-  const PK_N = 5, PK_INTRO = 2.6, PK_END = 2.6, PK_AFTER = 1.7, PK_AFTER_GOAL = 2.2, PK_WAIT = 7, PK_PTS = 1000;
+  const PK_N = 5, PK_INTRO = 3.0, PK_END = 2.6, PK_AFTER = 1.7, PK_AFTER_GOAL = 2.2, PK_WAIT = 9, PK_PTS = 1000;
   const PK_HALF = (PKF.goal.r - PKF.goal.l) / 2, PK_TALL = PKF.goal.line - PKF.goal.bar;           // 82 wide each side, 60 high
   // (v45) the keeper is the user's mouse (keeper_user.py): pk_k0 ready (front on, gloves up), pk_dR1..6 / pk_dL1..6 the
   // dive to the right / left (standing, crouching, leaping, stretched with the glove out, stretched lower, down); each
   // with its middle (c), bottom and leading glove (lead), in units
-  const PK_KEY = { ArrowLeft: [-60, 14], KeyA: [-60, 14], ArrowRight: [60, 14], KeyD: [60, 14], KeyQ: [-62, 50], KeyE: [62, 50], ArrowUp: [0, 50], KeyW: [0, 50], ArrowDown: [0, 10], KeyS: [0, 10], Space: [0, 10] };
+  const PK_RUN = 0.5;                                        // the run-up, s
+  const PK_SWEEP = [0.8, 0.55];                              // the needle's run end to end, s: the first kick .. the last
+  const PK_WEAK = 0.55, PK_STRONG = 0.8, PK_PERF = [0.635, 0.715];      // the power bar: soft | green (bright middle) | too hard
+  const PK_AX = PK_HALF + 16, PK_AH = PK_TALL + 14, PK_AIMV = 100;      // how far the aim goes; how fast (units/s, stick right out)
+  const PK_PAD = { r: 19, m: 32, y: 146 };                    // the stick (left) and the button (right): radius, in from the side, height
   const pkGX = (gx) => NWf / 2 + gx, pkGY = (gh) => PKF.goal.line - gh;              // a point on the goal's face -> screen
+  const pkKeys = new Set(), PK_KEYS = { ArrowLeft: 'L', KeyA: 'L', ArrowRight: 'R', KeyD: 'R', ArrowUp: 'U', KeyW: 'U', ArrowDown: 'D', KeyS: 'D' };
   function startPK() {
     holdBoost();
     G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
     G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
-    G.pk = { st: 'intro', stT: G.t, inT: G.t, k: 0, res: [], gain: 0, swipe: null, trail: [], shot: null, msg: null, fx: [] };
-    G.slideHeld = false; held.clear(); pressed.jump = false;
+    G.pk = { st: 'intro', stT: G.t, inT: G.t, k: 0, res: [], gain: 0, shot: null, msg: null, fx: [], aim: [0, 26], pad: null, nt: 0, power: null, kind: null, fireT: -9, pressT: -9 };
+    G.slideHeld = false; held.clear(); pressed.jump = false; pkKeys.clear();
   }
   function endPK() {
     G.pk = null; G.games = (G.games || 0) + 1; resumeBoost();
     G.genX = Math.max(G.genX, G.x + NW * 0.8);
     G.banner = G.t;
   }
-  function pkReady() { const p = G.pk; p.st = 'ready'; p.stT = G.t; p.shot = null; p.msg = null; p.trail = []; SND.play('pkWhistle'); }
-  // the kick: where on the goal's face it is going (gx from the middle, gh above the line), how long it takes
-  function pkKick(gx, gh, T) {
-    const p = G.pk; if (!p || p.st !== 'ready') return;
+  function pkReady() {
+    const p = G.pk; p.st = 'aim'; p.stT = G.t; p.shot = null; p.msg = null; p.power = null; p.kind = null; p.nt = 0; p.aim = [0, 26];
+    p.pilot = [(Math.random() < 0.5 ? -1 : 1) * (40 + Math.random() * 36), 10 + Math.random() * 40];
+    SND.play('pkWhistle');
+  }
+  // the needle: 0 .. 1 .. 0 (faster each kick)
+  const pkNeedle = (p) => { const T = PK_SWEEP[0] + (PK_SWEEP[1] - PK_SWEEP[0]) * p.k / (PK_N - 1), u = (p.nt / T) % 2; return u < 1 ? u : 2 - u; };
+  const pkZone = (v) => v < PK_WEAK ? 'weak' : v > PK_STRONG ? 'strong' : v >= PK_PERF[0] && v <= PK_PERF[1] ? 'perfect' : 'good';
+  // the shoot button: the power is what the needle shows now; the aim is kept; the runner runs up
+  function pkShoot() {
+    const p = G.pk; if (!p || p.st !== 'aim') return;
+    p.power = pkNeedle(p); p.kind = pkZone(p.power); p.st = 'run'; p.stT = G.t; p.pressT = G.t; p.pad = null;
+    SND.play('ui'); buzz(BUZZ_TAP);
+  }
+  // the kick (as the runner's foot meets the ball): where it goes and how it comes out, by the aim and the power
+  function pkKick(gx, gh, T, kind = 'good') {
+    const p = G.pk; if (!p || !['aim', 'run'].includes(p.st)) return;
+    if (kind === 'weak') gh *= 0.65;                           // (a soft one does not get up)
+    if (kind === 'strong') { gh = Math.max(gh, PK_TALL) + 12 + (p.power - PK_STRONG) * 140; gx *= 1.12; }
     const side = gx < -28 ? -1 : gx > 28 ? 1 : 0;
     const right = Math.random() < 0.33 + 0.06 * p.k;                       // the keeper guesses right more often as it goes on (1 in 3 .. 4 in 7)
     const others = [-1, 0, 1].filter((s) => s !== side);
-    const dive = right ? side : others[Math.floor(Math.random() * 2)];
-    // can it reach? diving low and middle on its side, jumping in the middle; never the top corners
-    const reach = dive === 0 ? Math.abs(gx) < 30 && gh < 48 : Math.sign(gx) === dive && Math.abs(gx) > 14 && Math.abs(gx) < PK_HALF + 4 && gh < 46;
+    let dive = right ? side : others[Math.floor(Math.random() * 2)];
+    // can it reach? diving low and middle on its side, jumping in the middle; never the top corners. A soft one it gets to
+    // anyway; a hard one only straight at it
+    let reach = dive === 0 ? Math.abs(gx) < 30 && gh < 48 : Math.sign(gx) === dive && Math.abs(gx) > 14 && Math.abs(gx) < PK_HALF + 4 && gh < 46;
+    if (kind === 'weak') { dive = side; reach = true; }
+    if (kind === 'perfect') reach = dive === 0 && Math.abs(gx) < 20 && gh < 40;
     let res;
     if (gh > PK_TALL + 3 || Math.abs(gx) > PK_HALF + 5) res = 'miss';
     else if (Math.abs(Math.abs(gx) - PK_HALF) <= 4 || Math.abs(gh - PK_TALL) <= 3) res = 'post';
     else if (reach) res = 'save';
     else res = 'goal';
-    p.shot = { gx, gh, T, t0: G.t, dive, res, done: false };
-    p.st = 'fly'; p.stT = G.t;
-    SND.play('pkKick'); buzz(BUZZ_TAP);
+    p.shot = { gx, gh, T, t0: G.t, dive, res, done: false, kind };
+    p.st = 'fly'; p.stT = G.t; p.fireT = G.t;
+    SND.play('pkKick'); buzz(kind === 'perfect' ? [30, 20, 40] : BUZZ_TAP);
   }
   function pkLand() {                                       // the ball gets to the goal's face
     const p = G.pk, s = p.shot;
@@ -2372,36 +2401,46 @@
     else if (s.res === 'save') { SND.play('pkSave'); buzz(30); }
     else if (s.res === 'post') { SND.play('pkPost'); buzz(25); p.fx.push({ kind: 'post', at, t: G.t }); }
     else SND.play('pkMiss');
-    p.msg = { s: { goal: '골!!', save: '막혔다!', post: '골대!', miss: s.gh > PK_TALL ? '넘어갔다' : '빗나갔다' }[s.res], t: G.t, res: s.res };
+    p.msg = { s: { goal: '골!!', save: s.kind === 'weak' ? '잡혔다!' : '막혔다!', post: '골대!', miss: s.gh > PK_TALL ? '넘어갔다' : '빗나갔다' }[s.res], t: G.t, res: s.res };
   }
-  function stepPK() {
+  function stepPK(dt) {
     const p = G.pk;
     if (p.st === 'intro') { if (G.t - p.stT > PK_INTRO) pkReady(); return; }
-    if (p.st === 'ready') {
-      if (AUTO && !window.__noAuto && G.t - p.stT > 0.5) {                // the test pilot: a corner, low or middle height
-        const sd = Math.random() < 0.5 ? -1 : 1; pkKick(sd * (48 + Math.random() * 26), 8 + Math.random() * 34, 0.5);
-      } else if (G.t - p.stT > PK_WAIT) pkKick((Math.random() * 2 - 1) * 20, 6, 0.6);   // (no swipe: a weak one down the middle)
+    if (p.st === 'aim') {
+      p.nt += dt;
+      let vx = 0, vy = 0;
+      if (p.pad) { vx = p.pad.kx; vy = p.pad.ky; }
+      if (pkKeys.has('L')) vx -= 1; if (pkKeys.has('R')) vx += 1; if (pkKeys.has('U')) vy -= 1; if (pkKeys.has('D')) vy += 1;
+      if (AUTO && !window.__noAuto) {                       // the test pilot: to a corner, then the button in the green
+        const dx = p.pilot[0] - p.aim[0], dy = p.aim[1] - p.pilot[1], d = Math.hypot(dx, dy);
+        if (d > 2) { vx = dx / d; vy = dy / d; } else if (G.t - p.stT > 0.8 && pkZone(pkNeedle(p)) !== 'weak' && pkZone(pkNeedle(p)) !== 'strong') pkShoot();
+      }
+      p.aim[0] = Math.max(-PK_AX, Math.min(PK_AX, p.aim[0] + vx * PK_AIMV * dt));
+      p.aim[1] = Math.max(0, Math.min(PK_AH, p.aim[1] - vy * PK_AIMV * dt));
+      if (p.st === 'aim' && G.t - p.stT > PK_WAIT) pkShoot();                  // (nothing pressed: it goes as the needle is)
     }
+    if (p.st === 'run' && G.t - p.stT >= PK_RUN) pkKick(p.aim[0], p.aim[1], { weak: 1.1, good: 0.55, perfect: 0.42, strong: 0.45 }[p.kind], p.kind);
     if (p.st === 'fly' && G.t - p.shot.t0 >= p.shot.T) pkLand();
     if (p.st === 'after' && G.t - p.stT > (p.shot.res === 'goal' ? PK_AFTER_GOAL : PK_AFTER)) {
       if (++p.k >= PK_N) { p.st = 'done'; p.stT = G.t; SND.play(p.res.includes('goal') ? 'orbClear' : 'bbOut'); }
       else pkReady();
     }
-    p.trail = p.trail.filter((q) => G.t - q.t < 0.35);
     p.fx = p.fx.filter((e) => G.t - e.t < 1.6);
     if (p.st === 'done' && G.t - p.stT > PK_END) endPK();
   }
-  // the swipe: from where the finger goes down (the lower part of the screen) to where it comes up
-  function pkDown(id, x, y) { const p = G.pk; if (!p || p.st !== 'ready') return; p.swipe = { id, x, y, t: G.t }; p.trail = [{ x, y, t: G.t }]; }
-  function pkMove(id, x, y) { const p = G.pk; if (!p || !p.swipe || p.swipe.id !== id) return; p.trail.push({ x, y, t: G.t }); }
-  function pkUp(id, x, y) {
-    const p = G.pk; if (!p || !p.swipe || p.swipe.id !== id) return;
-    const s = p.swipe; p.swipe = null;
-    if (p.st !== 'ready' || x === undefined) return;
-    const dx = x - s.x, dy = y - s.y;
-    if (dy > -14) return;                                    // not up: not a kick
-    pkKick(Math.max(-150, Math.min(150, dx * 1.9)), Math.max(0, (-dy - 14) * 1.1), Math.max(0.42, Math.min(0.62, 0.62 - (G.t - s.t) * 0.3)));
+  // touches: the left half is the stick (it moves from where the finger goes down), the right half the button
+  function pkDown(id, x, y) {
+    const p = G.pk; if (!p || p.st !== 'aim') return;
+    if (x < NW / 2) p.pad = { id, ox: x, oy: y, kx: 0, ky: 0 };
+    else pkShoot();
   }
+  function pkMove(id, x, y) {
+    const p = G.pk; if (!p || !p.pad || p.pad.id !== id) return;
+    let dx = (x - p.pad.ox) / PK_PAD.r, dy = (y - p.pad.oy) / PK_PAD.r; const d = Math.hypot(dx, dy);
+    if (d > 1) { dx /= d; dy /= d; }
+    p.pad.kx = dx; p.pad.ky = dy;
+  }
+  function pkUp(id) { const p = G.pk; if (p && p.pad && p.pad.id === id) p.pad = null; }
   // ---- drawing
   function pkBallAt(s, u) {                                 // the ball u of the way (0 the spot .. 1 the goal's face, on past it)
     const zx = NWf / 2, sx = zx + (PKF.spot[0] - 210), sy = PKF.spot[1] - 7, q = Math.min(1, u);
@@ -2454,6 +2493,78 @@
     const q = Math.min(1, (t - Tc - 0.3) / 0.12);
     return { nm: f(6), x: cx5 + d * 4 + (cx6 - cx5 - d * 4) * q, y: cy5 + 8 + (cy6 - cy5 - 8) * q * q, at: 'c' };
   }
+  // (v46) the runner: waiting behind the ball and to its left (turned towards it: its back-right picture), running up
+  // (bobbing, getting smaller as it goes away from us), the kick (turned to the goal, a lunge and a lean), then still
+  function drawKicker(p, al) {
+    const n = G.char, zx = NWf / 2, bx = zx + (PKF.spot[0] - 210), by = PKF.spot[1];
+    const A = { x: bx - 60, y: 178, k: 0.56 }, B = { x: bx - 16, y: by + 6, k: 0.5 };
+    let x = A.x, y = A.y, k = A.k, view = '135', lean = 0, bob = Math.abs(Math.sin(G.t * 2.6)) * 0.8;
+    if (p.st === 'run') {
+      const q = Math.min(1, (G.t - p.stT) / PK_RUN), e = q * q * (3 - 2 * q) * 0.6 + q * 0.4;
+      x = A.x + (B.x - A.x) * e; y = A.y + (B.y - A.y) * e; k = A.k + (B.k - A.k) * e;
+      bob = Math.abs(Math.sin(q * Math.PI * 4)) * 4; lean = 8;
+    } else if (['fly', 'after', 'done'].includes(p.st)) {
+      const v = G.t - p.fireT, l = v < 0.1 ? v / 0.1 : Math.max(0, 1 - (v - 0.1) / 0.35);
+      x = B.x + 6 * l; y = B.y - 2 * l; k = B.k; view = '180'; lean = 18 * l; bob = 0;
+    }
+    const sp = M.sprites[`bt_${n}_${view}`]; if (!sp) return;
+    ctx.globalAlpha = al * 0.3; ctx.fillStyle = '#000000'; ctx.beginPath(); ctx.ellipse(x, y, sp.w * k * 0.32, 2.4 * k / 0.5, 0, 0, 6.2832); ctx.fill(); ctx.globalAlpha = al;
+    ctx.save(); ctx.translate(x, y - bob); ctx.rotate(lean * Math.PI / 180); ctx.scale(k, k);
+    spr(`bt_${n}_${view}`, -sp.foot[0], -sp.foot[1], 1, sp.w, sp.h); ctx.restore(); ctx.globalAlpha = al;
+  }
+  // the stick (left), the shoot button (right) and the power bar (under the ball)
+  function drawPKControls(p, al) {
+    const live = p.st === 'aim', on = ['aim', 'run', 'fly', 'after'].includes(p.st); if (!on) return;
+    const R = PK_PAD.r, sx = PK_PAD.m, by = PK_PAD.y, bxr = NWf - PK_PAD.m;
+    // the stick: a ring, a knob that follows the finger
+    ctx.globalAlpha = al * (live ? 1 : 0.45);
+    ctx.beginPath(); ctx.arc(sx, by, R, 0, 6.2832); ctx.fillStyle = 'rgba(26,10,20,0.5)'; ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.stroke();
+    const kx = p.pad ? p.pad.kx : 0, ky = p.pad ? p.pad.ky : 0;
+    ctx.beginPath(); ctx.arc(sx + kx * R * 0.55, by + ky * R * 0.55, 8.5, 0, 6.2832); ctx.fillStyle = p.pad ? 'rgba(255,236,170,0.95)' : 'rgba(255,255,255,0.85)'; ctx.fill();
+    ctx.lineWidth = 1; ctx.strokeStyle = '#1a0a14'; ctx.stroke();
+    label('조준', sx, by + R + 6.5, 6.5, 'center', al * (live ? 1 : 0.45), '#ffffff');
+    // the button
+    const pr = G.t - p.pressT < 0.15;
+    ctx.globalAlpha = al * (live ? 1 : 0.45);
+    ctx.beginPath(); ctx.arc(bxr, by + (pr ? 1 : 0), R, 0, 6.2832);
+    const g = ctx.createRadialGradient(bxr - 5, by - 6, 2, bxr, by, R); g.addColorStop(0, pr ? '#ffd0a0' : '#ffb070'); g.addColorStop(0.55, pr ? '#e85020' : '#ff6a2a'); g.addColorStop(1, '#a82a10');
+    ctx.fillStyle = g; ctx.fill(); ctx.lineWidth = 1.4; ctx.strokeStyle = '#2a0a06'; ctx.stroke();
+    label('슛!', bxr, by + (pr ? 1 : 0), 10, 'center', al * (live ? 1 : 0.55), '#ffffff');
+    if (live) { ctx.globalAlpha = al * (0.25 + 0.25 * Math.sin(G.t * 6)); ctx.beginPath(); ctx.arc(bxr, by, R + 3, 0, 6.2832); ctx.lineWidth = 1.5; ctx.strokeStyle = '#ffd080'; ctx.stroke(); }
+    ctx.globalAlpha = al;
+    // the power bar (right of the ball, left of the button): soft (blue grey) | the green (bright in its middle) | too
+    // hard (red); the needle
+    const x0 = NWf / 2 + 16, W = Math.min(120, bxr - R - 10 - x0), H = 8, y0 = 168;
+    rrect(x0 - 1.5, y0 - 1.5, W + 3, H + 3, 5); ctx.fillStyle = '#1a0a14'; ctx.fill();
+    ctx.save(); rrect(x0, y0, W, H, 4); ctx.clip();
+    const zone = (a, b, c0, c1) => { const gg = ctx.createLinearGradient(0, y0, 0, y0 + H); gg.addColorStop(0, c0); gg.addColorStop(1, c1); ctx.fillStyle = gg; ctx.fillRect(x0 + a * W, y0, (b - a) * W, H); };
+    zone(0, PK_WEAK, '#9ab0d0', '#4a5a7a'); zone(PK_WEAK, PK_STRONG, '#7af08a', '#20a040'); zone(PK_PERF[0], PK_PERF[1], '#fff6a0', '#f0b020'); zone(PK_STRONG, 1, '#ff8a7a', '#c01818');
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(x0, y0, W, H * 0.35);
+    ctx.restore();
+    label('약', x0 + W * PK_WEAK / 2, y0 - 4, 5.5, 'center', al * 0.9, '#c8d8f0');
+    label('정타', x0 + W * (PK_PERF[0] + PK_PERF[1]) / 2, y0 - 4, 5.5, 'center', al, '#ffe68a');
+    label('셈', x0 + W * (PK_STRONG + 1) / 2, y0 - 4, 5.5, 'center', al * 0.9, '#ffb0a8');
+    const v = p.st === 'aim' ? pkNeedle(p) : p.power ?? 0, nx = x0 + v * W;
+    ctx.beginPath(); ctx.moveTo(nx - 3, y0 - 3.5); ctx.lineTo(nx + 3, y0 - 3.5); ctx.lineTo(nx, y0 + 1); ctx.closePath(); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.lineWidth = 0.8; ctx.strokeStyle = '#1a0a14'; ctx.stroke();
+    ctx.fillStyle = '#1a0a14'; ctx.fillRect(nx - 1.3, y0 - 1, 2.6, H + 2); ctx.fillStyle = '#ffffff'; ctx.fillRect(nx - 0.6, y0 - 0.5, 1.2, H + 1);
+    // what the press came to
+    if (p.kind && p.st !== 'aim') {
+      const t = { perfect: ['정타!', '#ffe14a'], good: ['좋아요', '#8af09a'], weak: ['약해요', '#a8c0e8'], strong: ['너무 세요', '#ff8a7a'] }[p.kind], v2 = G.t - p.pressT;
+      label(t[0], x0 + W / 2, y0 - 13, (p.kind === 'perfect' ? 10 : 8) * (1 + 0.25 * Math.max(0, 1 - v2 / 0.2)), 'center', al, t[1]);
+    }
+  }
+  // the aim on the goal: a ring (red off the goal), pulsing while you can move it
+  function drawPKAim(p, al) {
+    if (!['aim', 'run'].includes(p.st)) return;
+    const x = pkGX(p.aim[0]), y = pkGY(p.aim[1]), off = Math.abs(p.aim[0]) > PK_HALF - 3 || p.aim[1] > PK_TALL - 2;
+    const r = 6 + (p.st === 'aim' ? Math.sin(G.t * 7) * 0.8 : 0), c = off ? '#ff5a5a' : '#ffe68a';
+    ctx.globalAlpha = al; ctx.lineWidth = 2.6; ctx.strokeStyle = '#1a0a14';
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.stroke();
+    ctx.lineWidth = 1.4; ctx.strokeStyle = c; ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.stroke();
+    ctx.beginPath(); for (const [a, b] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) { ctx.moveTo(x + a * (r - 2.5), y + b * (r - 2.5)); ctx.lineTo(x + a * (r + 3), y + b * (r + 3)); }
+    ctx.lineWidth = 1.2; ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, y, 1.1, 0, 6.2832); ctx.fillStyle = c; ctx.fill();
+  }
   function drawPK() {
     const p = G.pk; if (!p) return;
     world();
@@ -2489,16 +2600,9 @@
     // the ball in front: on the spot, in flight, saved (knocked away), off the post
     if (!s) ball({ x: zx + (PKF.spot[0] - 210), y: PKF.spot[1] - 7, k: 1 }, 0);
     else if (!behind) ball(B, spin);
-    // the swipe's trail
-    if (p.trail.length > 1) {
-      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-      for (let i = 1; i < p.trail.length; i++) {
-        const a = p.trail[i - 1], b = p.trail[i], f = 1 - (G.t - b.t) / 0.35;
-        ctx.globalAlpha = al * Math.max(0, f) * 0.8; ctx.lineWidth = 4 * f + 1; ctx.strokeStyle = '#ffe68a';
-        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-      }
-      ctx.globalAlpha = al;
-    }
+    drawKicker(p, al);
+    drawPKAim(p, al);
+    drawPKControls(p, al);
     // a goal: a burst of confetti from the net, the screen flashing a moment
     for (const e of p.fx) {
       const v = G.t - e.t;
@@ -2524,7 +2628,6 @@
       if (r === 'goal') { ctx.beginPath(); ctx.arc(x, y, 5, 0, 6.2832); ctx.lineWidth = 1.2; ctx.strokeStyle = '#5ae07a'; ctx.stroke(); }
     }
     ctx.globalAlpha = al;
-    if (p.st === 'ready' && !p.trail.length) label('위로 쓸어서 차요', zx, 172, 7.5, 'center', al * (0.6 + 0.4 * Math.sin(G.t * 5)), '#ffffff');
     if (p.msg && p.st !== 'done') {
       const v = G.t - p.msg.t, big = p.msg.res === 'goal', a = Math.min(1, v / 0.08) * Math.max(0, Math.min(1, ((big ? 2.0 : 1.5) - v) / 0.3));
       const sc = big ? 1 + 0.25 * Math.max(0, 1 - v / 0.25) : 1;
@@ -2533,10 +2636,11 @@
     }
     if (p.st === 'intro') {
       const v = G.t - p.stT, a = Math.min(1, v / 0.3) * Math.max(0, Math.min(1, (PK_INTRO - v) / 0.3));
-      ctx.globalAlpha = al * a * 0.8; rrect(zx - 118, 52, 236, 54, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = al;
-      label('승부차기! 5번 차요', zx, 66, 15, 'center', a, '#ffe0a8');
-      label('아래에서 위로 쓸어 차요: 쓸어 올린 쪽으로 날아가요', zx, 84, 7.5, 'center', a, '#ffffff');
-      label('길게 쓸면 높이 (너무 길면 넘어가요) · 골마다 1,000점', zx, 95, 7.5, 'center', a, '#ffffff');
+      ctx.globalAlpha = al * a * 0.8; rrect(zx - 124, 50, 248, 64, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = al;
+      label('승부차기! 5번 차요', zx, 64, 15, 'center', a, '#ffe0a8');
+      label('왼쪽으로 골대 어디에 찰지 조준, 오른쪽 버튼으로 슛', zx, 82, 7.5, 'center', a, '#ffffff');
+      label('세기 바의 초록 칸에서 눌러야 정타 · 약하면 잡히고 너무 세면 넘어가요', zx, 93, 7, 'center', a, '#ffffff');
+      label('골마다 1,000점', zx, 104, 7, 'center', a, '#ffe68a');
     }
     if (p.st === 'done') {
       const v = G.t - p.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (PK_END - v) / 0.35));
@@ -2956,7 +3060,7 @@
     if (G.bb) stepBaseball(dt);
     if (G.wm) stepWhack();
     if (G.mem) stepMemory();
-    if (G.pk) stepPK();
+    if (G.pk) stepPK(dt);
     if (G.sl) stepSlot(dt);
     if (G.cut) stepCut(dt);
     else if (!busy() && G.station >= 0 && COURSE[G.station][5] === STAGE2 - 1) cutCheck();
@@ -3935,9 +4039,10 @@
     window.__bbSwing = () => bbSwing();
     window.__wm = () => { const w = G.wm; if (!w) return null; return { st: w.st, u: w.st === 'play' ? +(G.t - w.t0).toFixed(2) : null, caught: w.caught, missed: w.missed, oops: w.oops, gain: w.gain,
       moles: w.moles.map((m) => { const p = wmPlace(m), s = M.sprites[wmName(m)]; return { h: m.h, kind: m.kind, good: m.good, st: m.st, q: +p.q.toFixed(2), x: +p.x.toFixed(1), y: +(p.y - s.foot[1] * p.k * 0.55).toFixed(1) }; }) }; };
-    window.__pk = () => { const p = G.pk; if (!p) return null; return { st: p.st, k: p.k, res: p.res.slice(), gain: p.gain, shot: p.shot ? { ...p.shot } : null }; };
+    window.__pk = () => { const p = G.pk; if (!p) return null; return { st: p.st, k: p.k, res: p.res.slice(), gain: p.gain, shot: p.shot ? { ...p.shot } : null, aim: p.aim.slice(), power: p.power, kind: p.kind, needle: pkNeedle(p), pad: p.pad && { ...p.pad } }; };
+    window.__pkForce = (gx, gh, power) => { const p = G.pk; if (!p || p.st !== 'aim') return; p.aim = [gx, gh]; pkShoot(); p.power = power; p.kind = pkZone(power); };
     window.__sl = () => { const s = G.sl; if (!s) return null; return { st: s.st, k: s.k, res: s.res.slice(), gain: s.gain, want: s.want && s.want.slice(), reach: !!s.reach, reels: s.reels.map((r) => ({ pos: +r.pos.toFixed(2), spin: r.spin, stop: !!r.stop })), mx: slMX(), btns: SLF.btns.map(([x, y]) => [slMX() + x, slMY() + y]) }; };
-    window.__pkKick = (gx, gh) => pkKick(gx, gh, 0.5);
+    window.__pkKick = (gx, gh) => pkKick(gx, gh, 0.5, 'good');
     window.__memg = () => { const m = G.mem; if (!m) return null; return { st: m.st, seq: m.seq.slice(), k: m.k, round: m.round, res: m.res.slice(), gain: m.gain, best: m.best || 0, at: [0, 1, 2, 3, 4].map(memAt) }; };
     window.__bbTypes = BB_TYPES; window.__bbBallAt = (t) => bbBallAt(t);
     window.__bbAim = (x, y) => { if (G.bb) G.bb.cur = [x, y]; };

@@ -154,7 +154,73 @@ window.BodySound = (() => {
     mem3: (c, o, t) => bell(c, o, t, 79), mem4: (c, o, t) => bell(c, o, t, 81),
     memOk: (c, o, t) => { [72, 76, 79, 84].forEach((n, i) => bell(c, o, t + i * 0.07, n, 0.6)); },
     memBad: (c, o, t) => { for (const d of [0, 0.16]) { tone(c, o, t + d, 'square', 150, 132, 0.12, 0.07, 0.004); tone(c, o, t + d, 'sine', 75, 70, 0.12, 0.25, 0.004); } },
+    // the penalty shoot-out (v44): the referee's whistle (a trilling pea whistle), the kick (a leathery thump), a goal
+    // (the net, the crowd's roar, a fanfare), a save (gloves on the ball, the crowd's 'ooh'), the post (a ringing clang),
+    // wide or over (the crowd's 'aww')
+    pkWhistle: (c, o, t) => { trill(c, o, t, 2950, 0.3, 0.16); burst(c, o, t, 'bandpass', 3000, 3000, 2.5, 0.3, 0.05, 0.01); },
+    pkKick: (c, o, t) => {
+      tone(c, o, t, 'sine', 150, 55, 0.11, 0.6, 0.001, 0.09);
+      burst(c, o, t, 'lowpass', 2200, 380, 0.8, 0.06, 0.45, 0.0008);
+      burst(c, o, t + 0.01, 'bandpass', 900, 2400, 1.2, 0.22, 0.12, 0.02);                      // the ball going off (a whoosh)
+    },
+    pkGoal: (c, o, t) => {
+      burst(c, o, t, 'bandpass', 2400, 800, 1.1, 0.32, 0.4, 0.004);                             // into the net
+      burst(c, o, t + 0.05, 'bandpass', 850, 1300, 0.6, 2.0, 0.2, 0.25);                         // the crowd's roar, rising and going on
+      burst(c, o, t + 0.08, 'bandpass', 2300, 2800, 0.8, 1.7, 0.07, 0.3);
+      [72, 76, 79, 84].forEach((n, i) => tone(c, o, t + 0.12 + i * 0.08, 'square', NOTE(n), null, 0.12, 0.06, 0.004));
+      [72, 76, 79, 84].forEach((n) => tone(c, o, t + 0.46, 'triangle', NOTE(n), null, 0.8, 0.09, 0.01));
+    },
+    pkSave: (c, o, t) => {
+      burst(c, o, t, 'lowpass', 1700, 360, 0.8, 0.09, 0.55, 0.0008);
+      tone(c, o, t, 'sine', 210, 90, 0.1, 0.35, 0.001, 0.09);
+      crowd(c, o, t + 0.1, 560, 760, 0.9, 0.11);
+    },
+    pkPost: (c, o, t) => {
+      burst(c, o, t, 'highpass', 3000, 3000, 0.8, 0.015, 0.4, 0.0005);
+      for (const [f, k, d] of [[612, 0.22, 0.9], [1188, 0.14, 0.7], [1977, 0.09, 0.5], [2906, 0.05, 0.35]]) tone(c, o, t, 'sine', f, f * 0.995, d, k, 0.001);
+      crowd(c, o, t + 0.15, 520, 820, 1.0, 0.12);
+    },
+    pkMiss: (c, o, t) => crowd(c, o, t + 0.05, 820, 430, 1.0, 0.24),
+    // the toilet jackpot (v44): the flush lever (a clunk, the water rushing), the reels going by (ticks), a reel
+    // stopping (a thunk), a reach (a rising sweep, then a drum roll), two alike (a ding-ding), three (bells running up,
+    // coins), the jackpot (a fanfare and a long fall of coins)
+    slLever: (c, o, t) => {
+      burst(c, o, t, 'bandpass', 1400, 1400, 3, 0.03, 0.3, 0.001);
+      tone(c, o, t + 0.02, 'sine', 180, 90, 0.09, 0.35, 0.002, 0.08);
+      const w = water(c, o, 1800); burst(c, w, t + 0.08, 'lowpass', 1600, 420, 0.8, 0.7, 0.28, 0.05);
+      [[0.18, 620], [0.26, 840], [0.36, 700]].forEach(([d, f]) => bubble(c, w, t + d, f, 0.08));
+    },
+    slTick: (c, o, t) => tone(c, o, t, 'triangle', 2300, null, 0.012, 0.06, 0.001),
+    slStop: (c, o, t) => { tone(c, o, t, 'sine', 320, 150, 0.07, 0.34, 0.001, 0.06); burst(c, o, t, 'bandpass', 1300, 900, 2, 0.04, 0.25, 0.0008); },
+    slReach: (c, o, t) => { tone(c, o, t, 'sawtooth', 220, 880, 0.5, 0.08, 0.01, 0.5); tone(c, o, t, 'square', 330, 1320, 0.5, 0.05, 0.01, 0.5); },
+    slDrum: (c, o, t) => { burst(c, o, t, 'bandpass', 1900, 1700, 0.8, 0.05, 0.16, 0.001); tone(c, o, t, 'sine', 190, 150, 0.04, 0.08, 0.001); },
+    slSmall: (c, o, t) => { tone(c, o, t, 'triangle', NOTE(84), null, 0.1, 0.16); tone(c, o, t + 0.09, 'triangle', NOTE(88), null, 0.22, 0.16); },
+    slWin: (c, o, t) => {
+      [72, 76, 79, 84, 88, 91, 96].forEach((n, i) => tone(c, o, t + i * 0.05, 'square', NOTE(n), null, 0.1, 0.05, 0.003));
+      [84, 88, 91].forEach((n) => tone(c, o, t + 0.38, 'triangle', NOTE(n), null, 0.7, 0.1, 0.01));
+      coins(c, o, t + 0.1, 16, 0.9);
+    },
+    slJackpot: (c, o, t) => {
+      for (let r = 0; r < 3; r++) [72, 76, 79, 84, 88, 91].forEach((n, i) => tone(c, o, t + r * 0.32 + i * 0.045, 'square', NOTE(n + r * 2), null, 0.09, 0.08, 0.003));
+      [[0.98, [72, 76, 79, 84]], [1.3, [74, 77, 81, 86]], [1.62, [76, 79, 84, 88]]].forEach(([d, ch]) => ch.forEach((n) => tone(c, o, t + d, 'triangle', NOTE(n), null, d > 1.5 ? 1.4 : 0.3, 0.12, 0.008)));
+      coins(c, o, t + 0.2, 60, 2.6);
+      burst(c, o, t + 0.9, 'bandpass', 900, 1400, 0.6, 2.2, 0.12, 0.3);                           // and a cheer
+    },
   };
+  // a pea whistle: a high note trilling (its pitch shaken fast by a second oscillator)
+  function trill(c, out, t, f, dur, peak) {
+    const o = c.createOscillator(); o.type = 'sine'; o.frequency.value = f;
+    const l = c.createOscillator(); l.type = 'square'; l.frequency.value = 26;
+    const lg = c.createGain(); lg.gain.value = f * 0.06; l.connect(lg); lg.connect(o.frequency);
+    const g = gainEnv(c, out, t, peak, 0.01, dur, 'lin');
+    o.connect(g); o.start(t); l.start(t); o.stop(t + dur + 0.06); l.stop(t + dur + 0.06);
+  }
+  // a crowd's 'ooh' or 'aww': a band of noise sliding from f0 to f1
+  function crowd(c, out, t, f0, f1, dur, peak) { burst(c, out, t, 'bandpass', f0, f1, 0.9, dur, peak, dur * 0.25); burst(c, out, t, 'bandpass', f0 * 2.1, f1 * 2.1, 1.2, dur * 0.9, peak * 0.35, dur * 0.25); }
+  // coins falling: little bright chinks, n of them over dur seconds
+  function coins(c, out, t, n, dur) {
+    for (let i = 0; i < n; i++) { const d = Math.pow(i / n, 1.3) * dur, f = 2600 + Math.random() * 2200; tone(c, out, t + d, 'triangle', f, null, 0.05, 0.05, 0.001); tone(c, out, t + d + 0.002, 'sine', f * 1.5, null, 0.03, 0.025, 0.001); }
+  }
   // a soft bell: the note, a quieter octave above and a faint inharmonic overtone, ringing out
   function bell(c, out, t, n, k = 1) {
     const f = NOTE(n);

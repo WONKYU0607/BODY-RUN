@@ -1,7 +1,7 @@
 // Body Run: a side-scrolling runner through the body (jump, double jump, slide). The world is 180 units tall and as
 // wide as the screen's shape allows (300..420 units); it is drawn straight at the screen's own pixel resolution
 // from high-resolution art (4 px per unit; the characters at the resolution of their sheet).
-// Speed: from 160 units/s, +0.6 every second, up to 900. Jump, double and triple jump (even the highest stays clear of the ceiling);
+// Speed: from 170 units/s, +1 every second of running (v43), no top speed. Jump, double and triple jump (even the highest stays clear of the ceiling);
 // more jumps after the third keep you up, but never above the triple jump's highest point.
 // Health drains 1/s; heals +25; a hit -15 and a stumble.
 (() => {
@@ -17,65 +17,65 @@
   const NH = 180, GY = 150, CEIL = 14, PX = 84;
   const GRAV = 900, JUMP = 326, JUMP2 = 226, JUMP3 = 184, FASTFALL = 2.4;   // single 59 high, double 87.4, triple ~105 (v20: single +10%)
   const JMAX = (JUMP * JUMP + JUMP2 * JUMP2 + JUMP3 * JUMP3) / (2 * GRAV);    // the triple jump at its best (106.2): the 4th and on stop there
-  const V0 = 170, ACC = 0.6, VMAX = 900;
+  const V0 = 170, ACC = 1.0, VMAX = Infinity;               // (v43: +1/s, was 0.6; no top speed, was 900)
   const HP_MAX = 100, DRAIN = 1.0, HIT = 15, HEAL = 25, INVUL = 1.2;
   // the player's box: half-width and height running, sliding (the characters are drawn 0.8 of their old size)
   const PW = 5.76, PH = 17.28, SLW = 7.92, SLH = 9.36;     // (v38: 0.9 of v15's 6.4, 19.2, 8.8, 10.4, with the pictures)
   const TOPY = CEIL + 10;                       // a safety stop only: a perfect triple jump tops out at about 104 (head at y 27)
   const MAXY = GY - TOPY - PH;                  // ... as a height of the feet above the floor
   const FLOAT_BOTTOM = GY - 15.5, HANG_BOTTOM = GY - 15.5;     // under it a sliding player passes, a running one does not
-  // the course: places (id, Korean name, English name, [look, length in units] ...). v42: each place about 30 s on the
-  // first lap (work/placelen.py: the speed there then, less in the water; 13x the old lengths). Every place has a look of its own
+  // the course: places (id, Korean name, English name, [look, length in units] ...). v43: every place the same
+  // distance, 5500 (about 30 s at the start's speed; faster later, it goes by sooner; v42 had set each by time). Every place has a look of its own
   // (the pancreas and the efferent arteriole pass through two); its name shows once, on arrival. Stage 1 is the body;
   // at the anus a cut scene takes you out into the toilet: stage 2, down the drains (after its last place, for now, the
   // body again)
   const PLACES = [
-    ['esophagus', '식도', 'Esophagus', ['eso', 5350]], ['stomach', '위', 'Stomach', ['stomach', 5900]],
-    ['duodenum', '십이지장', 'Duodenum', ['duodenum', 6450]],
-    ['liver', '간', 'Liver', ['liver', 7000]],
-    ['gallbladder', '담낭', 'Gallbladder', ['gallbladder', 7550]],
-    ['pancreas', '췌장', 'Pancreas', ['pancreas', 5500], ['islet', 2600]],
-    ['spleen', '비장', 'Spleen', ['spleen', 8600]],
-    ['capillary', '모세혈관', 'Capillary', ['adrenal', 9150]],
-    ['renalArt', '신동맥', 'Renal artery', ['renalart', 9700]], ['glomerulus', '사구체', 'Glomerulus', ['glomerulus', 10250]],
-    ['efferent', '수출세동맥', 'Efferent arteriole', ['efferent', 5050], ['kidney', 5750]],
-    ['vein', '정맥', 'Vein', ['ivc', 11300]],
-    ['ra', '우심방', 'Right atrium', ['atrium', 14150]], ['rv', '우심실', 'Right ventricle', ['ventricle', 12400]],
-    ['pulmArt', '폐동맥', 'Pulmonary artery', ['pulmart', 12950]],
-    ['lung', '폐', 'Lung', ['bronchiole', 13450]], ['alveoli', '폐포', 'Alveoli', ['lung', 14000]],
-    ['pulmVein', '폐정맥', 'Pulmonary vein', ['pulmvein', 14550]],
-    ['la', '좌심방', 'Left atrium', ['latrium', 15100]], ['lv', '좌심실', 'Left ventricle', ['lventricle', 15650]],
-    ['myoCap', '심근 모세혈관', 'Myocardial capillary', ['myocard', 16150]],
-    ['aorta', '대동맥', 'Aorta', ['artery', 16700]], ['carotid', '총경동맥', 'Common carotid artery', ['carotid', 17250]],
-    ['thyroid', '갑상선', 'Thyroid', ['thyroid', 17800]], ['vertebral', '척추동맥', 'Vertebral artery', ['vertebral', 18350]],
+    ['esophagus', '식도', 'Esophagus', ['eso', 5500]], ['stomach', '위', 'Stomach', ['stomach', 5500]],
+    ['duodenum', '십이지장', 'Duodenum', ['duodenum', 5500]],
+    ['liver', '간', 'Liver', ['liver', 5500]],
+    ['gallbladder', '담낭', 'Gallbladder', ['gallbladder', 5500]],
+    ['pancreas', '췌장', 'Pancreas', ['pancreas', 3700], ['islet', 1800]],
+    ['spleen', '비장', 'Spleen', ['spleen', 5500]],
+    ['capillary', '모세혈관', 'Capillary', ['adrenal', 5500]],
+    ['renalArt', '신동맥', 'Renal artery', ['renalart', 5500]], ['glomerulus', '사구체', 'Glomerulus', ['glomerulus', 5500]],
+    ['efferent', '수출세동맥', 'Efferent arteriole', ['efferent', 2550], ['kidney', 2950]],
+    ['vein', '정맥', 'Vein', ['ivc', 5500]],
+    ['ra', '우심방', 'Right atrium', ['atrium', 5500]], ['rv', '우심실', 'Right ventricle', ['ventricle', 5500]],
+    ['pulmArt', '폐동맥', 'Pulmonary artery', ['pulmart', 5500]],
+    ['lung', '폐', 'Lung', ['bronchiole', 5500]], ['alveoli', '폐포', 'Alveoli', ['lung', 5500]],
+    ['pulmVein', '폐정맥', 'Pulmonary vein', ['pulmvein', 5500]],
+    ['la', '좌심방', 'Left atrium', ['latrium', 5500]], ['lv', '좌심실', 'Left ventricle', ['lventricle', 5500]],
+    ['myoCap', '심근 모세혈관', 'Myocardial capillary', ['myocard', 5500]],
+    ['aorta', '대동맥', 'Aorta', ['artery', 5500]], ['carotid', '총경동맥', 'Common carotid artery', ['carotid', 5500]],
+    ['thyroid', '갑상선', 'Thyroid', ['thyroid', 5500]], ['vertebral', '척추동맥', 'Vertebral artery', ['vertebral', 5500]],
     // the brain from below: in by the medulla, up round the back, the side and the top to the front, out from the middle
-    ['medulla', '연수', 'Medulla oblongata', ['medulla', 18850]], ['cerebellum', '소뇌', 'Cerebellum', ['purkinje', 19400]],
-    ['occipital', '후두엽', 'Occipital lobe', ['occipital', 19950]], ['temporal', '측두엽', 'Temporal lobe', ['temporal', 20500]],
-    ['hippocampus', '해마', 'Hippocampus', ['hippo', 21050]], ['parietal', '두정엽', 'Parietal lobe', ['parietal', 21550]],
-    ['frontal', '전두엽', 'Frontal lobe', ['arach', 22100]], ['cortex', '대뇌피질', 'Cerebral cortex', ['pyramidal', 22650]],
-    ['callosum', '뇌량', 'Corpus callosum', ['fibres', 23200]],
+    ['medulla', '연수', 'Medulla oblongata', ['medulla', 5500]], ['cerebellum', '소뇌', 'Cerebellum', ['purkinje', 5500]],
+    ['occipital', '후두엽', 'Occipital lobe', ['occipital', 5500]], ['temporal', '측두엽', 'Temporal lobe', ['temporal', 5500]],
+    ['hippocampus', '해마', 'Hippocampus', ['hippo', 5500]], ['parietal', '두정엽', 'Parietal lobe', ['parietal', 5500]],
+    ['frontal', '전두엽', 'Frontal lobe', ['arach', 5500]], ['cortex', '대뇌피질', 'Cerebral cortex', ['pyramidal', 5500]],
+    ['callosum', '뇌량', 'Corpus callosum', ['fibres', 5500]],
     // out along the optic nerve into the back of the eye, then through it to the front (no blood in the clear parts)
-    ['opticNerve', '시신경', 'Optic nerve', ['opticnerve', 23750]], ['retina', '망막', 'Retina', ['retina', 24250]],
-    ['vitreous', '유리체', 'Vitreous body', ['vitreous', 24800]], ['lens', '수정체', 'Lens', ['lens', 25350]],
-    ['pupil', '눈동자', 'Pupil', ['iris', 25900]], ['cornea', '각막', 'Cornea', ['cornea', 26450]],      // the eye blinks here
-    ['jugular', '경정맥', 'Jugular vein', ['vein', 26900]],
-    ['sma', '상장간막동맥', 'Superior mesenteric artery', ['sma', 27000]],
-    ['jejunalWall', '공장벽', 'Jejunal wall', ['villus', 27000]], ['jejunum', '공장', 'Jejunum', ['gut', 27000]], ['ileum', '회장', 'Ileum', ['ileum', 27000]],
-    ['cecum', '맹장', 'Cecum', ['cecum', 27000]], ['colon', '대장', 'Large intestine', ['colon', 27000]],
-    ['rectum', '직장', 'Rectum', ['rectum', 27000]], ['anus', '항문', 'Anus', ['anus', 27000]],
+    ['opticNerve', '시신경', 'Optic nerve', ['opticnerve', 5500]], ['retina', '망막', 'Retina', ['retina', 5500]],
+    ['vitreous', '유리체', 'Vitreous body', ['vitreous', 5500]], ['lens', '수정체', 'Lens', ['lens', 5500]],
+    ['pupil', '눈동자', 'Pupil', ['iris', 5500]], ['cornea', '각막', 'Cornea', ['cornea', 5500]],      // the eye blinks here
+    ['jugular', '경정맥', 'Jugular vein', ['vein', 5500]],
+    ['sma', '상장간막동맥', 'Superior mesenteric artery', ['sma', 5500]],
+    ['jejunalWall', '공장벽', 'Jejunal wall', ['villus', 5500]], ['jejunum', '공장', 'Jejunum', ['gut', 5500]], ['ileum', '회장', 'Ileum', ['ileum', 5500]],
+    ['cecum', '맹장', 'Cecum', ['cecum', 5500]], ['colon', '대장', 'Large intestine', ['colon', 5500]],
+    ['rectum', '직장', 'Rectum', ['rectum', 5500]], ['anus', '항문', 'Anus', ['anus', 5500]],
   ];
   const STAGE2 = PLACES.length;                     // the first place of stage 2
-  PLACES.push(['toiletBowl', '변기 물속', 'Toilet bowl', ['toilet', 18900]],
+  PLACES.push(['toiletBowl', '변기 물속', 'Toilet bowl', ['toilet', 5500]],
     // down the drains, the way the water really goes: out of the building, the sewers, the treatment works, the river
-    ['trap', 'S자 트랩', 'S-trap', ['trap', 18900]], ['soilStack', '오수 수직관', 'Soil stack', ['stack', 18900]],
-    ['drainPipe', '집 배수관', 'Drain pipe', ['drain', 18900]], ['septic', '정화조', 'Septic tank', ['septic', 18900]],
-    ['chamber', '오수받이', 'Inspection chamber', ['chamber', 18900]], ['sewerPipe', '하수관', 'Sewer pipe', ['sewer', 18900]],
-    ['manhole', '맨홀 아래', 'Manhole', ['manhole', 18900]], ['trunkSewer', '하수 간선', 'Trunk sewer', ['trunk', 18900]],
-    ['combined', '빗물 합류', 'Combined sewer', ['combined', 18900]], ['interceptor', '차집관로', 'Interceptor', ['interceptor', 18900]],
-    ['pumpStation', '중계펌프장', 'Pumping station', ['pump', 18900]], ['barScreen', '유입 스크린', 'Bar screen', ['screen', 18900]],
-    ['grit', '침사지', 'Grit chamber', ['grit', 18900]], ['clarifier1', '1차 침전지', 'Primary clarifier', ['clarifier1', 18900]],
-    ['aeration', '포기조', 'Aeration tank', ['aeration', 18900]], ['clarifier2', '2차 침전지', 'Secondary clarifier', ['clarifier2', 18900]],
-    ['uv', '소독조', 'UV disinfection', ['uv', 18900]], ['outfall', '방류구', 'Outfall', ['outfall', 18900]]);
+    ['trap', 'S자 트랩', 'S-trap', ['trap', 5500]], ['soilStack', '오수 수직관', 'Soil stack', ['stack', 5500]],
+    ['drainPipe', '집 배수관', 'Drain pipe', ['drain', 5500]], ['septic', '정화조', 'Septic tank', ['septic', 5500]],
+    ['chamber', '오수받이', 'Inspection chamber', ['chamber', 5500]], ['sewerPipe', '하수관', 'Sewer pipe', ['sewer', 5500]],
+    ['manhole', '맨홀 아래', 'Manhole', ['manhole', 5500]], ['trunkSewer', '하수 간선', 'Trunk sewer', ['trunk', 5500]],
+    ['combined', '빗물 합류', 'Combined sewer', ['combined', 5500]], ['interceptor', '차집관로', 'Interceptor', ['interceptor', 5500]],
+    ['pumpStation', '중계펌프장', 'Pumping station', ['pump', 5500]], ['barScreen', '유입 스크린', 'Bar screen', ['screen', 5500]],
+    ['grit', '침사지', 'Grit chamber', ['grit', 5500]], ['clarifier1', '1차 침전지', 'Primary clarifier', ['clarifier1', 5500]],
+    ['aeration', '포기조', 'Aeration tank', ['aeration', 5500]], ['clarifier2', '2차 침전지', 'Secondary clarifier', ['clarifier2', 5500]],
+    ['uv', '소독조', 'UV disinfection', ['uv', 5500]], ['outfall', '방류구', 'Outfall', ['outfall', 5500]]);
   // the course as stretches of one look: id, Korean name, English name, look, length, place number
   const COURSE = [];
   PLACES.forEach((p, k) => { for (const [look, len] of p.slice(3)) COURSE.push([p[0], p[1], p[2], look, len, k]); });
@@ -152,6 +152,8 @@
     const near = (id) => { const d = ((STARTS[COURSE.findIndex((st) => st[0] === id)] - s.lx) % LAP + LAP) % LAP; return d < Math.max(2500, G.v * 8); };
     if (G.wm || near('spleen')) { files.add('wm_field.webp'); files.add('wm.webp'); }       // the germ game's, near the spleen
     if (G.mem || near('hippocampus')) files.add('mem.webp');                                // the memory game's
+    if (G.pk || near('manhole')) { files.add('pk_field.webp'); files.add('pk.webp'); }      // (v44) the penalty shoot-out's
+    if (G.sl || near('toiletBowl')) files.add('sl.webp');                                   // (v44) the toilet jackpot's
     const dc = ((S2_X - s.lx) % LAP + LAP) % LAP;            // the flush cut scene's pictures, near the end of the body
     if (G.cut || G.cutTail || dc < Math.max(2500, G.v * 8)) files.add('cut_flush.webp');
     if (STAGES.bb && !CAPTURE) { if (nearBB) { SND.fetchSong(STAGES.bb).catch(() => {}); if (SND.ctx) SND.prepare(STAGES.bb).catch(() => {}); } else SND.release(STAGES.bb); }
@@ -160,7 +162,7 @@
       if (on) { SND.fetchSong(STAGES[k]).catch(() => {}); if (SND.ctx) SND.prepare(STAGES[k]).catch(() => {}); } else SND.release(STAGES[k]);
     }
     for (const f of files) decode(f).catch(() => {});
-    if (!PRELOAD) for (const f of Object.keys(bmp)) if (!files.has(f) && /^(th_|fx_fire|bb|bat_|cut_|wm|mem)/.test(f)) release(f);
+    if (!PRELOAD) for (const f of Object.keys(bmp)) if (!files.has(f) && /^(th_|fx_fire|bb|bat_|cut_|wm|mem|pk|sl)/.test(f)) release(f);
     manageSongs();
   }
 
@@ -224,7 +226,7 @@
       y: 0, vy: 0, jumps: 0, onGround: true, slide: false, slideHeld: false, fastFall: false,
       invul: 0, nudge: 0, char: charName, obs: [], items: [], pops: [], puffs: [],
       genX: 520, genStation: undefined, lastGate: -1e9, R: rng(12345), nextHeal: 1800, station: -1, theme: COURSE[0][3], prevTheme: null, fade: 1, banner: 0, lapShown: 0,
-      blinkAt: -1, blinkR: rng(4242), vt: 0, rh: null, orb: null, bb: null, wm: null, mem: null, cut: null, cutTail: null, bounce: false, pitObj: null,
+      blinkAt: -1, blinkR: rng(4242), vt: 0, rh: null, orb: null, bb: null, wm: null, mem: null, pk: null, sl: null, slLap: -1, cut: null, cutTail: null, bounce: false, pitObj: null,
       o2n: 0, boost: 0, boostT0: -9, boostHeld: 0, boosts: 0, fire: [], fxR: rng(9191),
       intro: [[1950, 'spike'], [3650, 'drop'], [5420, 'pit'], [7250, 'shot'], [9130, 'door']],
     });
@@ -318,7 +320,7 @@
   // under water (stage 2) the speed carried in is cut by 30% and climbs from there at the same rate as ever (G.wPen: the
   // 30% of the speed it came in at, held while in the water)
   const wPen = () => (inWater() ? G.wPen || 0 : 0);
-  function curSpeed() { return G.orb || G.bb || G.wm || G.mem || G.cut ? 0 : G.rh ? G.rh.speed : (G.v - wPen()) * (0.3 + 0.7 * G.slow) * (G.boost > 0 ? BOOST_K : 1); }
+  function curSpeed() { return G.orb || G.bb || G.wm || G.mem || G.pk || G.sl || G.cut ? 0 : G.rh ? G.rh.speed : (G.v - wPen()) * (0.3 + 0.7 * G.slow) * (G.boost > 0 ? BOOST_K : 1); }
   function arriveIn(dist, v) { return ACC > 0 ? (-v + Math.sqrt(v * v + 2 * ACC * Math.max(0, dist))) / ACC : dist / v; }
   function aimDoor(o) {                              // set its beat so the wanted lip is half way through its hold on arrival
     const ta = G.t + arriveIn(o.x + o.w / 2 - G.x, curSpeed());
@@ -606,6 +608,8 @@
     if (G.bb) endBaseball();
     if (G.wm) endWhack();
     if (G.mem) endMemory();
+    if (G.pk) endPK();
+    if (G.sl) endSlot();
     if (G.cut) cutDone();
     const s = stationAt(G.x), here = COURSE[s.i][5];
     let j = s.i, lap = s.lap;
@@ -634,11 +638,14 @@
     if (G.bb) endBaseball();
     if (G.wm) endWhack();
     if (G.mem) endMemory();
+    if (G.pk) endPK();
+    if (G.sl) endSlot();
     if (G.cut) cutDone();
     const s = stationAt(G.x), lap = STARTS[j] + 1 > s.lx ? s.lap : s.lap + 1;
     G.x = lap * LAP + STARTS[j] + 1;
     G.obs = []; G.items = []; G.genX = G.x + NW;
     G.station = -1;                                         // arriving, even when it is the place you were in
+    G.slLap = -1;                                           // (the toilet jackpot: again, even if played this lap)
     pressed.jump = false;
     SND.play('ui');
   }
@@ -658,14 +665,16 @@
     if (G.bb) { bbDown(e.pointerId, nx, ny); e.preventDefault(); return; }
     if (G.wm) { wmDown(nx, ny); e.preventDefault(); return; }
     if (G.mem) { memDown(nx, ny); e.preventDefault(); return; }
+    if (G.pk) { pkDown(e.pointerId, nx, ny); e.preventDefault(); return; }
+    if (G.sl) { slTap(nx, ny); e.preventDefault(); return; }
     const side = (nx < NW / 2) !== SET.swap ? 'jump' : 'slide';    // the left half jumps (the right, swapped)
     held.set(e.pointerId, side);
     if (side === 'jump') doJump();
     setSlide(); e.preventDefault();
   });
-  const up = (e) => { held.delete(e.pointerId); setSlide(); rhUp(e.pointerId); bbUp(e.pointerId); };
+  const up = (e) => { held.delete(e.pointerId); setSlide(); rhUp(e.pointerId); bbUp(e.pointerId); if (G.pk && G.mode === 'play') { const [nx, ny] = e.type !== 'pointercancel' ? toWorld(e) : []; pkUp(e.pointerId, nx, ny); } };
   cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up); cv.addEventListener('pointerleave', up);
-  cv.addEventListener('pointermove', (e) => { if (G.mode !== 'play') return; if (G.rh) { const [nx, ny] = toWorld(e); rhMove(e.pointerId, nx, ny); } if (G.bb) { const [nx, ny] = toWorld(e); bbMove(e.pointerId, nx, ny); } });
+  cv.addEventListener('pointermove', (e) => { if (G.mode !== 'play') return; if (G.rh) { const [nx, ny] = toWorld(e); rhMove(e.pointerId, nx, ny); } if (G.bb) { const [nx, ny] = toWorld(e); bbMove(e.pointerId, nx, ny); } if (G.pk) { const [nx, ny] = toWorld(e); pkMove(e.pointerId, nx, ny); } });
   document.addEventListener('visibilitychange', () => { if (document.hidden && G.mode === 'play') pause(); });
   addEventListener('keydown', (e) => {
     if (e.repeat) return;
@@ -676,6 +685,8 @@
     const dg = /^(Digit|Numpad)([0-9])$/.exec(e.code);                // the germ and memory games: the number keys
     if (dg && G.wm && G.mode === 'play') { if (WM_KEY[dg[2]] !== undefined) wmKey(WM_KEY[dg[2]]); e.preventDefault(); return; }
     if (dg && G.mem && G.mode === 'play') { memKey(+dg[2] - 1); e.preventDefault(); return; }
+    if (G.pk && G.mode === 'play' && PK_KEY[e.code]) { const [gx, gh] = PK_KEY[e.code]; pkKick(gx, gh, 0.5); e.preventDefault(); return; }   // (keys: a corner each)
+    if (G.sl && G.mode === 'play' && ['Space', 'Enter', 'ArrowUp', 'ArrowDown', 'KeyJ', 'KeyF'].includes(e.code)) { slTap(-99, -99); e.preventDefault(); return; }
     if (G.orb && G.mode === 'play' && ['Space', 'ArrowUp', 'ArrowDown', 'KeyW', 'KeyS', 'Enter', 'KeyJ', 'KeyF'].includes(e.code)) { orbTap(); e.preventDefault(); return; }
     if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') { keyJump = true; doJump(); e.preventDefault(); }
     if (e.code === 'ArrowDown' || e.code === 'KeyS') { keySlide = true; setSlide(); e.preventDefault(); }
@@ -1107,7 +1118,7 @@
   const OB_PLANS = {};                                     // laid out once per song, when first needed
   const orbPlan = (song) => OB_PLANS[song.id] || (OB_PLANS[song.id] = planOrbit(song));
   let OB = orbPlan(songFor('orb'));                        // the path of the stage on now (or of the next one)
-  const busy = () => !!(G.rh || G.orb || G.bb || G.wm || G.mem || G.cut);
+  const busy = () => !!(G.rh || G.orb || G.bb || G.wm || G.mem || G.pk || G.sl || G.cut);
   function otime() {
     const o = G.orb;
     if (o.wait !== null) return -OB_LEAD;                    // the song still on its way
@@ -2309,6 +2320,448 @@
   }
   const hexRGB = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)).join(',');
 
+  // ---------------------------------------------------------------- the penalty shoot-out (under the manhole) (v44)
+  // Down in a round brick sewer, a goal of white pipes; the keeper is a sewer rat in a jersey and big gloves. Five
+  // kicks: swipe up from the bottom of the screen to shoot: the way you swipe (left, right) is where it goes, how far up
+  // you swipe is how high (too far: over the bar). The keeper guesses a side as you kick (more often right as it goes
+  // on); it cannot reach the top corners. A goal: 1000 points. (minigames2.py: the field, the keeper, the ball)
+  const PKF = M.pk || { goal: { l: 128, r: 292, bar: 58, line: 118 }, spot: [210, 160] };
+  const PK_N = 5, PK_INTRO = 2.6, PK_END = 2.6, PK_AFTER = 1.7, PK_AFTER_GOAL = 2.2, PK_WAIT = 7, PK_PTS = 1000;
+  const PK_HALF = (PKF.goal.r - PKF.goal.l) / 2, PK_TALL = PKF.goal.line - PKF.goal.bar;           // 82 wide each side, 60 high
+  const PK_KS = 0.83;                                       // the keeper's picture, scaled (about 40 tall, gloves out 35 wide)
+  const PK_KEY = { ArrowLeft: [-60, 14], KeyA: [-60, 14], ArrowRight: [60, 14], KeyD: [60, 14], KeyQ: [-62, 50], KeyE: [62, 50], ArrowUp: [0, 50], KeyW: [0, 50], ArrowDown: [0, 10], KeyS: [0, 10], Space: [0, 10] };
+  const pkGX = (gx) => NWf / 2 + gx, pkGY = (gh) => PKF.goal.line - gh;              // a point on the goal's face -> screen
+  function startPK() {
+    holdBoost();
+    G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
+    G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
+    G.pk = { st: 'intro', stT: G.t, inT: G.t, k: 0, res: [], gain: 0, swipe: null, trail: [], shot: null, msg: null, fx: [] };
+    G.slideHeld = false; held.clear(); pressed.jump = false;
+  }
+  function endPK() {
+    G.pk = null; G.games = (G.games || 0) + 1; resumeBoost();
+    G.genX = Math.max(G.genX, G.x + NW * 0.8);
+    G.banner = G.t;
+  }
+  function pkReady() { const p = G.pk; p.st = 'ready'; p.stT = G.t; p.shot = null; p.msg = null; p.trail = []; SND.play('pkWhistle'); }
+  // the kick: where on the goal's face it is going (gx from the middle, gh above the line), how long it takes
+  function pkKick(gx, gh, T) {
+    const p = G.pk; if (!p || p.st !== 'ready') return;
+    const side = gx < -28 ? -1 : gx > 28 ? 1 : 0;
+    const right = Math.random() < 0.33 + 0.06 * p.k;                       // the keeper guesses right more often as it goes on (1 in 3 .. 4 in 7)
+    const others = [-1, 0, 1].filter((s) => s !== side);
+    const dive = right ? side : others[Math.floor(Math.random() * 2)];
+    // can it reach? diving low and middle on its side, jumping in the middle; never the top corners
+    const reach = dive === 0 ? Math.abs(gx) < 34 && gh < 62 : Math.sign(gx) === dive && Math.abs(gx) > 14 && Math.abs(gx) < PK_HALF + 4 && gh < 46;
+    let res;
+    if (gh > PK_TALL + 3 || Math.abs(gx) > PK_HALF + 5) res = 'miss';
+    else if (Math.abs(Math.abs(gx) - PK_HALF) <= 4 || Math.abs(gh - PK_TALL) <= 3) res = 'post';
+    else if (reach) res = 'save';
+    else res = 'goal';
+    p.shot = { gx, gh, T, t0: G.t, dive, res, done: false };
+    p.st = 'fly'; p.stT = G.t;
+    SND.play('pkKick'); buzz(BUZZ_TAP);
+  }
+  function pkLand() {                                       // the ball gets to the goal's face
+    const p = G.pk, s = p.shot;
+    s.done = true; p.res.push(s.res); p.st = 'after'; p.stT = G.t;
+    const at = [pkGX(s.gx), pkGY(s.gh)];
+    if (s.res === 'goal') { G.score += PK_PTS; p.gain += PK_PTS; SND.play('pkGoal'); buzz([40, 30, 70]); p.fx.push({ kind: 'goal', at, t: G.t }); }
+    else if (s.res === 'save') { SND.play('pkSave'); buzz(30); }
+    else if (s.res === 'post') { SND.play('pkPost'); buzz(25); p.fx.push({ kind: 'post', at, t: G.t }); }
+    else SND.play('pkMiss');
+    p.msg = { s: { goal: '골!!', save: '막혔다!', post: '골대!', miss: s.gh > PK_TALL ? '넘어갔다' : '빗나갔다' }[s.res], t: G.t, res: s.res };
+  }
+  function stepPK() {
+    const p = G.pk;
+    if (p.st === 'intro') { if (G.t - p.stT > PK_INTRO) pkReady(); return; }
+    if (p.st === 'ready') {
+      if (AUTO && !window.__noAuto && G.t - p.stT > 0.5) {                // the test pilot: a corner, low or middle height
+        const sd = Math.random() < 0.5 ? -1 : 1; pkKick(sd * (48 + Math.random() * 26), 8 + Math.random() * 34, 0.5);
+      } else if (G.t - p.stT > PK_WAIT) pkKick((Math.random() * 2 - 1) * 20, 6, 0.6);   // (no swipe: a weak one down the middle)
+    }
+    if (p.st === 'fly' && G.t - p.shot.t0 >= p.shot.T) pkLand();
+    if (p.st === 'after' && G.t - p.stT > (p.shot.res === 'goal' ? PK_AFTER_GOAL : PK_AFTER)) {
+      if (++p.k >= PK_N) { p.st = 'done'; p.stT = G.t; SND.play(p.res.includes('goal') ? 'orbClear' : 'bbOut'); }
+      else pkReady();
+    }
+    p.trail = p.trail.filter((q) => G.t - q.t < 0.35);
+    p.fx = p.fx.filter((e) => G.t - e.t < 1.6);
+    if (p.st === 'done' && G.t - p.stT > PK_END) endPK();
+  }
+  // the swipe: from where the finger goes down (the lower part of the screen) to where it comes up
+  function pkDown(id, x, y) { const p = G.pk; if (!p || p.st !== 'ready') return; p.swipe = { id, x, y, t: G.t }; p.trail = [{ x, y, t: G.t }]; }
+  function pkMove(id, x, y) { const p = G.pk; if (!p || !p.swipe || p.swipe.id !== id) return; p.trail.push({ x, y, t: G.t }); }
+  function pkUp(id, x, y) {
+    const p = G.pk; if (!p || !p.swipe || p.swipe.id !== id) return;
+    const s = p.swipe; p.swipe = null;
+    if (p.st !== 'ready' || x === undefined) return;
+    const dx = x - s.x, dy = y - s.y;
+    if (dy > -14) return;                                    // not up: not a kick
+    pkKick(Math.max(-150, Math.min(150, dx * 1.9)), Math.max(0, (-dy - 14) * 1.1), Math.max(0.42, Math.min(0.62, 0.62 - (G.t - s.t) * 0.3)));
+  }
+  // ---- drawing
+  function pkBallAt(s, u) {                                 // the ball u of the way (0 the spot .. 1 the goal's face, on past it)
+    const zx = NWf / 2, sx = zx + (PKF.spot[0] - 210), sy = PKF.spot[1] - 7, q = Math.min(1, u);
+    // going away from the eye: its size falls as 1/distance (0.36 at the goal), and it closes on the goal's point the same way
+    const k0 = 1 / (1 + 1.78 * q), e = (1 - k0) / (1 - 1 / 2.78);
+    let x = sx + (pkGX(s.gx) - sx) * e, y = sy + (pkGY(s.gh) - sy) * e - Math.sin(Math.PI * q) * (6 + s.gh * 0.15), k = k0;
+    if (u > 1) {                                             // on past the face: into the net, off the post, saved, away
+      const v = u - 1;
+      if (s.res === 'goal') { k *= 1 - 0.15 * Math.min(1, v * 3); y += Math.min(6, v * 18); x += Math.sign(s.gx) * Math.min(4, v * 10); }
+      else if (s.res === 'post') { const hb = Math.abs(s.gh - PK_TALL) <= 3; x += (hb ? Math.sign(s.gx) * 30 : -Math.sign(s.gx) * 120) * v; y += hb ? -40 * v + 160 * v * v : -20 * v + 150 * v * v; k *= 1 + v * 0.7; y = Math.min(y, PKF.goal.line + 26); }
+      else if (s.res === 'save') {
+        if (s.dive) { x += s.dive * 80 * v; y += -30 * v + 170 * v * v; k *= 1 + 0.5 * Math.min(1, v); }
+        else { x += Math.sign(s.gx || 1) * 18 * v; y += -10 * v + 150 * v * v; k *= 1 + 0.3 * Math.min(1, v); }
+        y = Math.min(y, PKF.goal.line + 12);
+      }
+      else { x += s.gx * v * 0.8; y -= s.gh > PK_TALL ? v * 50 : 0; k *= 1 - 0.4 * Math.min(1, v); }
+    }
+    return { x, y, k };
+  }
+  // the keeper at a time: its picture, where its middle is, turned (diving right is the left dive mirrored). It reacts
+  // 0.1 s after the kick and gets there in 0.3 s; to a shot it saves, its gloves go to the ball; else to where it guessed
+  function pkKeeper(s) {
+    const zx = NWf / 2, y0 = PKF.goal.line - 17 * PK_KS;    // standing: feet on the goal line
+    if (!s) return { pose: 0, x: zx + Math.sin(G.t * 3.1) * 6, y: y0 + Math.abs(Math.sin(G.t * 6.2)) * -1.5, flip: false };
+    const d = Math.max(0, Math.min(1, (G.t - s.t0 - 0.1) / 0.3)), e = d * d * (3 - 2 * d), lift = Math.sin(Math.PI * d);
+    const fall = Math.max(0, Math.min(1, (G.t - s.t0 - Math.max(0.7, s.T + 0.15)) / 0.22));
+    const save = s.res === 'save';
+    if (s.dive !== 0) {                                      // a dive: the gloves (left of the middle in the picture; mirrored) to the ball
+      const gox = s.dive * 37.6 * PK_KS, goy = -8.4 * PK_KS;
+      const tx = save ? s.gx : s.dive * 50, th = save ? s.gh : 22;
+      const x1 = zx + tx - gox, y1 = Math.min(PKF.goal.line + 4, pkGY(th) - goy);
+      const y = y0 + (y1 - y0) * e - 7 * lift, yl = PKF.goal.line + 6 - 13 * PK_KS;      // (then down on the ground)
+      return { pose: d > 0.15 ? 1 : 0, x: zx + (x1 - zx) * e, y: y + (Math.max(y, yl) - y) * fall, flip: s.dive > 0 };
+    }
+    // in the middle: a low one blocked with the body (arms out), a higher one jumped for (both gloves up, 34 above its middle)
+    const tx = save ? Math.max(-22, Math.min(22, s.gx)) : 0, th = save ? s.gh : 52;
+    if (th < 30) return { pose: 0, x: zx + tx * e, y: y0 - 2 * lift, flip: false };
+    const y1 = Math.min(y0, pkGY(th) + 34 * PK_KS);
+    return { pose: d > 0.15 && fall < 1 ? 2 : 0, x: zx + tx * e, y: y0 + (y1 - y0) * e * (1 - fall * fall), flip: false };
+  }
+  function drawPK() {
+    const p = G.pk; if (!p) return;
+    world();
+    let al = Math.min(1, (G.t - p.inT) / 0.35);
+    if (p.st === 'done') al *= Math.max(0, Math.min(1, (PK_END - (G.t - p.stT)) / 0.35));
+    ctx.globalAlpha = al;
+    const zx = NWf / 2;
+    ctx.fillStyle = '#120a0a'; ctx.fillRect(0, 0, NWf, NH);
+    spr('pk_field', zx - 210, 0, 1, 420, 180);
+    const s = p.shot, u = s ? (G.t - s.t0) / s.T : 0;
+    // the net bulging where a goal went in
+    for (const e of p.fx) if (e.kind === 'goal') {
+      const v = (G.t - e.t) / 0.6; if (v > 1) continue;
+      ctx.globalAlpha = al * (1 - v) * 0.8;
+      for (const r of [6, 12, 18]) { ctx.beginPath(); ctx.ellipse(e.at[0], e.at[1], r * (0.5 + v), r * 0.6 * (0.5 + v), 0, 0, 6.2832); ctx.lineWidth = 1; ctx.strokeStyle = '#ffffff'; ctx.stroke(); }
+      ctx.globalAlpha = al;
+    }
+    // the ball when it is in or behind the goal's face (drawn before the keeper)
+    const B = s ? pkBallAt(s, u) : null, behind = s && u >= 1 && (s.res === 'goal' || s.res === 'miss');
+    const ball = (b, spin) => { const w = 20 * b.k; ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(spin); spr('pk_ball', -w / 2, -w / 2, 1, w, w); ctx.restore(); ctx.globalAlpha = al; };
+    const spin = s ? (G.t - s.t0) * 16 * (s.gx < 0 ? -1 : 1) : 0;
+    if (behind) ball(B, spin);
+    // the keeper
+    { const K = pkKeeper(s), nm = 'pk_k' + K.pose, sp = M.sprites[nm];
+      if (sp) { ctx.save(); ctx.translate(K.x, K.y); if (K.flip) ctx.scale(-1, 1); spr(nm, -sp.c[0] * PK_KS, -sp.c[1] * PK_KS, 1, sp.w * PK_KS, sp.h * PK_KS); ctx.restore(); ctx.globalAlpha = al; } }
+    // the ball in front: on the spot, in flight, saved (knocked away), off the post
+    if (!s) ball({ x: zx + (PKF.spot[0] - 210), y: PKF.spot[1] - 7, k: 1 }, 0);
+    else if (!behind) ball(B, spin);
+    // the swipe's trail
+    if (p.trail.length > 1) {
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      for (let i = 1; i < p.trail.length; i++) {
+        const a = p.trail[i - 1], b = p.trail[i], f = 1 - (G.t - b.t) / 0.35;
+        ctx.globalAlpha = al * Math.max(0, f) * 0.8; ctx.lineWidth = 4 * f + 1; ctx.strokeStyle = '#ffe68a';
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      }
+      ctx.globalAlpha = al;
+    }
+    // a goal: a burst of confetti from the net, the screen flashing a moment
+    for (const e of p.fx) {
+      const v = G.t - e.t;
+      if (e.kind === 'goal') {
+        if (v < 0.12) { ctx.globalAlpha = al * (1 - v / 0.12) * 0.35; ctx.fillStyle = '#fff6d8'; ctx.fillRect(0, 0, NWf, NH); }
+        const R = rng(Math.round(e.t * 1000));
+        for (let i = 0; i < 46; i++) {
+          const a = R() * 6.2832, sp = 60 + R() * 140, x = e.at[0] + Math.cos(a) * sp * v, y = e.at[1] + Math.sin(a) * sp * v + 90 * v * v;
+          ctx.globalAlpha = al * Math.max(0, 1 - v / 1.4);
+          ctx.fillStyle = ['#ff5a6a', '#ffd23a', '#5ad26a', '#4aa8ff', '#ffffff', '#c47aff'][i % 6];
+          ctx.save(); ctx.translate(x, y); ctx.rotate(v * 8 + i); ctx.fillRect(-1.6, -0.8, 3.2, 1.6); ctx.restore();
+        }
+      } else if (e.kind === 'post' && v < 0.3) {
+        ctx.globalAlpha = al * (1 - v / 0.3); ctx.beginPath(); ctx.arc(e.at[0], e.at[1], 6 + v * 40, 0, 6.2832); ctx.lineWidth = 2; ctx.strokeStyle = '#ffffff'; ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = al;
+    // the kicks: five balls (used ones: green for a goal, dim for the rest)
+    for (let i = 0; i < PK_N; i++) {
+      const r = p.res[i], x = 20 + i * 10, y = 44;
+      ctx.globalAlpha = al * (r && r !== 'goal' ? 0.3 : 1);
+      spr('pk_ball', x - 4, y - 4, 1, 8, 8);
+      if (r === 'goal') { ctx.beginPath(); ctx.arc(x, y, 5, 0, 6.2832); ctx.lineWidth = 1.2; ctx.strokeStyle = '#5ae07a'; ctx.stroke(); }
+    }
+    ctx.globalAlpha = al;
+    if (p.st === 'ready' && !p.trail.length) label('위로 쓸어서 차요', zx, 172, 7.5, 'center', al * (0.6 + 0.4 * Math.sin(G.t * 5)), '#ffffff');
+    if (p.msg && p.st !== 'done') {
+      const v = G.t - p.msg.t, big = p.msg.res === 'goal', a = Math.min(1, v / 0.08) * Math.max(0, Math.min(1, ((big ? 2.0 : 1.5) - v) / 0.3));
+      const sc = big ? 1 + 0.25 * Math.max(0, 1 - v / 0.25) : 1;
+      label(p.msg.s, zx, 50, (big ? 22 : 13) * sc, 'center', a, big ? '#ffe68a' : p.msg.res === 'save' ? '#ffb0b8' : '#ffffff');
+      if (big) label(`+${PK_PTS.toLocaleString('en-US')}점`, zx, 68, 9, 'center', a, '#ffe68a');
+    }
+    if (p.st === 'intro') {
+      const v = G.t - p.stT, a = Math.min(1, v / 0.3) * Math.max(0, Math.min(1, (PK_INTRO - v) / 0.3));
+      ctx.globalAlpha = al * a * 0.8; rrect(zx - 118, 52, 236, 54, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = al;
+      label('승부차기! 5번 차요', zx, 66, 15, 'center', a, '#ffe0a8');
+      label('아래에서 위로 쓸어 차요: 쓸어 올린 쪽으로 날아가요', zx, 84, 7.5, 'center', a, '#ffffff');
+      label('길게 쓸면 높이 (너무 길면 넘어가요) · 골마다 1,000점', zx, 95, 7.5, 'center', a, '#ffffff');
+    }
+    if (p.st === 'done') {
+      const v = G.t - p.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (PK_END - v) / 0.35));
+      const n = (q) => p.res.filter((r) => r === q).length;
+      ctx.globalAlpha = a * 0.8; rrect(zx - 110, 54, 220, 60, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = 1;
+      label(`골 ${n('goal')}개${n('goal') ? '!' : ''}`, zx, 70, 14, 'center', a, n('goal') ? '#ffe68a' : '#ffd0dc');
+      label(`골 ${n('goal')} · 막힘 ${n('save')} · 골대 ${n('post')} · 빗나감 ${n('miss')}`, zx, 90, 7.5, 'center', a, '#ffffff');
+      label(`+${p.gain.toLocaleString('en-US')}점`, zx, 104, 8.5, 'center', a, '#ffe68a');
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ---------------------------------------------------------------- the toilet jackpot (in the toilet bowl) (v44)
+  // A slot machine made of a toilet tank. Three goes: tap anywhere to pull the flush lever and the reels spin; tap
+  // again to stop them one by one (left to right; or a reel's own button under it). Three the same pays (a golden poop
+  // is the jackpot), two the same a little. What each go comes to is drawn when the lever is pulled (like a real
+  // machine; with a better chance on the last go if nothing three-of-a-kind came up); the reels stop where your taps
+  // land, and slide on to it. Two alike on the first two reels: '리치' - the last reel slows down, a drum roll.
+  const SLF = M.sl || { win: [[54.5, 67], [116.5, 67], [178.5, 67]], winw: 50, winh: 56, stop_y: 110, lever: [229.5, 41], bulbs: [], marquee: [116.5, 10.5] };
+  const SL_N = 3, SL_INTRO = 2.6, SL_END = 2.8, SL_SPEED = 15, SL_REACH_V = 4.5, SL_GAP = 36, SL_AUTO = 4, SL_TOP = 40;
+  const SL_PAY = [5000, 2000, 1500, 1000, 700, 500], SL_PAIR = 100;
+  const SL_NAME = ['황금똥', '고무오리', '뚫어뻥', '두루마리', '비누', '물방울'];
+  // the strips: each symbol at least twice, the cheap ones more often, the golden poop twice
+  const SL_STRIP = [[5, 3, 1, 4, 0, 5, 2, 4, 3, 5, 1, 4, 2, 5, 0, 3, 4, 5], [4, 5, 0, 3, 2, 5, 4, 1, 5, 3, 4, 0, 2, 5, 3, 1, 4, 5], [3, 4, 5, 1, 0, 4, 5, 2, 3, 5, 4, 1, 3, 0, 5, 2, 4, 5]];
+  const slMX = () => NWf / 2 - SW('sl_machine') / 2;
+  function startSlot() {
+    holdBoost();
+    G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
+    G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
+    G.slLap = stationAt(G.x).lap;
+    G.sl = { st: 'intro', stT: G.t, inT: G.t, k: 0, res: [], gain: 0, best3: false, reels: [0, 1, 2].map((i) => ({ pos: Math.floor(Math.random() * 18), spin: false, stop: null, strip: SL_STRIP[i].slice(), vNow: 0 })),
+      want: null, msg: null, coins: [], leverT: -9, tick: 0, drum: 0, flash: -9 };
+    G.slideHeld = false; held.clear(); pressed.jump = false;
+  }
+  function endSlot() {
+    G.sl = null; G.games = (G.games || 0) + 1; resumeBoost();
+    G.genX = Math.max(G.genX, G.x + NW * 0.8);
+    G.banner = G.t;
+  }
+  // what this go comes to: three of a kind (which), two (which places), or nothing
+  function slOutcome() {
+    const s = G.sl, last = s.k === SL_N - 1 && !s.best3, r = Math.random();
+    const pJack = last ? 0.15 : 0.07, p3 = last ? 0.6 : 0.3, p2 = 0.35;
+    const pick = (ex) => { let v; do v = 1 + Math.floor(Math.random() * 5); while (ex.includes(v)); return v; };
+    if (r < pJack) return [0, 0, 0];
+    if (r < p3) { const v = [1, 1, 2, 3, 3, 4, 4, 5, 5, 5][Math.floor(Math.random() * 10)]; return [v, v, v]; }
+    if (r < p3 + p2) {
+      const v = Math.random() < 0.15 ? 0 : pick([]), o = pick([v]);
+      return Math.random() < 0.5 ? [v, v, o] : Math.random() < 0.5 ? [v, o, v] : [o, v, v];          // (two on the left first: a reach that fails)
+    }
+    const a = Math.floor(Math.random() * 6); let b, c; do b = Math.floor(Math.random() * 6); while (b === a); do c = Math.floor(Math.random() * 6); while (c === a || c === b);
+    return [a, b, c];
+  }
+  function slPull() {
+    const s = G.sl; if (!s || s.st !== 'ready') return;
+    s.want = slOutcome(); s.st = 'spin'; s.stT = G.t; s.leverT = G.t; s.msg = null;
+    s.reels.forEach((rl, i) => { rl.spin = true; rl.stop = null; rl.t0 = G.t + 0.12 + i * 0.08; rl.v = SL_SPEED; });
+    s.reach = false;
+    SND.play('slLever'); buzz(25);
+  }
+  // stop a reel: it runs on to the next place on its strip showing what it should (at least two symbols on), easing in
+  function slStop(i) {
+    const s = G.sl, rl = s.reels[i]; if (!rl.spin || rl.stop || G.t < rl.t0 + 0.4) return false;
+    // it stops two or three symbols on (those are above the window, out of sight): what it stops on is put there, and on a
+    // reach that fails the one it needed just above it (one short: it would have come next)
+    const st = rl.strip, n = st.length, ix = (k) => ((k % n) + n) % n, v = i === 2 && s.reach ? SL_REACH_V : rl.v;
+    const k = Math.ceil(rl.pos) + 2;
+    st[ix(k)] = s.want[i];
+    if (i === 2 && s.want[0] === s.want[1] && s.want[2] !== s.want[0]) st[ix(k + 1)] = s.want[0];
+    else if (st[ix(k + 1)] === s.want[i]) st[ix(k + 1)] = (s.want[i] + 1 + Math.floor(Math.random() * 5)) % 6;
+    rl.stop = { from: rl.pos, to: k, t0: G.t, dur: Math.max(0.25, Math.min(2.2, 3 * (k - rl.pos) / v)) };     // (eased out: going on at the speed it had)
+    return true;
+  }
+  function slTap(x, y) {
+    const s = G.sl; if (!s) return;
+    if (s.st === 'ready') { slPull(); return; }
+    if (s.st !== 'spin') return;
+    // a reel's own button, or else the leftmost still spinning
+    const mx = slMX(), by = SL_TOP + SLF.stop_y;
+    for (let i = 0; i < 3; i++) if (Math.abs(x - (mx + SLF.win[i][0])) < 22 && Math.abs(y - by) < 12) { if (slStop(i)) { SND.play('ui'); buzz(BUZZ_TAP); } return; }
+    for (let i = 0; i < 3; i++) { const rl = s.reels[i]; if (rl.spin && !rl.stop) { if (slStop(i)) { SND.play('ui'); buzz(BUZZ_TAP); } return; } }
+  }
+  function slResult() {
+    const s = G.sl, w = s.want;
+    let pts = 0, kind = 'none';
+    if (w[0] === w[1] && w[1] === w[2]) { pts = SL_PAY[w[0]]; kind = w[0] === 0 ? 'jackpot' : 'three'; s.best3 = true; }
+    else if (w[0] === w[1] || w[1] === w[2] || w[0] === w[2]) { pts = SL_PAIR; kind = 'two'; }
+    G.score += pts; s.gain += pts; s.res.push(kind);
+    s.st = 'after'; s.stT = G.t; s.flash = G.t; s.reach = false;
+    s.msg = { kind, pts, sym: w[0] === w[1] || w[0] === w[2] ? w[0] : w[1], t: G.t, near: w[0] === w[1] && w[2] !== w[0] };
+    if (kind === 'jackpot') { SND.play('slJackpot'); buzz([60, 40, 60, 40, 120]); for (let i = 0; i < 140; i++) s.coins.push({ x: Math.random() * NWf, y: -10 - Math.random() * 180, vx: (Math.random() * 2 - 1) * 20, vy: 40 + Math.random() * 60, r: Math.random() * 6.28, vr: (Math.random() * 2 - 1) * 10 }); }
+    else if (kind === 'three') { SND.play('slWin'); buzz([40, 30, 60]); const mx = slMX(); for (let i = 0; i < 40; i++) s.coins.push({ x: mx + SLF.win[1][0], y: SL_TOP + SLF.win[1][1], vx: (Math.random() * 2 - 1) * 150, vy: -80 - Math.random() * 120, r: 0, vr: (Math.random() * 2 - 1) * 10 }); }
+    else if (kind === 'two') SND.play('slSmall');
+    else SND.play('miss');
+  }
+  function stepSlot(dt) {
+    const s = G.sl;
+    if (s.st === 'intro' && G.t - s.stT > SL_INTRO) { s.st = 'ready'; s.stT = G.t; }
+    if (s.st === 'ready' && AUTO && !window.__noAuto && G.t - s.stT > 0.4) slPull();
+    if (s.st === 'spin') {
+      const u = G.t - s.stT;
+      // a reach: the first two have landed alike and the last still turns (slowing right down, a drum roll; 3 s, then it stops)
+      const reach = s.want[0] === s.want[1] && !s.reels[0].spin && !s.reels[1].spin && s.reels[2].spin && G.t >= s.reels[2].t0;
+      if (reach && !s.reach) { SND.play('slReach'); s.reachT = G.t; }
+      s.reach = reach;
+      if (AUTO && !window.__noAuto) { for (let i = 0; i < 3; i++) if (u > 0.9 + i * 0.4 && (i < 2 || !reach || G.t - s.reachT > 1.4)) slStop(i); }
+      else {
+        if (u > SL_AUTO) { for (let i = 0; i < 2; i++) if (u > SL_AUTO + i * 0.45) slStop(i); if (u > SL_AUTO + 0.9 && !reach) slStop(2); }   // (no taps: they stop on their own)
+        if (reach && G.t - s.reachT > 3) slStop(2);
+      }
+      let all = true;
+      s.reels.forEach((rl, i) => {
+        const p0 = rl.pos; rl.vNow = 0;
+        if (rl.spin) { stepReel(rl, i); rl.vNow = (rl.pos - p0) / dt; }
+      });
+      function stepReel(rl, i) {
+        if (G.t < rl.t0) { all = false; return; }
+        if (rl.stop) {                                     // easing in to its place, a little past it and back (a thunk)
+          const q = (G.t - rl.stop.t0) / rl.stop.dur;
+          if (q < 1) rl.pos = rl.stop.from + (rl.stop.to - rl.stop.from) * (1 - Math.pow(1 - q, 3));
+          else {
+            if (!rl.stop.hit) { rl.stop.hit = true; SND.play('slStop'); buzz(15); }
+            const r = (G.t - rl.stop.t0 - rl.stop.dur) / 0.16;
+            rl.pos = rl.stop.to + 0.09 * Math.sin(Math.PI * Math.min(1, r)) * (1 - Math.min(1, r) * 0.5);
+            if (r >= 1) { rl.pos = rl.stop.to; rl.spin = false; }
+          }
+          if (rl.spin) all = false;
+        } else {
+          const v = i === 2 && reach ? SL_REACH_V : rl.v;                // the reach: the last reel slows right down
+          rl.pos += v * dt; all = false;
+        }
+      }
+      // the sound of it: ticks as the symbols go by, a drum roll on a reach
+      s.tick += dt * (s.reels.some((rl) => rl.spin) ? (reach ? SL_REACH_V : SL_SPEED) : 0);
+      if (s.tick >= 1) { s.tick -= Math.floor(s.tick); SND.play('slTick'); }
+      if (reach) { s.drum += dt; if (s.drum > 0.07) { s.drum = 0; SND.play('slDrum'); } }
+      if (all) slResult();
+    }
+    if (s.st === 'after') {
+      const hold = s.msg.kind === 'jackpot' ? 3.2 : s.msg.kind === 'three' ? 2.2 : 1.4;
+      if (G.t - s.stT > hold) { if (++s.k >= SL_N) { s.st = 'done'; s.stT = G.t; } else { s.st = 'ready'; s.stT = G.t; s.msg = null; } }
+    }
+    for (const c of s.coins) { c.vy += 260 * dt; c.x += c.vx * dt; c.y += c.vy * dt; c.r += c.vr * dt; if (c.y > NH - 4 && c.vy > 0) { c.vy *= -0.35; c.vx *= 0.7; c.y = NH - 4; } }
+    s.coins = s.coins.filter((c) => G.t - s.flash < 3.4);
+    if (s.st === 'done' && G.t - s.stT > SL_END) endSlot();
+  }
+  // ---- drawing
+  function drawSlot() {
+    const s = G.sl; if (!s) return;
+    world();
+    let al = Math.min(1, (G.t - s.inT) / 0.35);
+    if (s.st === 'done') al *= Math.max(0, Math.min(1, (SL_END - (G.t - s.stT)) / 0.35));
+    const zx = NWf / 2, mx = slMX(), my = SL_TOP;
+    // the toilet water behind, darkened, a glow behind the machine
+    ctx.globalAlpha = al * 0.78; ctx.fillStyle = '#04121a'; ctx.fillRect(0, 0, NWf, NH);
+    const g = ctx.createRadialGradient(zx, my + 70, 20, zx, my + 70, 170); g.addColorStop(0, 'rgba(80,180,220,0.35)'); g.addColorStop(1, 'rgba(80,180,220,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, NWf, NH); ctx.globalAlpha = al;
+    // the reels behind the windows: a cream drum, the symbols going by (smeared when fast), the pay line
+    const W2 = SLF.winw / 2, H2 = SLF.winh / 2;
+    for (let i = 0; i < 3; i++) {
+      const rl = s.reels[i], cx = mx + SLF.win[i][0], cy = my + SLF.win[i][1], strip = rl.strip, n = strip.length;
+      ctx.save(); ctx.beginPath(); ctx.rect(cx - W2, cy - H2, W2 * 2, H2 * 2); ctx.clip();
+      const dg = ctx.createLinearGradient(0, cy - H2, 0, cy + H2); dg.addColorStop(0, '#9a9488'); dg.addColorStop(0.5, '#fffaf0'); dg.addColorStop(1, '#9a9488');
+      ctx.fillStyle = dg; ctx.fillRect(cx - W2, cy - H2, W2 * 2, H2 * 2);
+      const fast = Math.abs(rl.vNow) > 7;                       // (smeared when it goes by quickly)
+      const base = Math.floor(rl.pos), fr = rl.pos - base;
+      for (let j = -2; j <= 2; j++) {
+        const sym = strip[(((base + j) % n) + n) % n], y = cy + (j - fr) * SL_GAP * -1;     // (the strip moves down the window)
+        const sz = 32;
+        if (fast) { for (let k = 0; k < 6; k++) spr('sl_s' + sym, cx - sz / 2, y - sz / 2 - k * 3, 0.22 * al, sz, sz); }
+        else spr('sl_s' + sym, cx - sz / 2, y - sz / 2, 1, sz, sz);
+        ctx.globalAlpha = al;
+      }
+      const sh = ctx.createLinearGradient(0, cy - H2, 0, cy + H2); sh.addColorStop(0, 'rgba(20,10,10,0.45)'); sh.addColorStop(0.25, 'rgba(20,10,10,0)'); sh.addColorStop(0.75, 'rgba(20,10,10,0)'); sh.addColorStop(1, 'rgba(20,10,10,0.45)');
+      ctx.fillStyle = sh; ctx.fillRect(cx - W2, cy - H2, W2 * 2, H2 * 2);
+      ctx.restore();
+      // a winning reel glows
+      if (s.st === 'after' && s.msg && s.msg.kind !== 'none' && s.want[i] === s.msg.sym && (s.msg.kind !== 'two' || s.want.filter((v) => v === s.msg.sym).length >= 2)) {
+        ctx.globalAlpha = al * (0.5 + 0.5 * Math.sin(G.t * 16)); ctx.lineWidth = 2.2; ctx.strokeStyle = '#ffe14a'; ctx.strokeRect(cx - W2 + 1, cy - H2 + 1, W2 * 2 - 2, H2 * 2 - 2); ctx.globalAlpha = al;
+      }
+    }
+    // the pay line across the three windows
+    ctx.globalAlpha = al * 0.55; ctx.strokeStyle = '#ff3a4a'; ctx.lineWidth = 0.9; ctx.beginPath(); ctx.moveTo(mx + SLF.win[0][0] - W2, my + SLF.win[0][1]); ctx.lineTo(mx + SLF.win[2][0] + W2, my + SLF.win[2][1]); ctx.stroke(); ctx.globalAlpha = al;
+    // the machine itself, its lever (pulled for a moment), the marquee's name, the bulbs (chasing; all blinking on a win)
+    spr('sl_machine', mx, my, 1, SW('sl_machine'), SH('sl_machine'));
+    { const pulled = G.t - s.leverT < 0.3, nm = pulled ? 'sl_lever1' : 'sl_lever0', lv = M.sprites[nm];
+      if (lv) spr(nm, mx + SLF.lever[0] - lv.piv[0], my + SLF.lever[1] - lv.piv[1], 1, lv.w, lv.h); }
+    { const m = s.msg, qx = mx + SLF.marquee[0], qy = my + SLF.marquee[1] + 0.5, blink = 0.6 + 0.4 * Math.sin(G.t * 6);
+      if (s.reach) label('리치!', qx, qy, 11, 'center', al * (Math.floor(G.t * 8) % 2 ? 1 : 0.55), '#ff8a8a');
+      else if (m && s.st === 'after') {
+        if (m.kind === 'jackpot') label('JACKPOT', qx, qy, 10, 'center', al * (Math.floor(G.t * 10) % 2 ? 1 : 0.5), '#ffe68a');
+        else if (m.kind === 'three') label('당첨!', qx, qy, 10, 'center', al * (Math.floor(G.t * 10) % 2 ? 1 : 0.5), '#ffe68a');
+        else if (m.kind === 'two') label(m.near ? `아깝다! +${m.pts}점` : `두 개 같아요 +${m.pts}점`, qx, qy, m.near ? 9 : 7.5, 'center', al, '#ffffff');
+        else label('꽝', qx, qy, 10, 'center', al, '#d8c8d0');
+      }
+      else if (s.st === 'ready') label('탭해서 레버 당기기', qx, qy, 7.5, 'center', al * blink, '#ffffff');
+      else label('변기 잭팟', qx, qy, 10, 'center', al, '#ffe68a'); }
+    ctx.globalAlpha = al;
+    const win = s.st === 'after' && s.msg && (s.msg.kind === 'three' || s.msg.kind === 'jackpot');
+    SLF.bulbs.forEach(([bx, by], i) => {
+      const on = win ? Math.floor(G.t * 10) % 2 === 0 : s.st === 'spin' ? (i + Math.floor(G.t * 18)) % 4 === 0 : (i + Math.floor(G.t * 5)) % 3 === 0;
+      ctx.beginPath(); ctx.arc(mx + bx, my + by, 1.5, 0, 6.2832); ctx.fillStyle = on ? (s.reach ? '#ff5a5a' : '#fff2a8') : '#7a5a2a'; ctx.fill();
+      if (on) { ctx.globalAlpha = al * 0.35; ctx.beginPath(); ctx.arc(mx + bx, my + by, 3.4, 0, 6.2832); ctx.fill(); ctx.globalAlpha = al; }
+    });
+    // the stop buttons: lit while their reel can be stopped
+    for (let i = 0; i < 3; i++) {
+      const rl = s.reels[i], bx = mx + SLF.win[i][0], by = my + SLF.stop_y, live = s.st === 'spin' && rl.spin && !rl.stop && G.t >= rl.t0 + 0.4;
+      ctx.beginPath(); ctx.ellipse(bx, by, 13, 6, 0, 0, 6.2832); ctx.fillStyle = '#1a0a14'; ctx.fill();
+      ctx.beginPath(); ctx.ellipse(bx, by - 1, 12, 5, 0, 0, 6.2832); ctx.fillStyle = live ? '#ff3a4a' : '#6a2a30'; ctx.fill();
+      label('STOP', bx, by - 0.8, 5.5, 'center', al, live ? '#ffffff' : '#c8a0a4');
+      ctx.globalAlpha = al;
+    }
+    // reach!
+    // a win: the coins, the words
+    for (const c of s.coins) { ctx.save(); ctx.translate(c.x, c.y); ctx.scale(Math.cos(c.r), 1); spr('sl_coin', -4, -4, 1, 8, 8); ctx.restore(); ctx.globalAlpha = al; }
+    if (s.msg && s.st !== 'done') {
+      const v = G.t - s.msg.t, m = s.msg;
+      if (m.kind === 'jackpot') {
+        if (v < 0.5) { ctx.globalAlpha = al * (1 - v / 0.5) * 0.5; ctx.fillStyle = '#fff6c8'; ctx.fillRect(0, 0, NWf, NH); ctx.globalAlpha = al; }
+        const sc = 1 + 0.3 * Math.max(0, 1 - v / 0.3) + 0.05 * Math.sin(G.t * 10);
+        label('JACKPOT!!', zx, 96, 26 * sc, 'center', al, ['#ffe14a', '#ff7a5a', '#7ae0ff', '#c88aff'][Math.floor(G.t * 8) % 4]);
+        label(`+${m.pts.toLocaleString('en-US')}점`, zx, 118, 12, 'center', al, '#ffe68a');
+      } else if (m.kind === 'three') {
+        label(`${SL_NAME[m.sym]} 3개! +${m.pts.toLocaleString('en-US')}점`, zx, 100, 13 * (1 + 0.2 * Math.max(0, 1 - v / 0.25)), 'center', al, '#ffe68a');
+      }
+    }
+    // the goes: three coins at the top left
+    for (let i = 0; i < SL_N; i++) { ctx.globalAlpha = al * (i < s.res.length ? 0.3 : 1); spr('sl_coin', 16 + i * 10, 40, 1, 8, 8); }
+    ctx.globalAlpha = al;
+    if (s.st === 'intro') {
+      const v = G.t - s.stT, a = Math.min(1, v / 0.3) * Math.max(0, Math.min(1, (SL_INTRO - v) / 0.3));
+      ctx.globalAlpha = al * a * 0.85; rrect(zx - 118, 64, 236, 56, 8); ctx.fillStyle = '#10141e'; ctx.fill(); ctx.globalAlpha = al;
+      label('변기 잭팟! 3번 돌려요', zx, 78, 15, 'center', a, '#ffe0a8');
+      label('탭하면 레버를 당겨 돌아가고, 다시 탭해서 하나씩 멈춰요', zx, 96, 7.5, 'center', a, '#ffffff');
+      label('같은 그림 3개면 당첨, 황금똥 3개면 잭팟 5,000점!', zx, 107, 7.5, 'center', a, '#ffe68a');
+    }
+    if (s.st === 'done') {
+      const v = G.t - s.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (SL_END - v) / 0.35));
+      ctx.globalAlpha = a * 0.85; rrect(zx - 110, 66, 220, 56, 8); ctx.fillStyle = '#10141e'; ctx.fill(); ctx.globalAlpha = 1;
+      const hit = s.res.filter((r) => r === 'three' || r === 'jackpot').length;
+      label(s.res.includes('jackpot') ? '잭팟 터졌다!' : hit ? `당첨 ${hit}번!` : '다음에 다시!', zx, 82, 14, 'center', a, s.gain ? '#ffe68a' : '#ffd0dc');
+      label(`+${s.gain.toLocaleString('en-US')}점`, zx, 104, 9, 'center', a, '#ffe68a');
+    }
+    ctx.globalAlpha = 1;
+  }
+
   // ---------------------------------------------------------------- stage 2: under water
   // Holding (either button, anywhere on the screen, the up key) swims up; let go and you sink slowly; you can rest on
   // the bottom; the surface stops you. Things are in the water at every height: columns from the bottom and paper hung
@@ -2424,7 +2877,14 @@
     G.pilotUp = yp < target;
   }
   // ---------------------------------------------------------------- step
+  // (v43) with no top speed the run can get very fast: a step that would move more than 8 units is done as several
+  // smaller ones, so nothing thin is passed through between two steps
   function step(dt) {
+    const n = G.mode === 'play' ? Math.ceil(Math.abs(curSpeed()) * dt / 8) : 1;
+    if (n > 1) { for (let i = 0; i < n; i++) stepOnce(dt / n); return; }
+    stepOnce(dt);
+  }
+  function stepOnce(dt) {
     if (G.mode !== 'play') return;
     if (G.bb && G.bb.fx) G.bb.fx.age += dt;                  // the baseball hit's burst runs on its own clock ...
     if (G.bb && G.bb.hold > 0) { G.bb.hold -= dt; return; }  // ... through the hit-stop, when all else stands still
@@ -2432,7 +2892,7 @@
     G.t += dt;
     if (!busy()) G.vt += dt;                                // the speed does not climb during the rhythm and orbit stages
     G.v = Math.min(VMAX, V0 + ACC * G.vt);
-    G.slow = Math.min(1, G.slow + dt / 0.8);
+    G.slow = Math.min(1, G.slow + dt / 0.6);                 // after a hit, back to full speed in 0.6 s (v43; was 0.8)
     if (G.boost > 0) {                                       // the booster running out: a second of grace
       G.boost -= dt; G.slow = 1;
       if (G.boost <= 0) { G.boost = 0; G.invul = Math.max(G.invul, BOOST_GRACE); }
@@ -2444,6 +2904,8 @@
     if (G.bb) stepBaseball(dt);
     if (G.wm) stepWhack();
     if (G.mem) stepMemory();
+    if (G.pk) stepPK();
+    if (G.sl) stepSlot(dt);
     if (G.cut) stepCut(dt);
     else if (!busy() && G.station >= 0 && COURSE[G.station][5] === STAGE2 - 1) cutCheck();
     G.nudge = Math.max(0, G.nudge - dt * 30);
@@ -2537,9 +2999,11 @@
       }
       if (!themeFiles(th).every((f) => bmp[f])) { G.missing = (G.missing || 0) + 1; (G.missList = G.missList || []).push(th); }   // (tests: a look not ready on arrival)
       if (arrived) { if (!busy()) G.banner = G.t; setLabel(s.st, s.lap); if (s.st[0] === 'ra' && !busy()) startRhythm(); if (s.st[0] === 'vertebral' && !busy()) startOrbit(); if (s.st[0] === 'jejunum' && !busy()) startBaseball();
-        if (s.st[0] === 'spleen' && !busy()) startWhack(); if (s.st[0] === 'hippocampus' && !busy()) startMemory(); }
+        if (s.st[0] === 'spleen' && !busy()) startWhack(); if (s.st[0] === 'hippocampus' && !busy()) startMemory(); if (s.st[0] === 'manhole' && !busy()) startPK(); }
       manageThemes(); G.memT = G.t;
     }
+    // (v44) the toilet jackpot: in the toilet bowl, once the flush has settled (arriving there is in the cut scene)
+    if (!busy() && !G.cutTail && G.station >= 0 && COURSE[G.station][0] === 'toiletBowl' && G.slLap !== stationAt(G.x).lap) startSlot();
     G.fade = Math.min(1, G.fade + dt / 0.7);
     if (!(G.t - G.memT < 0.5)) { G.memT = G.t; manageThemes(); }
     // passing the cornea the eye blinks now and then (sometimes twice quickly); its own random, so the course is unchanged
@@ -3091,7 +3555,7 @@
   // stage a pink disc with a note, the orbit stage a violet disc with a little orbit, baseball a ball, the germ game
   // (v40) a germ, the memory game a neuron. More games: add them here.
   const BAR_W = 160;
-  const MINI_MARKS = [['spleen', 'wm'], ['ra', 'rh'], ['vertebral', 'orb'], ['hippocampus', 'mem'], ['jejunum', 'bb']].map(([id, kind]) => { const i = COURSE.findIndex((st) => st[0] === id); return { kind, i, lx: STARTS[i] }; });
+  const MINI_MARKS = [['spleen', 'wm'], ['ra', 'rh'], ['vertebral', 'orb'], ['hippocampus', 'mem'], ['jejunum', 'bb'], ['toiletBowl', 'sl'], ['manhole', 'pk']].map(([id, kind]) => { const i = COURSE.findIndex((st) => st[0] === id); return { kind, i, lx: STARTS[i] }; });
   function miniMark(kind, x, y, alpha) {
     ctx.globalAlpha = alpha * GA;
     ctx.beginPath(); ctx.arc(x, y, 4.6, 0, 6.29); ctx.fillStyle = '#1a0a14'; ctx.fill();
@@ -3122,6 +3586,23 @@
       ctx.beginPath(); ctx.arc(x, y, 2.7, 0, 6.29); ctx.fillStyle = '#b07ae0'; ctx.fill();
       ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(x - 1.05, y - 0.3, 0.75, 0, 6.29); ctx.arc(x + 1.05, y - 0.3, 0.75, 0, 6.29); ctx.fill();
       ctx.fillStyle = '#1a0a14'; ctx.beginPath(); ctx.arc(x - 0.95, y - 0.2, 0.38, 0, 6.29); ctx.arc(x + 1.15, y - 0.2, 0.38, 0, 6.29); ctx.fill();
+      ctx.globalAlpha = GA; return;
+    }
+    if (kind === 'pk') {                                    // (v44) a football: white, a dark pentagon in the middle, patches at the edge
+      ctx.beginPath(); ctx.arc(x, y, 3.9, 0, 6.29); ctx.fillStyle = '#f4f0ea'; ctx.fill();
+      ctx.fillStyle = '#1a0a14'; ctx.beginPath();
+      for (let k = 0; k < 5; k++) { const a = -Math.PI / 2 + k * 2 * Math.PI / 5; ctx.lineTo(x + Math.cos(a) * 1.45, y + Math.sin(a) * 1.45); }
+      ctx.closePath(); ctx.fill();
+      ctx.save(); ctx.beginPath(); ctx.arc(x, y, 3.9, 0, 6.29); ctx.clip();
+      for (let k = 0; k < 5; k++) { const a = Math.PI / 2 + k * 2 * Math.PI / 5; ctx.beginPath(); ctx.arc(x + Math.cos(a) * 4.0, y + Math.sin(a) * 4.0, 1.25, 0, 6.29); ctx.fill(); }
+      ctx.restore();
+      ctx.globalAlpha = GA; return;
+    }
+    if (kind === 'sl') {                                    // (v44) a slot machine's face: a gold disc, three reels in a dark window
+      ctx.beginPath(); ctx.arc(x, y, 3.9, 0, 6.29); ctx.fillStyle = '#ffc83a'; ctx.fill();
+      ctx.fillStyle = '#1a0a14'; ctx.fillRect(x - 2.85, y - 1.75, 5.7, 3.5);
+      ctx.fillStyle = '#fffaf0'; for (let k = -1; k <= 1; k++) ctx.fillRect(x + k * 1.85 - 0.75, y - 1.3, 1.5, 2.6);
+      ctx.fillStyle = '#e8343c'; for (let k = -1; k <= 1; k++) ctx.fillRect(x + k * 1.85 - 0.45, y - 0.3, 0.9, 0.6);
       ctx.globalAlpha = GA; return;
     }
     if (kind === 'mem') {                                   // a teal disc with a little neuron: a round body, forking branches
@@ -3270,7 +3751,7 @@
     device();
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, GW, GH);
     if (PROF) {
-      for (const [k, f] of [['scene', drawScene], ['lids', drawLids], ['rhythm', drawRhythm], ['orbit', drawOrbit], ['baseball', drawBaseball], ['whack', drawWhack], ['memory', drawMemory], ['cut', drawCut], ['hud', drawHud]]) {
+      for (const [k, f] of [['scene', drawScene], ['lids', drawLids], ['rhythm', drawRhythm], ['orbit', drawOrbit], ['baseball', drawBaseball], ['whack', drawWhack], ['memory', drawMemory], ['pk', drawPK], ['slot', drawSlot], ['cut', drawCut], ['hud', drawHud]]) {
         const t0 = performance.now(); f(); PROF[k] = (PROF[k] || 0) + performance.now() - t0;
       }
       PROF.n = (PROF.n || 0) + 1;
@@ -3282,6 +3763,8 @@
       drawBaseball();
       drawWhack();
       drawMemory();
+      drawPK();
+      drawSlot();
       if (G.cut || G.cutTail) drawCut();
       drawHud();
     }
@@ -3381,7 +3864,7 @@
     window.__settle = async () => { while (Object.keys(pending).length) await Promise.all(Object.values(pending)).catch(() => {}); render(); return Object.keys(bmp).length; };
     window.__state = () => ({ mode: G.mode, t: +G.t.toFixed(2), x: Math.round(G.x), v: +G.v.toFixed(1), hp: +G.hp.toFixed(1), score: G.score, eaten: G.eaten, hits: G.hits,
       station: COURSE[Math.max(0, G.station)][0], seg: G.station, theme: G.theme, lid: +lidAmount().toFixed(2), lastHit: G.lastHit, rot, lap: stationAt(G.x).lap, y: +G.y.toFixed(1), slide: G.slide, obs: G.obs.length, items: G.items.length,
-      NW, RS: +RS.toFixed(3), GW, GH, rhSong: G.rh ? G.rh.song.id : null, orbSong: G.orb ? OB.song.id : null, rotation: { ...ROT }, o2n: G.o2n, boost: +G.boost.toFixed(2), boostHeld: +G.boostHeld.toFixed(2), boosts: G.boosts, decoded: Object.keys(bmp).length, atp: G.atp || 0, orbits: G.orbits || 0, orb: G.orb ? G.orb.st : null, bb: G.bb ? G.bb.st : null, wm: G.wm ? G.wm.st : null, mem: G.mem ? G.mem.st : null, games: G.games || 0, huge: G.obs.filter((o) => o.kind === 'huge').length });
+      NW, RS: +RS.toFixed(3), GW, GH, rhSong: G.rh ? G.rh.song.id : null, orbSong: G.orb ? OB.song.id : null, rotation: { ...ROT }, o2n: G.o2n, boost: +G.boost.toFixed(2), boostHeld: +G.boostHeld.toFixed(2), boosts: G.boosts, decoded: Object.keys(bmp).length, atp: G.atp || 0, orbits: G.orbits || 0, orb: G.orb ? G.orb.st : null, bb: G.bb ? G.bb.st : null, wm: G.wm ? G.wm.st : null, mem: G.mem ? G.mem.st : null, pk: G.pk ? G.pk.st : null, sl: G.sl ? G.sl.st : null, games: G.games || 0, huge: G.obs.filter((o) => o.kind === 'huge').length });
     window.__G = G;
     window.__mem = () => { let px = 0; const files = {}; for (const [f, b] of Object.entries(bmp)) { const n = b.width * b.height; px += n; files[f] = +(n * 4 / 1e6).toFixed(1); } return { MB: +(px * 4 / 1e6).toFixed(1), files }; };
     window.__prof = PROF;
@@ -3400,6 +3883,9 @@
     window.__bbSwing = () => bbSwing();
     window.__wm = () => { const w = G.wm; if (!w) return null; return { st: w.st, u: w.st === 'play' ? +(G.t - w.t0).toFixed(2) : null, caught: w.caught, missed: w.missed, oops: w.oops, gain: w.gain,
       moles: w.moles.map((m) => { const p = wmPlace(m), s = M.sprites[wmName(m)]; return { h: m.h, kind: m.kind, good: m.good, st: m.st, q: +p.q.toFixed(2), x: +p.x.toFixed(1), y: +(p.y - s.foot[1] * p.k * 0.55).toFixed(1) }; }) }; };
+    window.__pk = () => { const p = G.pk; if (!p) return null; return { st: p.st, k: p.k, res: p.res.slice(), gain: p.gain, shot: p.shot ? { ...p.shot } : null }; };
+    window.__sl = () => { const s = G.sl; if (!s) return null; return { st: s.st, k: s.k, res: s.res.slice(), gain: s.gain, want: s.want && s.want.slice(), reach: !!s.reach, reels: s.reels.map((r) => ({ pos: +r.pos.toFixed(2), spin: r.spin, stop: !!r.stop })), mx: slMX() }; };
+    window.__pkKick = (gx, gh) => pkKick(gx, gh, 0.5);
     window.__memg = () => { const m = G.mem; if (!m) return null; return { st: m.st, seq: m.seq.slice(), k: m.k, round: m.round, res: m.res.slice(), gain: m.gain, best: m.best || 0, at: [0, 1, 2, 3, 4].map(memAt) }; };
     window.__bbTypes = BB_TYPES; window.__bbBallAt = (t) => bbBallAt(t);
     window.__bbAim = (x, y) => { if (G.bb) G.bb.cur = [x, y]; };

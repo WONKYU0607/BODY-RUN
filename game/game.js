@@ -119,7 +119,11 @@
     })().catch((e) => { delete pending[fn]; throw e; });
     return pending[fn];
   }
-  function release(fn) { const b = bmp[fn]; if (b) { if (b.close) b.close(); delete bmp[fn]; } }
+  const rimCache = {};
+  function release(fn) {
+    const b = bmp[fn]; if (b) { if (b.close) b.close(); delete bmp[fn]; }
+    for (const k of Object.keys(rimCache)) if (rimCache[k].f === fn) delete rimCache[k];      // (its obstacles' red rims)
+  }
   const themeFiles = (t) => { const th = M.themes[t]; return [th.far, th.mid, th.fx].filter(Boolean); };
   // what is kept decoded (a background picture is 14-21 MB once decoded, so not many at a time): the look you are in,
   // the one you just left while it fades, and the looks ahead as far as about MEM_LEAD seconds of running at the speed
@@ -303,7 +307,10 @@
     else if (u < 0.5) b = 0; else if (u < 0.56) tp = smooth3((u - 0.5) / 0.06); else if (u < 0.92) tp = 1; else if (u < 0.98) tp = 1 - smooth3((u - 0.92) / 0.06);
     return [b, tp];
   }
-  function curSpeed() { return G.orb || G.bb || G.cut ? 0 : G.rh ? G.rh.speed : G.v * (0.3 + 0.7 * G.slow) * (G.boost > 0 ? BOOST_K : 1); }
+  // under water (stage 2) the speed carried in is cut by 30% and climbs from there at the same rate as ever (G.wPen: the
+  // 30% of the speed it came in at, held while in the water)
+  const wPen = () => (inWater() ? G.wPen || 0 : 0);
+  function curSpeed() { return G.orb || G.bb || G.cut ? 0 : G.rh ? G.rh.speed : (G.v - wPen()) * (0.3 + 0.7 * G.slow) * (G.boost > 0 ? BOOST_K : 1); }
   function arriveIn(dist, v) { return ACC > 0 ? (-v + Math.sqrt(v * v + 2 * ACC * Math.max(0, dist))) / ACC : dist / v; }
   function aimDoor(o) {                              // set its beat so the wanted lip is half way through its hold on arrival
     const ta = G.t + arriveIn(o.x + o.w / 2 - G.x, curSpeed());
@@ -423,7 +430,7 @@
       const theme = themeAt(G.genX), th = M.themes[theme], fam = hzFam(theme);
       const coin = th.coin, special = th.special;
       // how hard: from the speed (0 at the start .. 1 at 460/s, about 5 minutes in), then a little more up to 900
-      const v = G.v;
+      const v = S2_L.has(theme) ? G.v - (G.wPen || 0) : G.v;          // (under water: the speed there)
       const d = Math.min(1, Math.max(0, (v - V0) / 300)), d2 = Math.min(1, Math.max(0, (v - 460) / 440));
       const gapT = 1.45 - 0.65 * d - 0.15 * d2;          // seconds between patterns
       const R = G.R;
@@ -441,7 +448,7 @@
         ['bob', 0.04 + 0.08 * d], ['swim', 0.04 + 0.08 * d], ['slidejump', 0.03 + 0.08 * d], ['jumpslide', 0.03 + 0.08 * d], ['lowtall', 0.02 + 0.06 * d],
         // v19: holes, doors, drops, spikes, shots: a few from the start, more and harder as it speeds up
         ['pit', 0.05 + 0.10 * d + 0.06 * d2], ['door', fam.door ? 0.04 + 0.08 * d + 0.05 * d2 : 0], ['drop', 0.05 + 0.08 * d + 0.05 * d2],
-        ['spike', 0.05 + 0.09 * d + 0.05 * d2], ['shot', 0.04 + 0.09 * d + 0.06 * d2]];
+        ['spike', 0.05 + 0.09 * d + 0.05 * d2], ['shot', 0.08 + 0.15 * d + 0.08 * d2]];        // (v38: shots twice as often)
       let r = R() * W.reduce((a, b) => a + b[1], 0), pat = 'rest';
       for (const [p, w] of W) { if ((r -= w) <= 0) { pat = p; break; } }
       // the way into each new look is guarded: a gate of three in quick succession
@@ -548,7 +555,7 @@
       } else if (pat === 'shot') {
         // where it meets you is about here (it waits off the screen and flies once on it)
         const vx = 110 + 120 * d + 60 * d2, shift = vx * (NWf + 4 - PX) / (v + vx);
-        const n = d > 0.5 && R() < 0.5 * d ? 2 : 1;
+        const n = d > 0.3 && R() < 0.65 * d ? (d2 > 0.2 && R() < 0.45 ? 3 : 2) : 1;     // (v38: pairs sooner, threes when fast)
         let meet = x + 40, low = R() < 0.5;
         for (let k = 0; k < n; k++) {
           addShot(meet + shift, low, vx, fam.shot);
@@ -1453,7 +1460,7 @@
     if (!c.swap) { G.x = c.lap * LAP + S2_X + 1; G.y = 0; G.vy = 0; G.onGround = true; G.obs = []; G.items = []; G.genX = G.x + NW * 0.8; }
     G.cut = null; G.cutTail = { landed: c.landed || G.t, splash: c.splash, bub: c.bub || [], drops: c.drops || [] };
     if (G.theme !== COURSE[S2_I][3]) G.station = -1;
-    G.slow = 0; resumeBoost();
+    G.slow = 1; resumeBoost();                                 // (on at the water's speed at once: no slow start)
     G.genX = Math.max(G.genX, G.x + NW * 0.8);
   }
   function sprRot(name, cx, cy, rot, alpha = 1, k = 1) {
@@ -1907,7 +1914,7 @@
   // one pattern under water at x; returns how far it reaches
   function spawnSwim(x, theme, fam, coin, special, v, d, d2, R) {
     const W = [['rest', 0.1], ['gate', 0.3 + 0.08 * d], ['gate2', 0.04 + 0.1 * d], ['float', 0.16], ['bob', 0.07 + 0.06 * d], ['swim', 0.06 + 0.06 * d],
-      ['tall', 0.07], ['drop', 0.04 + 0.05 * d + 0.03 * d2], ['spike', 0.04 + 0.05 * d + 0.03 * d2], ['shot', 0.04 + 0.07 * d + 0.04 * d2]];
+      ['tall', 0.07], ['drop', 0.04 + 0.05 * d + 0.03 * d2], ['spike', 0.04 + 0.05 * d + 0.03 * d2], ['shot', 0.09 + 0.13 * d + 0.07 * d2]];      // (v38: shots twice as often)
     let r = R() * W.reduce((a, b) => a + b[1], 0), pat = 'rest';
     for (const [p, w] of W) { if ((r -= w) <= 0) { pat = p; break; } }
     if (window.__patlog) window.__patlog['s2:' + pat] = (window.__patlog['s2:' + pat] || 0) + 1;
@@ -1950,11 +1957,17 @@
     } else if (pat === 'spike') {
       const o = addSpike(x + 50, fam.spike, R() < 0.5, Math.max(0.36, 0.62 - 0.22 * d - 0.05 * d2), 0.5 - 0.12 * d);
       coinsAt(x + 40, 4, GY - 50); used = (o ? o.w : 16) + 90;
-    } else if (pat === 'shot') {
+    } else if (pat === 'shot') {                                // one, or (faster) two or three at changing heights
       const vx = 110 + 120 * d + 60 * d2, shift = vx * (NWf + 4 - PX) / (v + vx);
-      const o = addShot(x + 40 + shift, true, vx, fam.shot);
-      if (o) { o.y = 34 + R() * (GY - 40 - o.h); coinsAt(x + 40, 4, o.y > 90 ? o.y - 30 : o.y + o.h + 26); }
-      used = 120;
+      const n = d > 0.3 && R() < 0.65 * d ? (d2 > 0.2 && R() < 0.45 ? 3 : 2) : 1;
+      let meet = x + 40, y = 34 + R() * (GY - 54);
+      for (let k = 0; k < n; k++) {
+        const o = addShot(meet + shift, true, vx, fam.shot);
+        if (o) { o.y = Math.max(30, Math.min(GY - 6 - o.h, y)); coinsAt(meet, 4, o.y > 90 ? o.y - 30 : o.y + o.h + 26); }
+        meet += Math.max(v * 0.9, 110);                          // (time to swim clear of the next one)
+        y = y > 90 ? y - (40 + R() * 30) : y + (40 + R() * 30);
+      }
+      used = meet - x + 40;
     }
     return used;
   }
@@ -2095,7 +2108,11 @@
       const arrived = G.station < 0 || COURSE[G.station][5] !== s.st[5];       // a new place (not just a new look in it)
       G.station = s.i;
       const th = s.st[3];
-      if (th !== G.theme) { G.prevTheme = G.theme; G.theme = th; G.fade = G.cut && G.cut.swap ? 1 : 0; }    // (out of the anus: straight in)
+      if (th !== G.theme) {
+        G.prevTheme = G.theme; G.theme = th; G.fade = G.cut && G.cut.swap ? 1 : 0;      // (out of the anus: straight in)
+        if (S2_L.has(th) && !S2_L.has(G.prevTheme)) G.wPen = 0.3 * G.v;                 // into the water: 30% slower from here
+        else if (!S2_L.has(th)) G.wPen = 0;
+      }
       if (!themeFiles(th).every((f) => bmp[f])) { G.missing = (G.missing || 0) + 1; (G.missList = G.missList || []).push(th); }   // (tests: a look not ready on arrival)
       if (arrived) { if (!busy()) G.banner = G.t; setLabel(s.st, s.lap); if (s.st[0] === 'ra' && !busy()) startRhythm(); if (s.st[0] === 'vertebral' && !busy()) startOrbit(); if (s.st[0] === 'jejunum' && !busy()) startBaseball(); }
       manageThemes(); G.memT = G.t;
@@ -2205,6 +2222,53 @@
   // stars twinkling along it, rainbow-tinted afterimages, a prism flame at the back
   const RAINBOW = ['#ff4a5e', '#ff9a2a', '#ffe14a', '#4ad66a', '#3aa0ff', '#9a5aff'];
   const tintCache = {};
+  // v38: what hurts and what you eat told apart at a glance: every obstacle has a red rim (a bright line round its
+  // outline and a faint glow beyond), every item a soft light round it that breathes and now and then a twinkle.
+  // The rim is made once per picture (at half its resolution: it is soft anyway) and dropped with the picture
+  const RIM = 0.85, RIM2 = 1.9;
+  function rimOf(name) {
+    if (rimCache[name]) return rimCache[name];
+    const s0 = M.sprites[name]; if (!s0) return null; const im = bmp[s0.f]; if (!im) return null;
+    const k = (s0.r[2] / s0.w) / 2, w = Math.max(1, Math.round(s0.r[2] / 2)), h = Math.max(1, Math.round(s0.r[3] / 2));
+    const pad = Math.ceil(RIM2 * k) + 2;
+    const sil = document.createElement('canvas'); sil.width = w; sil.height = h;
+    const sx = sil.getContext('2d'); sx.drawImage(im, s0.r[0], s0.r[1], s0.r[2], s0.r[3], 0, 0, w, h);
+    sx.globalCompositeOperation = 'source-in'; sx.fillStyle = '#ff2a2a'; sx.fillRect(0, 0, w, h);
+    const c = document.createElement('canvas'); c.width = w + 2 * pad; c.height = h + 2 * pad;
+    const x = c.getContext('2d');
+    for (const [rad, a] of [[RIM2 * k, 0.22], [RIM * k, 1]]) {
+      x.globalAlpha = a;
+      for (let i = 0; i < 16; i++) { const t = i / 16 * 6.2832; x.drawImage(sil, pad + Math.cos(t) * rad, pad + Math.sin(t) * rad); }
+    }
+    x.globalAlpha = 1; x.globalCompositeOperation = 'destination-out'; x.drawImage(sil, pad, pad);   // (round it, not on it)
+    return (rimCache[name] = { c, pad: pad / k, f: s0.f });
+  }
+  function rim(name, x, y, w = null, h = null) {                // drawn just before the obstacle's own picture
+    const r = rimOf(name); if (!r) return;
+    const s0 = M.sprites[name], fx = (w ?? s0.w) / s0.w, fy = (h ?? s0.h) / s0.h;
+    ctx.drawImage(r.c, x - r.pad * fx, y - r.pad * fy, (s0.w + 2 * r.pad) * fx, (s0.h + 2 * r.pad) * fy);
+  }
+  const rspr = (name, x, y, alpha = 1, w = null, h = null) => { rim(name, x, y, w, h); spr(name, x, y, alpha, w, h); };
+  let glowC = null;
+  function glowOf() {
+    if (glowC) return glowC;
+    const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d');
+    const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+    g.addColorStop(0, 'rgba(255,250,215,0.95)'); g.addColorStop(0.45, 'rgba(255,240,170,0.45)'); g.addColorStop(1, 'rgba(255,240,170,0)');
+    x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+    return (glowC = c);
+  }
+  function itemGlow(cx, cy, size, ph) {                          // the light round an item and its twinkle
+    const a = 0.42 + 0.18 * Math.sin(G.t * 5 + ph), d = size * 2.1;
+    ctx.globalAlpha = a * GA; ctx.drawImage(glowOf(), cx - d / 2, cy - d / 2, d, d); ctx.globalAlpha = GA;
+    const q = ((G.t * 0.7 + ph / 6.2832) % 1 + 1) % 1;
+    if (q < 0.16) {
+      const k = Math.sin(q / 0.16 * Math.PI), r = size * 0.42 * k, tx = cx - size * 0.32, ty = cy - size * 0.36;
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) { const ang = i * Math.PI / 4, rr = i % 2 ? r * 0.22 : r; ctx.lineTo(tx + Math.cos(ang) * rr, ty + Math.sin(ang) * rr); }
+      ctx.closePath(); ctx.fillStyle = '#ffffff'; ctx.globalAlpha = 0.95 * GA; ctx.fill(); ctx.globalAlpha = GA;
+    }
+  }
   function tinted(name, col) {                       // the sprite as a coloured silhouette (cached)
     const key = name + col; if (tintCache[key]) return tintCache[key];
     const s0 = M.sprites[name], im = bmp[s0.f]; if (!im) return null;
@@ -2408,13 +2472,13 @@
     world();
     for (const o of G.obs) {
       const sx = o.x - cam; if (sx >= NWf || sx + o.w <= 0) continue;
-      if (o.kind === 'hang') spr(o.name, sx, o.y);
+      if (o.kind === 'hang') rspr(o.name, sx, o.y);
       else if (o.kind === 'door') drawDoor(o, sx);
-      else if (o.kind === 'spike' && o.e > 0) spr(o.name, sx, o.y);
+      else if (o.kind === 'spike' && o.e > 0) rspr(o.name, sx, o.y);
       else if (o.kind === 'drop' && o.st === 'hang') {          // swelling on the ceiling, wobbling before it lets go
         const wob = o.wob ? Math.min(1, o.wob / 0.3) : 0, k = 1 + wob * (0.18 + 0.07 * Math.sin(G.t * 34));
         const w = SW(o.nd), h = SH(o.nd);
-        spr(o.nd, sx + (o.w - w / (0.92 + 0.08 * k)) / 2, DROP_Y0, 1, w / (0.92 + 0.08 * k), h * k);
+        rspr(o.nd, sx + (o.w - w / (0.92 + 0.08 * k)) / 2, DROP_Y0, 1, w / (0.92 + 0.08 * k), h * k);
       }
     }
     device();
@@ -2440,10 +2504,10 @@
       if (o.kind === 'drop') { drawDrop(o, sx); continue; }
       if (o.kind === 'shot') {
         const w = SW(o.name), h = SH(o.name);
-        ctx.save(); ctx.translate(sx + w / 2, o.y + h / 2); ctx.rotate(-o.spin); spr(o.name, -w / 2, -h / 2); ctx.restore();
+        ctx.save(); ctx.translate(sx + w / 2, o.y + h / 2); ctx.rotate(-o.spin); rspr(o.name, -w / 2, -h / 2); ctx.restore();
         continue;
       }
-      spr(o.name, sx, o.y);
+      rspr(o.name, sx, o.y);
     }
     for (const it of G.items) {
       const sx = it.x - cam; if (sx < -20 || sx > NWf + 20) continue;
@@ -2460,7 +2524,9 @@
         ctx.beginPath(); ctx.moveTo(sx, it.y); ctx.lineTo(sx + dx / L * 16, it.y + dy / L * 16); ctx.stroke();
         spr(n, sx - SW(n) / 2, it.y - SH(n) / 2); continue;
       }
-      spr(n, sx - SW(n) / 2, it.y - SH(n) / 2 + Math.sin(G.t * 4 + it.ph));
+      const by = Math.sin(G.t * 4 + it.ph);
+      itemGlow(sx, it.y + by, Math.max(SW(n), SH(n)), it.ph || 0);
+      spr(n, sx - SW(n) / 2, it.y - SH(n) / 2 + by);
     }
     // the player: a shadow, dust, the character (bobbing as it runs, squashed when sliding); not while on the orbit stage
     if (G.cut && G.cut.swap) { if (!G.cut.landed) drawDive(); else drawPlayer(cam); }
@@ -2522,8 +2588,8 @@
   }
   function drawDoor(o, sx) {
     const st = M.sprites[o.nt], sb = M.sprites[o.nb];
-    if (o.et > 0.004) spr(o.nt, sx + (o.w - st.w) / 2, HANG_BOTTOM - st.h - DOOR_UP * (1 - o.et));
-    if (o.eb > 0.004) spr(o.nb, sx + (o.w - sb.w) / 2, GY + 4 - DOOR_B * o.eb);
+    if (o.et > 0.004) rspr(o.nt, sx + (o.w - st.w) / 2, HANG_BOTTOM - st.h - DOOR_UP * (1 - o.et));
+    if (o.eb > 0.004) rspr(o.nb, sx + (o.w - sb.w) / 2, GY + 4 - DOOR_B * o.eb);
   }
   // the floor over a spike about to come up: it shakes, cracks and spits bits
   function drawQuake(o, sx) {
@@ -2553,11 +2619,11 @@
       const p = Math.min(1, (o.y - DROP_Y0) / (GY - SH(o.nd) - DROP_Y0));
       ctx.fillStyle = `rgba(0,0,0,${0.3 + 0.35 * p})`; ctx.beginPath(); ctx.ellipse(sx + o.w / 2, GY + 0.6, 4.5 + 7.5 * p, 1.5 + 0.9 * p, 0, 0, 6.29); ctx.fill();
       const w = SW(o.nd), h = SH(o.nd);
-      spr(o.nd, sx + (o.w - w) / 2, o.y, 1, w * 0.94, h * 1.08);
+      rspr(o.nd, sx + (o.w - w) / 2, o.y, 1, w * 0.94, h * 1.08);
     } else if (o.st === 'land') {
       const u = Math.min(1, (G.t - o.landT) / 0.14), w = SW(o.np), h = SH(o.np);
       const kx = 1.25 - 0.25 * u, ky = 0.6 + 0.4 * u;
-      spr(o.np, sx + (o.w - w * kx) / 2, GY + 2 - h * ky, 1, w * kx, h * ky);
+      rspr(o.np, sx + (o.w - w * kx) / 2, GY + 2 - h * ky, 1, w * kx, h * ky);
     } else if (o.wob) {                                       // a shadow even before it falls
       ctx.fillStyle = `rgba(0,0,0,${0.25 * Math.min(1, o.wob / 0.3)})`; ctx.beginPath(); ctx.ellipse(sx + o.w / 2, GY + 0.6, 4.5, 1.5, 0, 0, 6.29); ctx.fill();
     }

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-<title>Body Run</title>
+<title>장기런 · Body Run</title>
 <link rel="icon" href="data:,">
 <style>
   :root { color-scheme: dark; --u: 2px; }
@@ -44,27 +44,27 @@
       <div id="place" class="txt"><div id="pname"></div><div id="pen"></div></div>
     </div>
     <div id="select" class="panel" hidden>
-      <h1 class="txt">캐릭터를 골라 주세요</h1>
+      <h1 class="txt" data-en="Choose your character">캐릭터를 골라 주세요</h1>
       <div id="grid"></div>
     </div>
     <div id="pauseBox" class="panel" hidden>
-      <h1 class="txt">일시정지</h1>
-      <div class="row"><button id="bResume" class="pb">계속</button><button id="bRestart" class="pb alt">처음부터</button><button id="bChar" class="pb alt">캐릭터 바꾸기</button></div>
+      <h1 class="txt" data-en="Paused">일시정지</h1>
+      <div class="row"><button id="bResume" class="pb" data-en="Resume">계속</button><button id="bRestart" class="pb alt" data-en="Restart">처음부터</button><button id="bChar" class="pb alt" data-en="Change character">캐릭터 바꾸기</button></div>
     </div>
     <div id="setBox" class="panel" hidden>
-      <h1 class="txt">설정</h1>
-      <div class="setRow"><span class="setLab txt">버튼 위치</span><button id="bSwap" class="pb alt"></button></div>
-      <div class="setRow"><span class="setLab txt">사운드 끄기</span><button id="bSfx" class="pb tg"></button><button id="bMus" class="pb tg"></button></div>
-      <div class="row"><button id="bSetBack" class="pb">닫기</button></div>
+      <h1 class="txt" data-en="Settings">설정</h1>
+      <div class="setRow"><span class="setLab txt" data-en="Buttons">버튼 위치</span><button id="bSwap" class="pb alt"></button></div>
+      <div class="setRow"><span class="setLab txt" data-en="Sound">사운드 끄기</span><button id="bSfx" class="pb tg"></button><button id="bMus" class="pb tg"></button></div>
+      <div class="row"><button id="bSetBack" class="pb" data-en="Close">닫기</button></div>
     </div>
     <div id="overBox" class="panel" hidden>
-      <h1 class="txt">체력이 다 떨어졌어요</h1>
+      <h1 class="txt" data-en="Out of health">체력이 다 떨어졌어요</h1>
       <p id="overMsg"></p>
-      <div class="row"><button id="bAgain" class="pb">다시</button><button id="bChar2" class="pb alt">캐릭터 바꾸기</button></div>
+      <div class="row"><button id="bAgain" class="pb" data-en="Again">다시</button><button id="bChar2" class="pb alt" data-en="Change character">캐릭터 바꾸기</button></div>
     </div>
   </div>
 </div>
-<div id="loading">불러오는 중</div>
+<div id="loading" data-en="Loading">불러오는 중</div>
 <script src="sound.js"></script>
 <script src="stages.js"></script>
 <script src="game.js"></script>

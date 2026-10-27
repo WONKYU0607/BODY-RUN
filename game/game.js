@@ -1,7 +1,7 @@
 // Body Run: a side-scrolling runner through the body (jump, double jump, slide). The world is 180 units tall and as
 // wide as the screen's shape allows (300..420 units); it is drawn straight at the screen's own pixel resolution
 // from high-resolution art (4 px per unit; the characters at the resolution of their sheet).
-// Speed: from 170 units/s, +1 every second of running (v43), no top speed. Jump, double and triple jump (even the highest stays clear of the ceiling);
+// Speed: from 170 units/s, +0.8 every second of running (v47), no top speed. Jump, double and triple jump (even the highest stays clear of the ceiling);
 // more jumps after the third keep you up, but never above the triple jump's highest point.
 // Health drains 1/s; heals +25; a hit -15 and a stumble.
 (() => {
@@ -12,12 +12,18 @@
   const NO_DEATH = !qs.has('death');            // debugging: health 0 does not end the run (?death turns it on)
   const PRELOAD = qs.has('preload');            // test hook: decode every picture up front
   const PROF = qs.has('prof') ? {} : null;      // test hook: time each part of drawing (window.__prof)
+  // (v47) Korean or English: the device's language (?lang=ko|en for tests); every word on screen through TR(ko, en)
+  const LANG = (qs.get('lang') || navigator.language || 'en').toLowerCase().startsWith('ko') ? 'ko' : 'en';
+  const TR = (ko, en) => (LANG === 'ko' ? ko : en);
+  const PT = (n) => (LANG === 'ko' ? `${n.toLocaleString('en-US')}점` : `${n.toLocaleString('en-US')} pts`);   // points
+  document.documentElement.lang = LANG; document.title = TR('장기런', 'Body Run');
+  if (LANG !== 'ko') for (const el of document.querySelectorAll('[data-en]')) el.textContent = el.dataset.en;    // the page's own words
 
   // ---------------------------------------------------------------- world constants (units, seconds)
   const NH = 180, GY = 150, CEIL = 14, PX = 84;
   const GRAV = 900, JUMP = 326, JUMP2 = 226, JUMP3 = 184, FASTFALL = 2.4;   // single 59 high, double 87.4, triple ~105 (v20: single +10%)
   const JMAX = (JUMP * JUMP + JUMP2 * JUMP2 + JUMP3 * JUMP3) / (2 * GRAV);    // the triple jump at its best (106.2): the 4th and on stop there
-  const V0 = 170, ACC = 1.0, VMAX = Infinity;               // (v43: +1/s, was 0.6; no top speed, was 900)
+  const V0 = 170, ACC = 0.8, VMAX = Infinity;               // (v47: +0.8/s; v43: +1/s, was 0.6; no top speed, was 900)
   const HP_MAX = 100, DRAIN = 1.0, HIT = 15, HEAL = 25, INVUL = 1.2;
   // the player's box: half-width and height running, sliding (the characters are drawn 0.8 of their old size)
   const PW = 5.76, PH = 17.28, SLW = 7.92, SLH = 9.36;     // (v38: 0.9 of v15's 6.4, 19.2, 8.8, 10.4, with the pictures)
@@ -84,12 +90,14 @@
   const S2_I = COURSE.findIndex((st) => st[5] === STAGE2), S2_X = STARTS[S2_I];       // where stage 2 starts in the lap
   const stageOf = (lx) => (lx >= S2_X ? 2 : 1);
   const stageSpan = (st) => (st === 2 ? [S2_X, LAP] : [0, S2_X]);
-  const CHAR_NAMES = { tardigrade: '물곰', lacto: '유산균', paramecium: '짚신벌레', amoeba: '아메바', daphnia: '물벼룩', pillbug: '공벌레', ladybug: '무당벌레', jelly: '아기 해파리', sub: '초소형 잠수정', phage: '박테리오파지' };
+  const CHAR_NAMES = LANG === 'ko' ? { tardigrade: '물곰', lacto: '유산균', paramecium: '짚신벌레', amoeba: '아메바', daphnia: '물벼룩', pillbug: '공벌레', ladybug: '무당벌레', jelly: '아기 해파리', sub: '초소형 잠수정', phage: '박테리오파지' }
+    : { tardigrade: 'Water Bear', lacto: 'Lactobacillus', paramecium: 'Paramecium', amoeba: 'Amoeba', daphnia: 'Water Flea', pillbug: 'Pill Bug', ladybug: 'Ladybug', jelly: 'Baby Jellyfish', sub: 'Mini Sub', phage: 'Phage' };
   const PTS = { vitC: 10, o2: 10, iron: 30, omega: 30, fiber: 30, atp: 50, multi: 100, heal: 0, drop: 10, soap: 30 };
   const mod = (a, n) => ((a % n) + n) % n;
   const PILOT_HUGE = 0.58;
   // the booster: every 100 things eaten (anything but a heal), 5 seconds at three times the speed, untouchable (a second's grace after)
   const BOOST_N = 100, BOOST_T = 5, BOOST_K = 3, BOOST_GRACE = 1.0;
+  const boostNeed = () => BOOST_N + 20 * (G.boosts || 0);      // (v47) 100, then 120, 140, ... (late on the coins come thick)
   const MAG_R = 80;                                  // boosting, a magnetic field round the body pulls in what comes this near
   const FIRE_STYLE = Math.max(1, Math.min(5, +(qs.get('fire') || 5)));      // the look of the booster's fire (5: rainbow starlight, chosen)
 
@@ -136,7 +144,7 @@
     if (G.station < 0) return;
     const i = G.station, s = stationAt(G.x), want = new Set([COURSE[i][3]]);
     if (G.prevTheme && G.fade < 1) want.add(G.prevTheme);
-    const boosty = G.boost > 0 || G.boostHeld > 0 || G.o2n >= BOOST_N - 10;
+    const boosty = G.boost > 0 || G.boostHeld > 0 || G.o2n >= boostNeed() - 10;
     const reach = Math.max(MEM_MIN, G.v * (boosty ? BOOST_K : 1) * MEM_LEAD + NW);
     for (let k = i + 1, n = 0; n < COURSE.length; k++, n++) {          // the looks starting within reach
       const kk = k % COURSE.length, d = (k >= COURSE.length ? LAP : 0) + STARTS[kk] - s.lx;
@@ -145,7 +153,7 @@
     }
     const files = new Set(['common.webp']);
     for (const t of want) for (const f of themeFiles(t)) files.add(f);
-    if (G.boost > 0 || G.boostHeld > 0 || G.o2n >= BOOST_N - 25) files.add('fx_fire.webp');
+    if (G.boost > 0 || G.boostHeld > 0 || G.o2n >= boostNeed() - 25) files.add('fx_fire.webp');
     const jx = STARTS[COURSE.findIndex((st) => st[5] === JEJ)], dj = ((jx - s.lx) % LAP + LAP) % LAP;
     const nearBB = G.bb || dj < Math.max(2500, G.v * 8);
     if (nearBB) { files.add('bb_field.webp'); files.add('bb.webp'); files.add(`bat_${G.char}.webp`); }
@@ -189,7 +197,7 @@
     document.documentElement.style.setProperty('--u', `${CSS}px`);     // one unit in CSS pixels (for the labels)
     wrap.style.transform = `translate(-50%, -50%)${rot ? ' rotate(90deg)' : ''}`;
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-    if (M && G.mode) render();
+    if (G.mode === 'title') renderTitle(); else if (M && G.mode && G.mode !== 'select') render();
   }
   addEventListener('resize', resize);
   // transforms: world units, or the landscape picture's own pixels (for seamless strips)
@@ -299,6 +307,7 @@
   }
   const PIT_EDGE = PW * 0.6;                       // standing this far over a hole's edge you still stand
   const PIT_HIT = 20;                              // falling in costs more than a bump
+  const PIT_DEPTH = 34, PIT_HOLD = 0.22, PIT_SLOW = 0.3;   // (v47) how deep you sink; how long you stay at the bottom; how slow you go in it
   const DROP_Y0 = 9, DROP_G = 900;                 // a drop hangs with its top here (behind the ceiling band), falls this fast
   const DOOR_UP = 131, DOOR_B = 30;                // how far a door's hanging lip draws up into the ceiling; its standing lip's rise
   const smooth3 = (k) => k * k * (3 - 2 * k);
@@ -320,7 +329,9 @@
   // under water (stage 2) the speed carried in is cut by 30% and climbs from there at the same rate as ever (G.wPen: the
   // 30% of the speed it came in at, held while in the water)
   const wPen = () => (inWater() ? G.wPen || 0 : 0);
-  function curSpeed() { return G.orb || G.bb || G.wm || G.mem || G.pk || G.sl || G.cut ? 0 : G.rh ? G.rh.speed : (G.v - wPen()) * (0.3 + 0.7 * G.slow) * (G.boost > 0 ? BOOST_K : 1); }
+  function curSpeed() { return G.orb || G.bb || G.wm || G.mem || G.pk || G.sl || G.cut ? 0 : G.rh ? G.rh.speed : (G.v - wPen()) * (0.3 + 0.7 * G.slow) * (G.boost > 0 ? BOOST_K : 1) * pitSlow(); }
+  // (v47) in a hole: slowed as you sink (you go down into it, not along to its far wall), stopped at the bottom
+  function pitSlow() { return G.pitObj && G.y < 0 && !G.bounce ? (G.pitHoldT ? 0 : PIT_SLOW) : 1; }
   function arriveIn(dist, v) { return ACC > 0 ? (-v + Math.sqrt(v * v + 2 * ACC * Math.max(0, dist))) / ACC : dist / v; }
   function aimDoor(o) {                              // set its beat so the wanted lip is half way through its hold on arrival
     const ta = G.t + arriveIn(o.x + o.w / 2 - G.x, curSpeed());
@@ -404,6 +415,7 @@
   }
   // falling into a hole: it hurts, and you are thrown back out to land just past it
   function fallOut(p) {
+    G.bounce = true; G.pitHoldT = 0;                         // (first: the speed it is thrown out at is the full one)
     if (G.invul <= 0 && !(G.boost > 0)) {
       G.hits++; G.hp = Math.max(0, G.hp - PIT_HIT); SND.play('hit');
       G.lastHit = { kind: 'pit', name: 'pit', dx: Math.round(p.x - G.x), y: Math.round(G.y), vy: Math.round(G.vy), slide: false, jumps: G.jumps, v: Math.round(G.v), w: Math.round(p.w) };
@@ -654,6 +666,7 @@
   let keySlide = false, keyJump = false;
   cv.addEventListener('pointerdown', (e) => {
     SND.unlock();
+    if (G.mode === 'title') { titleTap(); e.preventDefault(); return; }
     if (G.mode !== 'play') return;
     const [nx, ny] = toWorld(e);
     if (nx > NW - 26 && ny < 26) { pause(); return; }
@@ -678,6 +691,7 @@
   document.addEventListener('visibilitychange', () => { if (document.hidden && G.mode === 'play') pause(); });
   addEventListener('keydown', (e) => {
     if (e.repeat) return;
+    if (G.mode === 'title' && ['Space', 'Enter'].includes(e.code)) { SND.unlock(); titleTap(); e.preventDefault(); return; }
     if (G.bb && G.mode === 'play') {                         // baseball: the arrows move the bat's ring, space (or enter) swings
       if (BB_KEY[e.code]) { bbKeys.add(BB_KEY[e.code]); e.preventDefault(); return; }
       if (['Space', 'Enter', 'KeyJ', 'KeyF'].includes(e.code)) { bbSwing(); e.preventDefault(); return; }
@@ -934,9 +948,9 @@
     const B = r.B, f0 = r.first * B;
     if (t < f0) {
       const a = Math.min(1, (t + RH_LEAD) / 0.3) * Math.min(1, (f0 - t) / 0.4);
-      label('심장이 두근두근!', NWf / 2, 66, 17, 'center', a, '#ffd0dc');
-      label('원은 고리가 겹칠 때 터치 · 공은 잡고 따라가기 · 풍선은 연타 · 원판은 빙빙', NWf / 2, 86, 6.5, 'center', a, '#ffffff');
-      label(r.song.name, NWf / 2, 100, 7.5, 'center', a * 0.9, '#ffe0a8');
+      label(TR('심장이 두근두근!', 'Heartbeat!'), NWf / 2, 66, 17, 'center', a, '#ffd0dc');
+      label(TR('원은 고리가 겹칠 때 터치 · 공은 잡고 따라가기 · 풍선은 연타 · 원판은 빙빙', 'Tap circles as the rings meet · hold and follow balls · mash balloons · spin discs'), NWf / 2, 86, 6.5, 'center', a, '#ffffff');
+      label(TR(r.song.name, r.song.en || r.song.name), NWf / 2, 100, 7.5, 'center', a * 0.9, '#ffe0a8');
       const c = r.first - Math.floor(t / B);
       if (t > 0 && c >= 1 && c <= 4) label(String(c), NWf / 2, 126, 16, 'center', a * (1 - (t / B) % 1), '#ffffff');
     }
@@ -953,7 +967,7 @@
         drawSlider(n, t, fade);
         if (n.dual && n.lead && t < n.tn + 0.3) {             // both hands: a word over the pair as it comes
           const [x1, y1] = rhPos(n.u, n.v), [x2, y2] = rhPos(n.mate.u, n.mate.v);
-          label('양손!', (x1 + x2) / 2, Math.min(y1, y2) - 4, 10, 'center', fade * Math.min(1, (n.tn + 0.3 - t) / 0.3), '#ffe68a');
+          label(TR('양손!', 'Both hands!'), (x1 + x2) / 2, Math.min(y1, y2) - 4, 10, 'center', fade * Math.min(1, (n.tn + 0.3 - t) / 0.3), '#ffe68a');
         }
       } else {
         if (n.res) continue;
@@ -967,13 +981,13 @@
       if (p.res !== 'miss') { ctx.beginPath(); ctx.arc(p.x, p.y, RH_R * (1 + u * 0.9), 0, 6.29); ctx.lineWidth = 2.2 * (1 - u); ctx.strokeStyle = p.res === 'perfect' ? `rgba(255,236,150,${1 - u})` : `rgba(160,220,255,${1 - u})`; ctx.stroke(); }
       label(p.s, p.x, p.y - RH_R - 4 - u * 8, p.small ? 7 : 9, 'center', 1 - u * u, p.res === 'perfect' ? '#ffe68a' : p.res === 'good' ? '#a8e0ff' : '#ff8a8a');
     }
-    if (r.combo >= 2 && !r.done) label(`${r.combo} 콤보`, 18, NH - 14, 10, 'left', 1, '#fff3c8');
+    if (r.combo >= 2 && !r.done) label(TR(`${r.combo} 콤보`, `${r.combo} combo`), 18, NH - 14, 10, 'left', 1, '#fff3c8');
     if (r.done) {
       const a = Math.min(1, (G.t - r.doneT) / 0.25) * Math.min(1, (RH_DONE - (G.t - r.doneT)) / 0.3);
       ctx.globalAlpha = a * 0.78; rrect(NWf / 2 - 110, 54, 220, 74, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = 1;
-      label('리듬 끝!', NWf / 2, 70, 14, 'center', a, '#ffd0dc');
+      label(TR('리듬 끝!', 'Rhythm clear!'), NWf / 2, 70, 14, 'center', a, '#ffd0dc');
       label(`Perfect ${r.n.perfect}  ·  Good ${r.n.good}  ·  Miss ${r.n.miss}`, NWf / 2, 92, 8.5, 'center', a, '#ffffff');
-      label(`최대 콤보 ${r.maxCombo}  ·  +${r.gain.toLocaleString('en-US')}점`, NWf / 2, 110, 8.5, 'center', a, '#ffe68a');
+      label(`${TR('최대 콤보', 'Max combo')} ${r.maxCombo}  ·  +${PT(r.gain)}`, NWf / 2, 110, 8.5, 'center', a, '#ffe68a');
     }
   }
   function drawNote(x, y, col, num, alpha, R = RH_R) {
@@ -1020,7 +1034,7 @@
     const left = Math.max(0, Math.min(1, (n.te - t) / (n.te - n.tn)));
     ctx.beginPath(); ctx.arc(cx, cy, 36, -Math.PI / 2, -Math.PI / 2 + left * 2 * Math.PI); ctx.lineWidth = 1.8; ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.stroke();
     ctx.globalAlpha = 1;
-    label(t < n.tn ? '준비' : '연타!', cx, cy - 45, 11, 'center', a, '#ffffff');
+    label(t < n.tn ? TR('준비', 'Ready') : TR('연타!', 'Tap fast!'), cx, cy - 45, 11, 'center', a, '#ffffff');
     label(String(Math.max(0, n.need - n.hits)), cx, cy + 0.5, 12, 'center', a, '#ffffff');
   }
   function drawSlider(n, t, alpha) {
@@ -1058,8 +1072,8 @@
     const left = Math.max(0, Math.min(1, (n.te - t) / (n.te - n.tn)));
     ctx.beginPath(); ctx.arc(cx, cy, R + 9.5, -Math.PI / 2, -Math.PI / 2 + left * 2 * Math.PI); ctx.lineWidth = 1.6; ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.stroke();
     ctx.globalAlpha = 1;
-    label(t < n.tn ? '준비' : '돌려!', cx, cy - 4, 12, 'center', a, '#ffffff');
-    label(`${Math.min(n.need, Math.floor(n.turns))} / ${n.need}바퀴`, cx, cy + 12, 7.5, 'center', a, '#ffe68a');
+    label(t < n.tn ? TR('준비', 'Ready') : TR('돌려!', 'Spin!'), cx, cy - 4, 12, 'center', a, '#ffffff');
+    label(`${Math.min(n.need, Math.floor(n.turns))} / ${n.need}${TR('바퀴', ' turns')}`, cx, cy + 12, 7.5, 'center', a, '#ffe68a');
   }
 
   // ---------------------------------------------------------------- the orbit stage (the vertebral artery, on the way into the brain)
@@ -1166,7 +1180,7 @@
   function orbMiss(why) {
     const o = G.orb, B = OB.B;
     o.res.miss++; o.off += 2 * B; o.next += 2 * B;
-    o.pops.push({ k: o.k + 1, res: 'miss', s: why === 'early' ? '빨라요' : '놓침', t: G.t });
+    o.pops.push({ k: o.k + 1, res: 'miss', s: why === 'early' ? TR('빨라요', 'Early') : TR('놓침', 'Miss'), t: G.t });
     SND.play('miss');
     if (o.a0 !== null) SND.playSong(OB.song, o.a0 + o.off);
   }
@@ -1266,7 +1280,7 @@
     }
     for (const p of o.pops) {
       const u = (G.t - p.t) / 0.6, [x, y] = P[p.k];
-      label(p.res === 'perfect' ? '완벽' : p.res === 'early' ? '빠름' : p.res === 'late' ? '느림' : p.s, x, y - 16 - u * 8, 7.5, 'center', al * (1 - u * u),
+      label(p.res === 'perfect' ? TR('완벽', 'Perfect') : p.res === 'early' ? TR('빠름', 'Early') : p.res === 'late' ? TR('느림', 'Late') : p.s, x, y - 16 - u * 8, 7.5, 'center', al * (1 - u * u),
         p.res === 'perfect' ? '#ffe68a' : p.res === 'early' ? '#a8e0ff' : p.res === 'late' ? '#ffc08a' : '#ff8a9a');
     }
     ctx.restore();
@@ -1275,18 +1289,18 @@
     const B = OB.B;
     if (o.st === 'play' && t < OB.T[1]) {
       const a = Math.min(1, (G.t - o.stT) / 0.3) * Math.min(1, (OB.T[1] - t) / 0.3);
-      label('박자 맞춰 빙글빙글!', NWf / 2, 46, 15, 'center', a, '#ffe0a8');
-      label('돌던 쪽이 다음 칸에 닿을 때 터치 · 놓치면 한 바퀴 더 돌고 그 칸부터', NWf / 2, 64, 7, 'center', a, '#ffffff');
-      label(OB.song.name, NWf / 2, 77, 7.5, 'center', a * 0.9, '#ffe0a8');
+      label(TR('박자 맞춰 빙글빙글!', 'Spin to the beat!'), NWf / 2, 46, 15, 'center', a, '#ffe0a8');
+      label(TR('돌던 쪽이 다음 칸에 닿을 때 터치 · 놓치면 한 바퀴 더 돌고 그 칸부터', 'Tap as the spinner reaches the next tile · miss and it goes round once more'), NWf / 2, 64, 7, 'center', a, '#ffffff');
+      label(TR(OB.song.name, OB.song.en || OB.song.name), NWf / 2, 77, 7.5, 'center', a * 0.9, '#ffe0a8');
       if (t > 0) { const c = OB.hits[1] - Math.floor(t / B); if (c >= 1 && c <= 3) label(String(c), NWf / 2, 136, 20, 'center', a * (1 - 0.7 * ((t / B) % 1)), '#ffffff'); }
     }
     if (o.st === 'done') {
       const u = G.t - o.stT, a = Math.min(1, u / 0.25) * Math.max(0, Math.min(1, (OB_DONE - u) / 0.35));
       ctx.globalAlpha = a * 0.78; rrect(NWf / 2 - 110, 54, 220, 74, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = 1;
-      label('통과!', NWf / 2, 70, 14, 'center', a, '#ffe0a8');
+      label(TR('통과!', 'Clear!'), NWf / 2, 70, 14, 'center', a, '#ffe0a8');
       const r = o.res, all = r.perfect + r.early + r.late + r.miss;
-      label(`완벽 ${r.perfect}  ·  빠름 ${r.early}  ·  느림 ${r.late}  ·  놓침 ${r.miss}`, NWf / 2, 92, 8.5, 'center', a, '#ffffff');
-      label(`정확도 ${Math.round(100 * r.perfect / Math.max(1, all))}%`, NWf / 2, 110, 8.5, 'center', a, '#ffe68a');
+      label(TR(`완벽 ${r.perfect}  ·  빠름 ${r.early}  ·  느림 ${r.late}  ·  놓침 ${r.miss}`, `Perfect ${r.perfect}  ·  Early ${r.early}  ·  Late ${r.late}  ·  Miss ${r.miss}`), NWf / 2, 92, 8.5, 'center', a, '#ffffff');
+      label(`${TR('정확도', 'Accuracy')} ${Math.round(100 * r.perfect / Math.max(1, all))}%`, NWf / 2, 110, 8.5, 'center', a, '#ffe68a');
     }
   }
   function drawSwirl(x, y, d) {                             // a swirl: the swing turns round here
@@ -1387,11 +1401,11 @@
   // the break at the plate (units; sideways ones go either way), how late it comes (the
   // power of the flight it grows with: 2 early and long, 6 all at the end), and a rise on the way (the curve's arc)
   const BB_TYPES = [                                                        // (T: the flight, v34's / 0.9 / 0.95: 10% then 5% slower)
-    { name: '직구', T: 0.398, bx: 0, by: 0, pw: 3, rise: 0 },
-    { name: '커브', T: 0.561, bx: 14, by: 26, pw: 2, rise: 16 },              // up first, then a long drop
-    { name: '포크볼', T: 0.444, bx: 0, by: 34, pw: 7, rise: 0 },             // looks straight, falls off the table at the end
-    { name: '슬라이더', T: 0.456, bx: 32, by: 4, pw: 3, rise: 0 },           // late, sideways
-    { name: '체인지업', T: 0.573, bx: 3, by: 9, pw: 2, rise: 0 },            // slow, sinking a little
+    { name: TR('직구', 'Fastball'), T: 0.398, bx: 0, by: 0, pw: 3, rise: 0 },
+    { name: TR('커브', 'Curveball'), T: 0.561, bx: 14, by: 26, pw: 2, rise: 16 },              // up first, then a long drop
+    { name: TR('포크볼', 'Forkball'), T: 0.444, bx: 0, by: 34, pw: 7, rise: 0 },             // looks straight, falls off the table at the end
+    { name: TR('슬라이더', 'Slider'), T: 0.456, bx: 32, by: 4, pw: 3, rise: 0 },           // late, sideways
+    { name: TR('체인지업', 'Changeup'), T: 0.573, bx: 3, by: 9, pw: 2, rise: 0 },            // slow, sinking a little
   ];
   const BB_PTS = { hr: 1000 };
   // the hit: the bat meets the ball BB_DS after the tap (the swing down), the game stops a moment there (hit-stop,
@@ -1456,7 +1470,7 @@
     const y0 = Math.max(0, G.y), vy = th > 0.02 ? (CUT_Y - y0 + 0.5 * GRAV * th * th) / th : 0;
     G.cut = { t0: G.t, x0: G.x, y0, vy, v0, th, stopX, faceX, ts: 0, lap: Math.floor(faceX / LAP), swap: 0, splash: 0, landed: 0 };
     if (G.onGround) SND.play('jump1');
-    G.onGround = false; G.slide = false; G.jumps = 1; G.pitObj = null;
+    G.onGround = false; G.slide = false; G.jumps = 1; G.pitObj = null; G.pitHoldT = 0;
     G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
     G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
     G.slideHeld = false; held.clear(); pressed.jump = false;
@@ -1573,7 +1587,7 @@
     const t0 = c ? (c.landed || null) : tail ? tail.landed : null;   // the title, from the landing
     if (t0 !== null) {
       const v = G.t - t0 + 0.4, ta = v < 0 ? 0 : v < 0.25 ? v / 0.25 : v < 1.6 ? 1 : Math.max(0, 1 - (v - 1.6) / 0.4);
-      if (ta > 0) label('스테이지 2', NWf / 2, 70, 20, 'center', ta, '#ffffff');
+      if (ta > 0) label(TR('스테이지 2', 'Stage 2'), NWf / 2, 70, 20, 'center', ta, '#ffffff');
       if (tail && v > 2.2) G.cutTail = null;
     }
   }
@@ -1649,7 +1663,7 @@
       else { const sd = dt < 0 ? -1 : 1; fly.to = [at[0] + sd * (190 + Math.random() * 40), 40 + Math.random() * 30]; fly.dur = 0.4; fly.h = 22; }
       b.ball = fly;
     }
-    b.msg = { s: { hr: '홈런!', foul: '파울', whiff: '헛스윙', strike: '스트라이크' }[res], t: G.t, res };
+    b.msg = { s: { hr: TR('홈런!', 'Home run!'), foul: TR('파울', 'Foul'), whiff: TR('헛스윙', 'Swing and miss'), strike: TR('스트라이크', 'Strike') }[res], t: G.t, res };
     if (res === 'hr') { G.score += BB_PTS.hr; b.gain += BB_PTS.hr; b.hr = true; SND.play('bbHR'); buzz([40, 30, 70]); }
     else if (res === 'foul') { SND.play('bbHit'); buzz(35); }
     else SND.play('bbMitt');
@@ -1890,34 +1904,34 @@
       batShape(kx, ky, 0.42); ctx.fillStyle = on ? 'rgba(255,214,110,0.4)' : 'rgba(255,214,110,0.2)'; ctx.fill();
       ctx.lineWidth = 2.4; ctx.strokeStyle = '#1a0a14'; ctx.stroke(); ctx.lineWidth = 1.3; ctx.strokeStyle = '#ffd66e'; ctx.stroke();
       ctx.beginPath(); ctx.arc(kx, ky, 1, 0, 6.29); ctx.fillStyle = '#ffd66e'; ctx.fill();
-      label('조준', pcx, py0 - 6, 7.5, 'center', al, '#ffffff');
+      label(TR('조준', 'Aim'), pcx, py0 - 6, 7.5, 'center', al, '#ffffff');
       const by = NH - 30, bxr = NW - 34;
       ctx.beginPath(); ctx.arc(bxr, by, 20, 0, 6.29); ctx.fillStyle = 'rgba(26,10,20,0.6)'; ctx.fill();
       ctx.beginPath(); ctx.arc(bxr, by, 18.5, 0, 6.29); ctx.fillStyle = G.t - b.swingT < 0.25 ? 'rgba(255,214,110,0.75)' : 'rgba(255,214,110,0.38)'; ctx.fill();
       ctx.lineWidth = 1.4; ctx.strokeStyle = 'rgba(255,240,200,0.95)'; ctx.stroke();
-      label('스윙', bxr, by + 0.5, 9, 'center', al, '#ffffff');
+      label(TR('스윙', 'Swing'), bxr, by + 0.5, 9, 'center', al, '#ffffff');
     }
     // the count: five balls, used ones dimmed
     for (let i = 0; i < BB_N; i++) { ctx.globalAlpha = al * (i < b.res.length ? 0.28 : 1); drawBall(20 + i * 10, 44, 3.4); }
     ctx.globalAlpha = al;
     if (b.st === 'intro') {
       const a = Math.min(1, u / 0.3) * Math.max(0, Math.min(1, (BB_INTRO - u) / 0.3));
-      label('공 5개, 홈런마다 점수!', NWf / 2, 62, 16, 'center', a, '#ffe0a8');
-      label('왼쪽을 끌어 노란 고리를 공이 올 자리(흰 고리)에', NWf / 2, 80, 7.5, 'center', a, '#ffffff');
-      label('흰 고리가 공만큼 줄어들 때 오른쪽 터치', NWf / 2, 91, 7.5, 'center', a, '#ffffff');
+      label(TR('공 5개, 홈런마다 점수!', '5 pitches - score with home runs!'), NWf / 2, 62, 16, 'center', a, '#ffe0a8');
+      label(TR('왼쪽을 끌어 노란 고리를 공이 올 자리(흰 고리)에', 'Drag on the left: the yellow ring to where the ball comes (white ring)'), NWf / 2, 80, 7.5, 'center', a, '#ffffff');
+      label(TR('흰 고리가 공만큼 줄어들 때 오른쪽 터치', 'Tap the right side as the white ring shrinks to the ball'), NWf / 2, 91, 7.5, 'center', a, '#ffffff');
     }
     if (b.msg && b.st !== 'done') {                       // the result: small, just over the zone (under the pitcher), briefly
       const v = G.t - b.msg.t, big = b.msg.res === 'hr', a = Math.min(1, v / 0.08) * Math.max(0, Math.min(1, ((big ? 1.3 : 0.95) - v) / 0.25));
-      const s = big ? `${b.msg.s} +${BB_PTS.hr.toLocaleString('en-US')}점` : b.msg.res === 'whiff' ? `${b.msg.s} · ${b.p.type.name}` : b.msg.s;   // (a miss: what got past you)
+      const s = big ? `${b.msg.s} +${PT(BB_PTS.hr)}` : b.msg.res === 'whiff' ? `${b.msg.s} · ${b.p.type.name}` : b.msg.s;   // (a miss: what got past you)
       label(s, zx, zy - BB_ZH / 2 - 5, 7, 'center', a, big ? '#ffe68a' : '#ffffff');
     }
     if (b.st === 'done') {
       const v = G.t - b.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (BB_END - v) / 0.35));
       ctx.globalAlpha = a * 0.78; rrect(NWf / 2 - 110, 54, 220, 60, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = 1;
       const n = (q) => b.res.filter((r) => r === q).length;
-      label(`홈런 ${n('hr')}개${n('hr') ? '!' : ''}`, NWf / 2, 70, 14, 'center', a, b.hr ? '#ffe68a' : '#ffd0dc');
-      label(`홈런 ${n('hr')} · 파울 ${n('foul')} · 헛스윙 ${n('whiff')} · 스트라이크 ${n('strike')}`, NWf / 2, 90, 7.5, 'center', a, '#ffffff');
-      label(`+${b.gain.toLocaleString('en-US')}점`, NWf / 2, 104, 8.5, 'center', a, '#ffe68a');
+      label(TR(`홈런 ${n('hr')}개${n('hr') ? '!' : ''}`, `${n('hr')} home run${n('hr') === 1 ? '' : 's'}${n('hr') ? '!' : ''}`), NWf / 2, 70, 14, 'center', a, b.hr ? '#ffe68a' : '#ffd0dc');
+      label(TR(`홈런 ${n('hr')} · 파울 ${n('foul')} · 헛스윙 ${n('whiff')} · 스트라이크 ${n('strike')}`, `HR ${n('hr')} · Foul ${n('foul')} · Miss ${n('whiff')} · Strike ${n('strike')}`), NWf / 2, 90, 7.5, 'center', a, '#ffffff');
+      label(`+${PT(b.gain)}`, NWf / 2, 104, 8.5, 'center', a, '#ffe68a');
     }
     ctx.globalAlpha = 1;
   }
@@ -2043,7 +2057,7 @@
     if (m.good) {
       const lose = Math.min(WM_OOPS, G.score); G.score -= lose; w.gain -= lose; w.oops++;     // (the score never goes below 0)
       SND.play('wmOops'); buzz([30, 40, 30]);
-      w.pops.push({ x, y: y - 6, s: lose ? '-' + lose : '앗!', t: G.t, bad: true });
+      w.pops.push({ x, y: y - 6, s: lose ? '-' + lose : TR('앗!', 'Oops!'), t: G.t, bad: true });
     } else {
       G.score += WM_PTS; w.gain += WM_PTS; w.caught++;
       SND.play('wmHit'); buzz(BUZZ_TAP);
@@ -2111,29 +2125,29 @@
       rrect(bx - 1, by - 1, bw + 2, 5.4, 2.7); ctx.fillStyle = '#1a0a14'; ctx.fill();
       rrect(bx, by, bw, 3.4, 1.7); ctx.fillStyle = '#4a3040'; ctx.fill();
       if (left > 0) { rrect(bx, by, Math.max(3.4, bw * left / WM_T), 3.4, 1.7); ctx.fillStyle = left < 5 ? '#ff6a6a' : '#ffd66e'; ctx.fill(); }
-      label(`${Math.ceil(left)}초`, bx + bw + 4, by + 1.8, 7, 'left', al, '#ffffff');
-      label(`잡은 세균 ${w.caught}`, bx - 4, by + 1.8, 7, 'right', al, '#ffe0a8');
+      label(`${Math.ceil(left)}${TR('초', 's')}`, bx + bw + 4, by + 1.8, 7, 'left', al, '#ffffff');
+      label(`${TR('잡은 세균', 'Germs')} ${w.caught}`, bx - 4, by + 1.8, 7, 'right', al, '#ffe0a8');
       ctx.globalAlpha = al;
     }
     if (w.st === 'intro') {
       const u = G.t - w.stT, a = Math.min(1, u / 0.3) * Math.max(0, Math.min(1, (WM_INTRO - u) / 0.3));
       ctx.globalAlpha = al * a * 0.8; rrect(zx - 118, 46, 236, 86, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = al;
-      label(`세균 잡기! ${WM_T}초`, zx, 60, 15, 'center', a, '#ffe0a8');
-      label('구멍에서 튀어나오는 나쁜 세균을 톡! 눌러 잡아요', zx, 77, 7.5, 'center', a, '#ffffff');
+      label(TR(`세균 잡기! ${WM_T}초`, `Germ Smash! ${WM_T}s`), zx, 60, 15, 'center', a, '#ffe0a8');
+      label(TR('구멍에서 튀어나오는 나쁜 세균을 톡! 눌러 잡아요', 'Tap the bad germs as they pop out of the holes'), zx, 77, 7.5, 'center', a, '#ffffff');
       // the good one, shown: its picture on the left of a lighter box, what it is and what tapping it costs beside it
       ctx.globalAlpha = al * a; rrect(zx - 92, 86, 184, 40, 6); ctx.fillStyle = 'rgba(120,220,90,0.14)'; ctx.fill();
       ctx.lineWidth = 0.9; ctx.strokeStyle = 'rgba(184,240,154,0.7)'; ctx.stroke();
       const ls = M.sprites.wm_lacto;
       if (ls) { const k = 34 / ls.foot[1]; spr('wm_lacto', zx - 70 - ls.foot[0] * k, 123 - ls.foot[1] * k, a, ls.w * k, ls.h * k); ctx.globalAlpha = al; }
-      label('이건 착한 유산균이에요', zx - 46, 99, 8.5, 'left', a, '#b8f09a');
-      label('잡으면 안 돼요! (누르면 -100점)', zx - 46, 113, 7.5, 'left', a, '#ffb0b8');
+      label(TR('이건 착한 유산균이에요', 'This one is a good germ'), zx - 46, 99, 8.5, 'left', a, '#b8f09a');
+      label(TR('잡으면 안 돼요! (누르면 -100점)', "Don't tap it! (-100 pts)"), zx - 46, 113, 7.5, 'left', a, '#ffb0b8');
     }
     if (w.st === 'done') {
       const v = G.t - w.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (WM_END - v) / 0.35));
       ctx.globalAlpha = a * 0.78; rrect(zx - 110, 54, 220, 60, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = 1;
-      label(`세균 ${w.caught}마리!`, zx, 70, 14, 'center', a, '#ffe68a');
-      label(`잡음 ${w.caught} · 놓침 ${w.missed} · 유산균 누름 ${w.oops}`, zx, 90, 7.5, 'center', a, '#ffffff');
-      label(`${w.gain < 0 ? '-' : '+'}${Math.abs(w.gain).toLocaleString('en-US')}점`, zx, 104, 8.5, 'center', a, w.gain < 0 ? '#ff8a96' : '#ffe68a');
+      label(TR(`세균 ${w.caught}마리!`, `${w.caught} germs!`), zx, 70, 14, 'center', a, '#ffe68a');
+      label(TR(`잡음 ${w.caught} · 놓침 ${w.missed} · 유산균 누름 ${w.oops}`, `Caught ${w.caught} · Missed ${w.missed} · Good germ tapped ${w.oops}`), zx, 90, 7.5, 'center', a, '#ffffff');
+      label(`${w.gain < 0 ? '-' : '+'}${PT(Math.abs(w.gain))}`, zx, 104, 8.5, 'center', a, w.gain < 0 ? '#ff8a96' : '#ffe68a');
     }
     ctx.globalAlpha = 1;
   }
@@ -2195,7 +2209,7 @@
       if (u >= m.seq.length * (on + gap) + 0.1) { m.st = 'input'; m.stT = G.t; m.lastTap = G.t; m.k = 0; }
     } else if (m.st === 'input') {
       if (AUTO && !window.__noAuto && G.t - m.lastTap > 0.32) { const [x, y] = memAt(m.seq[m.k]); memDown(x, y); }   // the test pilot
-      else if (G.t - m.lastTap > MG_WAIT) memWrong(null, '시간 초과');
+      else if (G.t - m.lastTap > MG_WAIT) memWrong(null, TR('시간 초과', 'Time up'));
     } else if (m.st === 'ok' && G.t - m.stT > MG_OK) {
       if (++m.round >= MG_ROUNDS) memDone(); else { memNew(m.seq); memShow(); }
     } else if (m.st === 'bad' && G.t - m.stT > MG_BAD) {
@@ -2219,7 +2233,7 @@
     for (let k = 0; k < MG_N; k++) { const [px, py] = memAt(k), d = Math.hypot(x - px, y - py); if (d < bd) { bd = d; n = k; } }
     if (n < 0) return;
     m.lastTap = G.t;
-    if (n !== m.seq[m.k]) { memWrong(n, '틀렸어요'); return; }
+    if (n !== m.seq[m.k]) { memWrong(n, TR('틀렸어요', 'Wrong')); return; }
     memLight(n, 'tap', MG_TAP); buzz(BUZZ_TAP);
     if (m.k > 0) m.pulses.push({ a: m.seq[m.k - 1], b: n, t: G.t - 0.12, dur: 0.16 });
     if (++m.k >= m.seq.length) {
@@ -2285,7 +2299,7 @@
     // in the middle: what to do now, and how far into the order you are
     const L = m.seq.length;
     if (m.st === 'show' || m.st === 'input' || m.st === 'ok' || m.st === 'bad') {
-      const t = m.st === 'show' ? '잘 보세요' : m.st === 'input' ? '따라 누르세요' : m.st === 'ok' ? `좋아요! +${m.okPts}` : m.why;
+      const t = m.st === 'show' ? TR('잘 보세요', 'Watch') : m.st === 'input' ? TR('따라 누르세요', 'Your turn') : m.st === 'ok' ? `${TR('좋아요!', 'Nice!')} +${m.okPts}` : m.why;
       const col = m.st === 'ok' ? '#ffe68a' : m.st === 'bad' ? '#ff9aa4' : '#ffffff';
       label(t, cx, MG_CY - 4, 8.5, 'center', al, col);
       ctx.globalAlpha = al;
@@ -2302,22 +2316,22 @@
       ctx.beginPath(); ctx.arc(x, y, 3.2, 0, 6.2832); ctx.fillStyle = r === 'ok' ? '#ffd23a' : r === 'bad' ? '#ff5a6a' : 'rgba(255,255,255,0.18)'; ctx.fill();
       ctx.lineWidth = i === m.round && m.st !== 'done' ? 1.3 : 0.8; ctx.strokeStyle = i === m.round && m.st !== 'done' ? '#ffffff' : '#1a0a14'; ctx.stroke();
     }
-    label(`${Math.min(m.round + 1, MG_ROUNDS)}/${MG_ROUNDS} 라운드 · ${L}개`, 20 + MG_ROUNDS * 9, 44.3, 6.5, 'left', al, '#e8dcff');
+    label(TR(`${Math.min(m.round + 1, MG_ROUNDS)}/${MG_ROUNDS} 라운드 · ${L}개`, `Round ${Math.min(m.round + 1, MG_ROUNDS)}/${MG_ROUNDS} · ${L}`), 20 + MG_ROUNDS * 9, 44.3, 6.5, 'left', al, '#e8dcff');
     ctx.globalAlpha = al;
     if (m.st === 'intro') {
       const u = G.t - m.stT, a = Math.min(1, u / 0.3) * Math.max(0, Math.min(1, (MG_INTRO - u) / 0.3));
       ctx.globalAlpha = al * a * 0.8; rrect(cx - 118, 78, 236, 54, 8); ctx.fillStyle = '#120a1e'; ctx.fill(); ctx.globalAlpha = al;
-      label('기억 시냅스! 5라운드', cx, 92, 15, 'center', a, '#e8d4ff');
-      label('뉴런이 빛나는 순서를 잘 보고', cx, 110, 7.5, 'center', a, '#ffffff');
-      label('똑같은 순서로 눌러요 (맞힐수록 하나씩 길어져요)', cx, 121, 7.5, 'center', a, '#ffffff');
+      label(TR('기억 시냅스! 5라운드', 'Memory Synapse! 5 rounds'), cx, 92, 15, 'center', a, '#e8d4ff');
+      label(TR('뉴런이 빛나는 순서를 잘 보고', 'Watch the order the neurons light up'), cx, 110, 7.5, 'center', a, '#ffffff');
+      label(TR('똑같은 순서로 눌러요 (맞힐수록 하나씩 길어져요)', 'then tap them in the same order (one longer each time)'), cx, 121, 7.5, 'center', a, '#ffffff');
     }
     if (m.st === 'done') {
       const v = G.t - m.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (MG_END - v) / 0.35));
       const ok = m.res.filter((r) => r === 'ok').length;
       ctx.globalAlpha = a * 0.82; rrect(cx - 110, 76, 220, 60, 8); ctx.fillStyle = '#120a1e'; ctx.fill(); ctx.globalAlpha = 1;
-      label(`${ok}/${MG_ROUNDS} 라운드 성공${ok ? '!' : ''}`, cx, 92, 14, 'center', a, ok ? '#ffe68a' : '#ffd0dc');
-      label(`가장 길게 맞힌 순서 ${m.best || 0}개`, cx, 111, 7.5, 'center', a, '#ffffff');
-      label(`+${m.gain.toLocaleString('en-US')}점`, cx, 125, 8.5, 'center', a, '#ffe68a');
+      label(TR(`${ok}/${MG_ROUNDS} 라운드 성공${ok ? '!' : ''}`, `${ok}/${MG_ROUNDS} rounds cleared${ok ? '!' : ''}`), cx, 92, 14, 'center', a, ok ? '#ffe68a' : '#ffd0dc');
+      label(TR(`가장 길게 맞힌 순서 ${m.best || 0}개`, `Longest sequence: ${m.best || 0}`), cx, 111, 7.5, 'center', a, '#ffffff');
+      label(`+${PT(m.gain)}`, cx, 125, 8.5, 'center', a, '#ffe68a');
     }
     ctx.globalAlpha = 1;
   }
@@ -2401,7 +2415,7 @@
     else if (s.res === 'save') { SND.play('pkSave'); buzz(30); }
     else if (s.res === 'post') { SND.play('pkPost'); buzz(25); p.fx.push({ kind: 'post', at, t: G.t }); }
     else SND.play('pkMiss');
-    p.msg = { s: { goal: '골!!', save: s.kind === 'weak' ? '잡혔다!' : '막혔다!', post: '골대!', miss: s.gh > PK_TALL ? '넘어갔다' : '빗나갔다' }[s.res], t: G.t, res: s.res };
+    p.msg = { s: { goal: TR('골!!', 'GOAL!!'), save: s.kind === 'weak' ? TR('잡혔다!', 'Caught!') : TR('막혔다!', 'Saved!'), post: TR('골대!', 'Post!'), miss: s.gh > PK_TALL ? TR('넘어갔다', 'Over the bar') : TR('빗나갔다', 'Wide') }[s.res], t: G.t, res: s.res };
   }
   function stepPK(dt) {
     const p = G.pk;
@@ -2522,14 +2536,14 @@
     const kx = p.pad ? p.pad.kx : 0, ky = p.pad ? p.pad.ky : 0;
     ctx.beginPath(); ctx.arc(sx + kx * R * 0.55, by + ky * R * 0.55, 8.5, 0, 6.2832); ctx.fillStyle = p.pad ? 'rgba(255,236,170,0.95)' : 'rgba(255,255,255,0.85)'; ctx.fill();
     ctx.lineWidth = 1; ctx.strokeStyle = '#1a0a14'; ctx.stroke();
-    label('조준', sx, by + R + 6.5, 6.5, 'center', al * (live ? 1 : 0.45), '#ffffff');
+    label(TR('조준', 'Aim'), sx, by + R + 6.5, 6.5, 'center', al * (live ? 1 : 0.45), '#ffffff');
     // the button
     const pr = G.t - p.pressT < 0.15;
     ctx.globalAlpha = al * (live ? 1 : 0.45);
     ctx.beginPath(); ctx.arc(bxr, by + (pr ? 1 : 0), R, 0, 6.2832);
     const g = ctx.createRadialGradient(bxr - 5, by - 6, 2, bxr, by, R); g.addColorStop(0, pr ? '#ffd0a0' : '#ffb070'); g.addColorStop(0.55, pr ? '#e85020' : '#ff6a2a'); g.addColorStop(1, '#a82a10');
     ctx.fillStyle = g; ctx.fill(); ctx.lineWidth = 1.4; ctx.strokeStyle = '#2a0a06'; ctx.stroke();
-    label('슛!', bxr, by + (pr ? 1 : 0), 10, 'center', al * (live ? 1 : 0.55), '#ffffff');
+    label(TR('슛!', 'Shoot!'), bxr, by + (pr ? 1 : 0), 10, 'center', al * (live ? 1 : 0.55), '#ffffff');
     if (live) { ctx.globalAlpha = al * (0.25 + 0.25 * Math.sin(G.t * 6)); ctx.beginPath(); ctx.arc(bxr, by, R + 3, 0, 6.2832); ctx.lineWidth = 1.5; ctx.strokeStyle = '#ffd080'; ctx.stroke(); }
     ctx.globalAlpha = al;
     // the power bar (right of the ball, left of the button): soft (blue grey) | the green (bright in its middle) | too
@@ -2541,15 +2555,15 @@
     zone(0, PK_WEAK, '#9ab0d0', '#4a5a7a'); zone(PK_WEAK, PK_STRONG, '#7af08a', '#20a040'); zone(PK_PERF[0], PK_PERF[1], '#fff6a0', '#f0b020'); zone(PK_STRONG, 1, '#ff8a7a', '#c01818');
     ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(x0, y0, W, H * 0.35);
     ctx.restore();
-    label('약', x0 + W * PK_WEAK / 2, y0 - 4, 5.5, 'center', al * 0.9, '#c8d8f0');
-    label('정타', x0 + W * (PK_PERF[0] + PK_PERF[1]) / 2, y0 - 4, 5.5, 'center', al, '#ffe68a');
-    label('셈', x0 + W * (PK_STRONG + 1) / 2, y0 - 4, 5.5, 'center', al * 0.9, '#ffb0a8');
+    label(TR('약', 'Soft'), x0 + W * PK_WEAK / 2, y0 - 4, 5.5, 'center', al * 0.9, '#c8d8f0');
+    label(TR('정타', 'Sweet'), x0 + W * (PK_PERF[0] + PK_PERF[1]) / 2, y0 - 4, 5.5, 'center', al, '#ffe68a');
+    label(TR('셈', 'Hard'), x0 + W * (PK_STRONG + 1) / 2, y0 - 4, 5.5, 'center', al * 0.9, '#ffb0a8');
     const v = p.st === 'aim' ? pkNeedle(p) : p.power ?? 0, nx = x0 + v * W;
     ctx.beginPath(); ctx.moveTo(nx - 3, y0 - 3.5); ctx.lineTo(nx + 3, y0 - 3.5); ctx.lineTo(nx, y0 + 1); ctx.closePath(); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.lineWidth = 0.8; ctx.strokeStyle = '#1a0a14'; ctx.stroke();
     ctx.fillStyle = '#1a0a14'; ctx.fillRect(nx - 1.3, y0 - 1, 2.6, H + 2); ctx.fillStyle = '#ffffff'; ctx.fillRect(nx - 0.6, y0 - 0.5, 1.2, H + 1);
     // what the press came to
     if (p.kind && p.st !== 'aim') {
-      const t = { perfect: ['정타!', '#ffe14a'], good: ['좋아요', '#8af09a'], weak: ['약해요', '#a8c0e8'], strong: ['너무 세요', '#ff8a7a'] }[p.kind], v2 = G.t - p.pressT;
+      const t = { perfect: [TR('정타!', 'Sweet shot!'), '#ffe14a'], good: [TR('좋아요', 'Good'), '#8af09a'], weak: [TR('약해요', 'Too soft'), '#a8c0e8'], strong: [TR('너무 세요', 'Too hard'), '#ff8a7a'] }[p.kind], v2 = G.t - p.pressT;
       label(t[0], x0 + W / 2, y0 - 13, (p.kind === 'perfect' ? 10 : 8) * (1 + 0.25 * Math.max(0, 1 - v2 / 0.2)), 'center', al, t[1]);
     }
   }
@@ -2632,23 +2646,23 @@
       const v = G.t - p.msg.t, big = p.msg.res === 'goal', a = Math.min(1, v / 0.08) * Math.max(0, Math.min(1, ((big ? 2.0 : 1.5) - v) / 0.3));
       const sc = big ? 1 + 0.25 * Math.max(0, 1 - v / 0.25) : 1;
       label(p.msg.s, zx, 50, (big ? 22 : 13) * sc, 'center', a, big ? '#ffe68a' : p.msg.res === 'save' ? '#ffb0b8' : '#ffffff');
-      if (big) label(`+${PK_PTS.toLocaleString('en-US')}점`, zx, 68, 9, 'center', a, '#ffe68a');
+      if (big) label(`+${PT(PK_PTS)}`, zx, 68, 9, 'center', a, '#ffe68a');
     }
     if (p.st === 'intro') {
       const v = G.t - p.stT, a = Math.min(1, v / 0.3) * Math.max(0, Math.min(1, (PK_INTRO - v) / 0.3));
       ctx.globalAlpha = al * a * 0.8; rrect(zx - 124, 50, 248, 64, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = al;
-      label('승부차기! 5번 차요', zx, 64, 15, 'center', a, '#ffe0a8');
-      label('왼쪽으로 골대 어디에 찰지 조준, 오른쪽 버튼으로 슛', zx, 82, 7.5, 'center', a, '#ffffff');
-      label('세기 바의 초록 칸에서 눌러야 정타 · 약하면 잡히고 너무 세면 넘어가요', zx, 93, 7, 'center', a, '#ffffff');
-      label('골마다 1,000점', zx, 104, 7, 'center', a, '#ffe68a');
+      label(TR('승부차기! 5번 차요', 'Penalty Shootout! 5 kicks'), zx, 64, 15, 'center', a, '#ffe0a8');
+      label(TR('왼쪽으로 골대 어디에 찰지 조준, 오른쪽 버튼으로 슛', 'Aim with the left side, shoot with the right button'), zx, 82, 7.5, 'center', a, '#ffffff');
+      label(TR('세기 바의 초록 칸에서 눌러야 정타 · 약하면 잡히고 너무 세면 넘어가요', 'Press in the green for a clean strike · too soft gets caught, too hard flies over'), zx, 93, 7, 'center', a, '#ffffff');
+      label(TR('골마다 1,000점', '1,000 pts a goal'), zx, 104, 7, 'center', a, '#ffe68a');
     }
     if (p.st === 'done') {
       const v = G.t - p.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (PK_END - v) / 0.35));
       const n = (q) => p.res.filter((r) => r === q).length;
       ctx.globalAlpha = a * 0.8; rrect(zx - 110, 54, 220, 60, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = 1;
-      label(`골 ${n('goal')}개${n('goal') ? '!' : ''}`, zx, 70, 14, 'center', a, n('goal') ? '#ffe68a' : '#ffd0dc');
-      label(`골 ${n('goal')} · 막힘 ${n('save')} · 골대 ${n('post')} · 빗나감 ${n('miss')}`, zx, 90, 7.5, 'center', a, '#ffffff');
-      label(`+${p.gain.toLocaleString('en-US')}점`, zx, 104, 8.5, 'center', a, '#ffe68a');
+      label(TR(`골 ${n('goal')}개${n('goal') ? '!' : ''}`, `${n('goal')} goal${n('goal') === 1 ? '' : 's'}${n('goal') ? '!' : ''}`), zx, 70, 14, 'center', a, n('goal') ? '#ffe68a' : '#ffd0dc');
+      label(TR(`골 ${n('goal')} · 막힘 ${n('save')} · 골대 ${n('post')} · 빗나감 ${n('miss')}`, `Goals ${n('goal')} · Saved ${n('save')} · Post ${n('post')} · Missed ${n('miss')}`), zx, 90, 7.5, 'center', a, '#ffffff');
+      label(`+${PT(p.gain)}`, zx, 104, 8.5, 'center', a, '#ffe68a');
     }
     ctx.globalAlpha = 1;
   }
@@ -2666,7 +2680,7 @@
   const slMY = () => NH - SH('sl_machine');
   const slWin = (i) => { const [x0, y0, x1, y1] = SLF.wins[i]; return { x0, y0, x1, y1, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w2: (x1 - x0) / 2, h2: (y1 - y0) / 2 }; };
   const SL_PAY = [5000, 2000, 1500, 1000, 700, 500], SL_PAIR = 100;
-  const SL_NAME = ['황금똥', '고무오리', '뚫어뻥', '두루마리', '비누', '물방울'];
+  const SL_NAME = LANG === 'ko' ? ['황금똥', '고무오리', '뚫어뻥', '두루마리', '비누', '물방울'] : ['golden poops', 'rubber ducks', 'plungers', 'toilet rolls', 'soaps', 'water drops'];
   // the strips: each symbol at least twice, the cheap ones more often, the golden poop twice
   const SL_STRIP = [[5, 3, 1, 4, 0, 5, 2, 4, 3, 5, 1, 4, 2, 5, 0, 3, 4, 5], [4, 5, 0, 3, 2, 5, 4, 1, 5, 3, 4, 0, 2, 5, 3, 1, 4, 5], [3, 4, 5, 1, 0, 4, 5, 2, 3, 5, 4, 1, 3, 0, 5, 2, 4, 5]];
   const slMX = () => NWf / 2 - SW('sl_machine') / 2;
@@ -2874,15 +2888,15 @@
       spr('sl_knob', kx - SLF.knob_c[0] * ks, ky - SLF.knob_c[1] * ks, 1, kn.w * ks, kn.h * ks); ctx.globalAlpha = al; }
     // the marquee bar: what is going on
     { const m = s.msg, [qx0, qy0, qw] = SLF.marquee, qx = mx + qx0, qy = my + qy0 + 0.3, blink = 0.78 + 0.22 * Math.sin(G.t * 6), fs = Math.min(8, qw / 7);
-      if (s.reach) label('리치!', qx, qy, fs * 1.15, 'center', al * (Math.floor(G.t * 8) % 2 ? 1 : 0.6), '#ffe3e3');
+      if (s.reach) label(TR('리치!', 'REACH!'), qx, qy, fs * 1.15, 'center', al * (Math.floor(G.t * 8) % 2 ? 1 : 0.6), '#ffe3e3');
       else if (m && s.st === 'after') {
         if (m.kind === 'jackpot') label('JACKPOT', qx, qy, fs * 1.1, 'center', al * (Math.floor(G.t * 10) % 2 ? 1 : 0.55), '#ffe68a');
-        else if (m.kind === 'three') label('당첨!', qx, qy, fs * 1.1, 'center', al * (Math.floor(G.t * 10) % 2 ? 1 : 0.55), '#ffe68a');
-        else if (m.kind === 'two') label(m.near ? `아깝다! +${m.pts}점` : `두 개 같아요 +${m.pts}점`, qx, qy, fs * 0.85, 'center', al, '#ffffff');
-        else label('꽝', qx, qy, fs, 'center', al, '#ffd8dc');
+        else if (m.kind === 'three') label(TR('당첨!', 'WIN!'), qx, qy, fs * 1.1, 'center', al * (Math.floor(G.t * 10) % 2 ? 1 : 0.55), '#ffe68a');
+        else if (m.kind === 'two') label(m.near ? `${TR('아깝다!', 'So close!')} +${PT(m.pts)}` : `${TR('두 개 같아요', 'Two alike')} +${PT(m.pts)}`, qx, qy, fs * 0.85, 'center', al, '#ffffff');
+        else label(TR('꽝', 'No luck'), qx, qy, fs, 'center', al, '#ffd8dc');
       }
-      else if (s.st === 'ready') label('탭해서 레버 당기기', qx, qy, fs * 0.85, 'center', al * blink, '#ffffff');
-      else label('변기 잭팟', qx, qy, fs, 'center', al, '#ffe68a'); }
+      else if (s.st === 'ready') label(TR('탭해서 레버 당기기', 'Tap to pull'), qx, qy, fs * 0.85, 'center', al * blink, '#ffffff');
+      else label(TR('변기 잭팟', 'Toilet Jackpot'), qx, qy, fs, 'center', al, '#ffe68a'); }
     ctx.globalAlpha = al;
     // a win: the coins, the words (over the reels)
     for (const c of s.coins) { ctx.save(); ctx.translate(c.x, c.y); ctx.scale(Math.cos(c.r), 1); spr('sl_coin', -4, -4, 1, 8, 8); ctx.restore(); ctx.globalAlpha = al; }
@@ -2893,9 +2907,9 @@
         if (v < 0.5) { ctx.globalAlpha = al * (1 - v / 0.5) * 0.5; ctx.fillStyle = '#fff6c8'; ctx.fillRect(0, 0, NWf, NH); ctx.globalAlpha = al; }
         const sc = 1 + 0.3 * Math.max(0, 1 - v / 0.3) + 0.05 * Math.sin(G.t * 10);
         label('JACKPOT!!', zx, ry - 4, 26 * sc, 'center', al, ['#ffe14a', '#ff7a5a', '#7ae0ff', '#c88aff'][Math.floor(G.t * 8) % 4]);
-        label(`+${m.pts.toLocaleString('en-US')}점`, zx, ry + 16, 12, 'center', al, '#ffe68a');
+        label(`+${PT(m.pts)}`, zx, ry + 16, 12, 'center', al, '#ffe68a');
       } else if (m.kind === 'three') {
-        label(`${SL_NAME[m.sym]} 3개! +${m.pts.toLocaleString('en-US')}점`, zx, ry, 13 * (1 + 0.2 * Math.max(0, 1 - v / 0.25)), 'center', al, '#ffe68a');
+        label(TR(`${SL_NAME[m.sym]} 3개! +${PT(m.pts)}`, `Three ${SL_NAME[m.sym]}! +${PT(m.pts)}`), zx, ry, 13 * (1 + 0.2 * Math.max(0, 1 - v / 0.25)), 'center', al, '#ffe68a');
       }
     }
     // the goes: three coins at the top left
@@ -2904,16 +2918,16 @@
     if (s.st === 'intro') {
       const v = G.t - s.stT, a = Math.min(1, v / 0.3) * Math.max(0, Math.min(1, (SL_INTRO - v) / 0.3));
       ctx.globalAlpha = al * a * 0.85; rrect(zx - 118, 72, 236, 56, 8); ctx.fillStyle = '#10141e'; ctx.fill(); ctx.globalAlpha = al;
-      label('변기 잭팟! 3번 돌려요', zx, 86, 15, 'center', a, '#ffe0a8');
-      label('탭하면 레버를 당겨 돌아가고, 다시 탭해서 하나씩 멈춰요', zx, 104, 7.5, 'center', a, '#ffffff');
-      label('같은 그림 3개면 당첨, 황금똥 3개면 잭팟 5,000점!', zx, 115, 7.5, 'center', a, '#ffe68a');
+      label(TR('변기 잭팟! 3번 돌려요', 'Toilet Jackpot! 3 spins'), zx, 86, 15, 'center', a, '#ffe0a8');
+      label(TR('탭하면 레버를 당겨 돌아가고, 다시 탭해서 하나씩 멈춰요', 'Tap to pull the lever, tap again to stop each reel'), zx, 104, 7.5, 'center', a, '#ffffff');
+      label(TR('같은 그림 3개면 당첨, 황금똥 3개면 잭팟 5,000점!', 'Three alike wins - three golden poops: the 5,000 pt jackpot!'), zx, 115, 7.5, 'center', a, '#ffe68a');
     }
     if (s.st === 'done') {
       const v = G.t - s.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (SL_END - v) / 0.35));
       ctx.globalAlpha = a * 0.85; rrect(zx - 110, 74, 220, 56, 8); ctx.fillStyle = '#10141e'; ctx.fill(); ctx.globalAlpha = 1;
       const hit = s.res.filter((r) => r === 'three' || r === 'jackpot').length;
-      label(s.res.includes('jackpot') ? '잭팟 터졌다!' : hit ? `당첨 ${hit}번!` : '다음에 다시!', zx, 90, 14, 'center', a, s.gain ? '#ffe68a' : '#ffd0dc');
-      label(`+${s.gain.toLocaleString('en-US')}점`, zx, 112, 9, 'center', a, '#ffe68a');
+      label(s.res.includes('jackpot') ? TR('잭팟 터졌다!', 'JACKPOT!') : hit ? TR(`당첨 ${hit}번!`, `${hit} win${hit === 1 ? '' : 's'}!`) : TR('다음에 다시!', 'Better luck next time!'), zx, 90, 14, 'center', a, s.gain ? '#ffe68a' : '#ffd0dc');
+      label(`+${PT(s.gain)}`, zx, 112, 9, 'center', a, '#ffe68a');
     }
     ctx.globalAlpha = 1;
   }
@@ -2932,7 +2946,7 @@
     G.y += G.vy * dt;
     if (G.y <= 0) { G.y = 0; if (G.vy < 0) G.vy = 0; G.onGround = true; } else G.onGround = false;
     if (G.y >= MAXY) { G.y = MAXY; if (G.vy > 0) G.vy = 0; }
-    G.slide = false; G.jumps = 0; G.pitObj = null; G.bounce = false;
+    G.slide = false; G.jumps = 0; G.pitObj = null; G.bounce = false; G.pitHoldT = 0;
     G.swimBub = (G.swimBub || []).filter((b) => G.t - b.t < 0.7);
     if (up && G.t - (G.swimBubT || 0) > 0.12) {               // (looks only: Math.random, not the course's own random)
       G.swimBubT = G.t; G.swimBub.push({ x: G.x - 5 + Math.random() * 3, y: GY - G.y - SH('ch_' + G.char) * 0.55, r: 0.8 + Math.random() * 1.1, t: G.t });
@@ -3087,9 +3101,12 @@
       if (G.y > MAXY) { G.y = MAXY; if (G.vy > 0) G.vy = 0; }        // the head bumps the ceiling
       if (G.y <= 0 && G.vy <= 0) {
         const p = G.boost > 0 ? null : pitAt(G.x);                    // boosting, you run straight over holes
-        if (!p && G.y > -5) { G.y = 0; G.vy = 0; G.onGround = true; G.jumps = 0; G.bounce = false; G.pitObj = null; puff(G.x - 6, 3); }
+        if (!p && G.y > -5) { G.y = 0; G.vy = 0; G.onGround = true; G.jumps = 0; G.bounce = false; G.pitObj = null; G.pitHoldT = 0; puff(G.x - 6, 3); }
         else if (!p) fallOut(G.pitObj || { x: G.x - 20, w: 0 });         // under the floor past the hole: its far wall
-        else { G.pitObj = p; if (G.y < -24) fallOut(p); }
+        else {                                               // down in it: to the bottom, a moment there, then thrown out
+          G.pitObj = p;
+          if (G.y <= -PIT_DEPTH) { G.y = -PIT_DEPTH; G.vy = 0; if (!G.pitHoldT) G.pitHoldT = G.t; if (G.t - G.pitHoldT >= PIT_HOLD) fallOut(p); }
+        }
       }
     }
     const wasSlide = G.slide;
@@ -3133,7 +3150,7 @@
       if (Math.abs(it.x - cx) < (b[2] - b[0]) / 2 + 6 && Math.abs(it.y - cy) < (b[3] - b[1]) / 2 + 6) {
         it.taken = true; it.t = G.t;
         if (it.kind === 'heal') G.hp = Math.min(HP_MAX, G.hp + HEAL);
-        if (it.kind !== 'heal' && !(G.boost > 0) && !busy() && ++G.o2n >= BOOST_N) startBoost();     // everything but the heal counts
+        if (it.kind !== 'heal' && !(G.boost > 0) && !busy() && ++G.o2n >= boostNeed()) startBoost();     // everything but the heal counts
         G.score += PTS[it.kind]; G.eaten++; if (it.kind === 'atp') G.atp = (G.atp || 0) + 1;
         SND.play(it.kind === 'heal' ? 'heal' : it.kind === 'atp' ? 'atp' : PTS[it.kind] >= 30 ? 'special' : 'coin');
         if (PTS[it.kind] >= 30 || it.kind === 'heal') G.pops.push({ x: it.x, y: it.y - 8, s: it.kind === 'heal' ? '+' + HEAL : '+' + PTS[it.kind], t: G.t });
@@ -3690,6 +3707,7 @@
     alpha *= GA;
     if (alpha !== 1) ctx.globalAlpha = alpha;
     ctx.font = `900 ${size}px system-ui, -apple-system, "Noto Sans KR", sans-serif`;
+    { const mw = NWf - 14, w = ctx.measureText(s).width; if (w > mw) { size *= mw / w; ctx.font = `900 ${size}px system-ui, -apple-system, "Noto Sans KR", sans-serif`; } }   // (v47) never off the screen
     ctx.textAlign = align; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
     ctx.lineWidth = size * 0.28; ctx.strokeStyle = '#1a0a14'; ctx.strokeText(s, x, y);
     ctx.fillStyle = fill; ctx.fillText(s, x, y);
@@ -3816,7 +3834,7 @@
       const gx = x0, gy = y0 + h + 4.5, gw = 62, gh = 4.6;
       rrect(gx - 1, gy - 1, gw + 2, gh + 2, 2.6); ctx.fillStyle = '#1a0a14'; ctx.fill();
       rrect(gx, gy, gw, gh, 2); ctx.fillStyle = '#26324a'; ctx.fill();
-      const on = G.boost > 0, f = on ? G.boost / BOOST_T : G.o2n / BOOST_N;
+      const on = G.boost > 0, f = on ? G.boost / BOOST_T : G.o2n / boostNeed();
       if (f > 0.01) {
         const gr = ctx.createLinearGradient(0, gy, 0, gy + gh);
         if (on) { gr.addColorStop(0, '#fff2b0'); gr.addColorStop(0.5, '#ff9a2a'); gr.addColorStop(1, '#d8361a'); }
@@ -3824,7 +3842,7 @@
         rrect(gx, gy, Math.max(gh, gw * f), gh, 2); ctx.fillStyle = gr; ctx.fill();
       }
       spr('it_' + (M.themes[G.theme].coin || 'o2'), gx - 10, gy - 2.6, 1, 9.2, 9.2);     // the coin of this place
-      if (!on) label(`${G.o2n}/${BOOST_N}`, gx + gw + 3, gy + gh / 2 + 0.2, 6, 'left', 1, '#cdeeff');
+      if (!on) label(`${G.o2n}/${boostNeed()}`, gx + gw + 3, gy + gh / 2 + 0.2, 6, 'left', 1, '#cdeeff');
     }
     // score
     const s = G.score.toLocaleString('en-US');
@@ -3872,10 +3890,10 @@
     // buttons (not on the rhythm or orbit stage)
     if (busy()) return;
     const by = NH - BTN_M - BTN_R, bl = BTN_M + BTN_R, br = NW - BTN_M - 2 - BTN_R;
-    if (inWater()) { const on = swimHeld(); button(bl, by, '헤엄', on); button(br, by, '헤엄', on); return; }     // (both swim)
+    if (inWater()) { const on = swimHeld(); button(bl, by, TR('헤엄', 'Swim'), on); button(br, by, TR('헤엄', 'Swim'), on); return; }     // (both swim)
     const jOn = [...held.values()].includes('jump') || (AUTO && !G.onGround);
-    button(SET.swap ? br : bl, by, '점프', jOn);
-    button(SET.swap ? bl : br, by, '슬라이드', G.slideHeld);
+    button(SET.swap ? br : bl, by, TR('점프', 'Jump'), jOn);
+    button(SET.swap ? bl : br, by, TR('슬라이드', 'Slide'), G.slideHeld);
   }
   // eyelids closing over the screen: 0 open .. 1 shut (close fast, hold, open a little slower)
   const BLINK = 0.32;
@@ -3931,28 +3949,29 @@
 
   // ---------------------------------------------------------------- labels, overlays
   function setLabel(st, lap) {
-    document.getElementById('pname').textContent = st[1];
-    document.getElementById('pen').textContent = st[2] + (lap > 0 ? `  ·  ${lap + 1}바퀴` : '');
+    document.getElementById('pname').textContent = TR(st[1], st[2]);       // (v47) one language
+    document.getElementById('pen').textContent = lap > 0 ? TR(`${lap + 1}바퀴`, `Lap ${lap + 1}`) : '';
   }
   function show(id, on) { document.getElementById(id).hidden = !on; }
   function pause(box = 'pauseBox') { if (G.mode !== 'play') return; G.mode = 'pause'; held.clear(); G.slideHeld = false; if (G.rh) G.rh.ptr.clear(); if (G.bb) G.bb.drag = null; bbKeys.clear(); if (box === 'setBox') setLabels(); show(box, true); if (SND.ctx) SND.ctx.suspend(); }
   const openSettings = () => pause('setBox');               // the settings, from the gear on the play screen: the game waits
   function resume() { show('pauseBox', false); show('setBox', false); G.mode = 'play'; last = performance.now(); SND.unlock(); SND.play('ui'); }
   function setLabels() {                                   // the settings' buttons show how things are now
-    document.getElementById('bSwap').textContent = SET.swap ? '왼쪽 슬라이드 · 오른쪽 점프' : '왼쪽 점프 · 오른쪽 슬라이드';
-    for (const [id, k, name] of [['bSfx', 'sfx', '효과음'], ['bMus', 'music', '배경음악']]) {
+    document.getElementById('bSwap').textContent = SET.swap ? TR('왼쪽 슬라이드 · 오른쪽 점프', 'Left slide · Right jump') : TR('왼쪽 점프 · 오른쪽 슬라이드', 'Left jump · Right slide');
+    for (const [id, k, name] of [['bSfx', 'sfx', TR('효과음', 'Sound effects')], ['bMus', 'music', TR('배경음악', 'Music')]]) {
       const b = document.getElementById(id), off = SND.muted(k);
-      b.textContent = name + (off ? ' 꺼짐' : ' 켜짐'); b.classList.toggle('off', off);
+      b.textContent = name + (off ? TR(' 꺼짐', ' off') : TR(' 켜짐', ' on')); b.classList.toggle('off', off);
     }
   }
   function gameOver() {
     G.mode = 'over'; show('overBox', true);
     if (busy()) { G.rh = null; G.orb = null; G.bb = null; G.cut = null; SND.stopSong(0.3); SND.stopLoop(0.3); SND.spin(null); }
     SND.ambience(false); SND.play('over');
-    document.getElementById('overMsg').textContent = `점수 ${G.score.toLocaleString('en-US')} · ${Math.floor(G.t / 60)}분 ${Math.floor(G.t % 60)}초 · ${COURSE[G.station][1]}까지`;
+    document.getElementById('overMsg').textContent = TR(`점수 ${G.score.toLocaleString('en-US')} · ${Math.floor(G.t / 60)}분 ${Math.floor(G.t % 60)}초 · ${COURSE[G.station][1]}까지`, `Score ${G.score.toLocaleString('en-US')} · ${Math.floor(G.t / 60)}:${String(Math.floor(G.t % 60)).padStart(2, '0')} · reached ${COURSE[G.station][2]}`);
   }
   function startGame(c) {
     try { localStorage.setItem('bodyrun.char', c); } catch (e) { /* storage off */ }
+    for (const f of ['title_bg.webp', 'logo_ko.webp', 'logo_en.webp']) if (bmp[f]) release(f);
     show('select', false); show('pauseBox', false); show('setBox', false); show('overBox', false); show('hudText', true);
     if (!CAPTURE) { SND.unlock(); SND.stopSong(0.2); SND.stopLoop(0.2); SND.spin(null); SND.play('ui'); SND.ambience(true); getReady(); }
     newRun(c); G.station = -1; step(0); last = performance.now();
@@ -3982,6 +4001,64 @@
   document.getElementById('bAgain').onclick = () => startGame(G.char);
   document.getElementById('bChar2').onclick = () => { G.mode = 'select'; SND.ambience(false); show('overBox', false); show('hudText', false); show('select', true); };
 
+  // ---------------------------------------------------------------- (v47) the title: the user's picture of the body
+  // behind, the name (장기런 / Body Run, by the device's language) bobbing at the top, four of the runners (picked at
+  // random) running about the bottom of it, hopping (now and then a big jump with a turn), '화면을 눌러 시작'. A tap: on
+  // to picking a runner
+  const TITLE = { run: [], t0: 0, tt: null };
+  const ttime = () => (TITLE.tt !== null ? TITLE.tt : performance.now() / 1000 - TITLE.t0);
+  function startTitle() {
+    G.mode = 'title'; show('select', false); show('hudText', false);
+    const pool = M.chars.slice(), lanes = [[134, 1.25], [146, 1.38], [159, 1.52], [172, 1.66]];        // feet's height, size
+    TITLE.run = lanes.map(([y, k], i) => {
+      const c = pool.splice(Math.floor(Math.random() * pool.length), 1)[0], dir = i % 2 ? -1 : 1;
+      return { c, y, k, dir, v: 38 + Math.random() * 14, x0: i * 120 + Math.random() * 40, ph: Math.random() * 6.28, jumpEvery: 2.6 + Math.random() * 2.4, jumpAt: Math.random() * 2 };
+    });
+    TITLE.run.sort((a, b) => a.y - b.y);                    // (the far ones first)
+    TITLE.t0 = performance.now() / 1000;
+  }
+  function titleTap() {
+    if (ttime() < 0.35) return;                             // (a tap that was meant for something before)
+    SND.play('ui'); G.mode = 'select'; show('select', true);
+  }
+  function renderTitle() {
+    device(); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, GW, GH);
+    world();
+    const t = ttime(), bg = M.sprites.title_bg;
+    // the picture, filling the screen (a slow drift in and out)
+    if (bg && bmp[bg.f]) {
+      const z = 1.04 + 0.03 * Math.sin(t * 0.25), sc = Math.max(NWf / bg.w, NH / bg.h) * z, w = bg.w * sc, h = bg.h * sc;
+      spr('title_bg', (NWf - w) / 2 + Math.sin(t * 0.17) * 4, (NH - h) / 2 + Math.cos(t * 0.21) * 2, 1, w, h);
+    } else { ctx.fillStyle = '#5a1030'; ctx.fillRect(0, 0, NWf, NH); }
+    // darker at the bottom (the runners and the words read on it)
+    const g = ctx.createLinearGradient(0, NH * 0.45, 0, NH); g.addColorStop(0, 'rgba(26,6,16,0)'); g.addColorStop(1, 'rgba(26,6,16,0.55)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, NWf, NH);
+    // the runners: across and round again, hopping as they run; now and then a big jump with a somersault; shadows
+    for (const r of TITLE.run) {
+      const sp = M.sprites['ch_' + r.c]; if (!sp) continue;
+      const span = NWf + 80, x = ((r.x0 + r.v * t) % span + span) % span - 40, sx = r.dir > 0 ? x : NWf - x;
+      const stride = (t * r.v / 9 + r.ph), hop = Math.abs(Math.sin(stride)) * 3.2 * r.k;
+      const jt = (t + r.jumpAt) % r.jumpEvery, J = 0.62, jumping = jt < J, jq = jt / J;
+      const big = jumping ? Math.sin(Math.PI * jq) * 30 * r.k : 0, spin = jumping ? jq * Math.PI * 2 * r.dir : 0;
+      const land = !jumping && jt - J < 0.12 ? 1 - (jt - J) / 0.12 : 0;               // a squash on landing
+      const w = sp.w * r.k * (1 + 0.12 * land), h = sp.h * r.k * (1 - 0.14 * land + (jumping ? 0 : 0.04 * Math.sin(stride * 2)));
+      const up = jumping ? big : hop;
+      ctx.globalAlpha = 0.32 * (1 - Math.min(1, up / 40)); ctx.fillStyle = '#000000';
+      ctx.beginPath(); ctx.ellipse(sx, r.y + 0.5, w * 0.38, 2.4 * r.k, 0, 0, 6.2832); ctx.fill(); ctx.globalAlpha = 1;
+      ctx.save(); ctx.translate(sx, r.y - up - h / 2); ctx.rotate(spin + (jumping ? 0 : Math.sin(stride) * 0.06)); if (r.dir < 0) ctx.scale(-1, 1);
+      spr('ch_' + r.c, -w / 2, -h / 2, 1, w, h); ctx.restore();
+    }
+    // the name: bobbing, breathing a little
+    const lg = M.sprites['logo_' + LANG];
+    if (lg && bmp[lg.f]) {
+      const W = Math.min(NWf * 0.6, 210) * (1 + 0.02 * Math.sin(t * 2.6)), H = W * lg.h / lg.w, y = 8 + Math.sin(t * 1.7) * 2;
+      spr('logo_' + LANG, NWf / 2 - W / 2, y, 1, W, H);
+    }
+    { const a = 0.78 + 0.22 * Math.sin(t * 3.4), s2 = 1 + 0.04 * Math.sin(t * 3.4);
+      ctx.globalAlpha = 0.45 * a; rrect(NWf / 2 - 52, 93, 104, 17, 8.5); ctx.fillStyle = '#1a0610'; ctx.fill(); ctx.globalAlpha = 1;
+      label(TR('화면을 눌러 시작', 'Tap to start'), NWf / 2, 101.5, 10.5 * s2, 'center', a, '#ffffff'); }
+  }
+
   // ---------------------------------------------------------------- loop
   let last = 0, acc = 0;
   const DT = 1 / 120;
@@ -3990,6 +4067,7 @@
     const el = Math.min(0.1, (now - last) / 1000); last = now;
     if (G.mode === 'play') { acc += el; while (acc >= DT) { step(DT); acc -= DT; } }
     if (G.mode === 'play' || G.mode === 'pause' || G.mode === 'over') render();
+    else if (G.mode === 'title') renderTitle();
   }
 
   // ---------------------------------------------------------------- start
@@ -3998,11 +4076,12 @@
     const at = qs.has('at') ? COURSE.findIndex((s) => s[0] === qs.get('at')) : -1;
     try {
       const first = [decode('common.webp')];
+      if (!CAPTURE || qs.has('title')) first.push(decode('title_bg.webp'), decode(`logo_${LANG}.webp`));     // (v47) the title's
       for (let k = -1; k <= 2; k++) for (const f of themeFiles(COURSE[mod(Math.max(at, 0) + k, COURSE.length)][3])) first.push(decode(f));
       if (PRELOAD) for (const t of Object.keys(M.themes)) for (const f of themeFiles(t)) first.push(decode(f));
       await Promise.all(first);
     } catch (e) {
-      document.getElementById('loading').textContent = '그림을 불러오지 못했어요. 새로고침해 주세요.';
+      document.getElementById('loading').textContent = TR('그림을 불러오지 못했어요. 새로고침해 주세요.', "Couldn't load the pictures. Please reload.");
       return;
     }
     buildSelect();
@@ -4010,8 +4089,9 @@
     getReady();                                              // the songs' files, while you pick
     document.getElementById('loading').hidden = true;
     const auto = qs.get('char');
-    if (CAPTURE || AUTO || auto) startGame(auto && M.chars.includes(auto) ? auto : 'tardigrade');
-    else { G.mode = 'select'; show('select', true); }
+    if (qs.has('title')) startTitle();
+    else if (CAPTURE || AUTO || auto) startGame(auto && M.chars.includes(auto) ? auto : 'tardigrade');
+    else startTitle();
     if (at >= 0) { G.x = STARTS[at] + 10; G.genX = G.x + 300; G.station = -1; step(0); }
     if (!CAPTURE) requestAnimationFrame((t) => { last = t; frame(t); });
     // test hooks
@@ -4022,6 +4102,8 @@
       station: COURSE[Math.max(0, G.station)][0], seg: G.station, theme: G.theme, lid: +lidAmount().toFixed(2), lastHit: G.lastHit, rot, lap: stationAt(G.x).lap, y: +G.y.toFixed(1), slide: G.slide, obs: G.obs.length, items: G.items.length,
       NW, RS: +RS.toFixed(3), GW, GH, rhSong: G.rh ? G.rh.song.id : null, orbSong: G.orb ? OB.song.id : null, rotation: { ...ROT }, o2n: G.o2n, boost: +G.boost.toFixed(2), boostHeld: +G.boostHeld.toFixed(2), boosts: G.boosts, decoded: Object.keys(bmp).length, atp: G.atp || 0, orbits: G.orbits || 0, orb: G.orb ? G.orb.st : null, bb: G.bb ? G.bb.st : null, wm: G.wm ? G.wm.st : null, mem: G.mem ? G.mem.st : null, pk: G.pk ? G.pk.st : null, sl: G.sl ? G.sl.st : null, games: G.games || 0, huge: G.obs.filter((o) => o.kind === 'huge').length });
     window.__G = G;
+    window.__title = (tt) => { TITLE.tt = tt; renderTitle(); return { mode: G.mode, run: TITLE.run.map((r) => r.c) }; };
+    window.__titleTap = () => titleTap();
     window.__mem = () => { let px = 0; const files = {}; for (const [f, b] of Object.entries(bmp)) { const n = b.width * b.height; px += n; files[f] = +(n * 4 / 1e6).toFixed(1); } return { MB: +(px * 4 / 1e6).toFixed(1), files }; };
     window.__prof = PROF;
     window.__orb = () => { const o = G.orb; if (!o) return null; const t = otime();

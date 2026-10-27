@@ -2328,7 +2328,9 @@
   const PKF = M.pk || { goal: { l: 128, r: 292, bar: 58, line: 118 }, spot: [210, 160] };
   const PK_N = 5, PK_INTRO = 2.6, PK_END = 2.6, PK_AFTER = 1.7, PK_AFTER_GOAL = 2.2, PK_WAIT = 7, PK_PTS = 1000;
   const PK_HALF = (PKF.goal.r - PKF.goal.l) / 2, PK_TALL = PKF.goal.line - PKF.goal.bar;           // 82 wide each side, 60 high
-  const PK_KS = 0.83;                                       // the keeper's picture, scaled (about 40 tall, gloves out 35 wide)
+  // (v45) the keeper is the user's mouse (keeper_user.py): pk_k0 ready (front on, gloves up), pk_dR1..6 / pk_dL1..6 the
+  // dive to the right / left (standing, crouching, leaping, stretched with the glove out, stretched lower, down); each
+  // with its middle (c), bottom and leading glove (lead), in units
   const PK_KEY = { ArrowLeft: [-60, 14], KeyA: [-60, 14], ArrowRight: [60, 14], KeyD: [60, 14], KeyQ: [-62, 50], KeyE: [62, 50], ArrowUp: [0, 50], KeyW: [0, 50], ArrowDown: [0, 10], KeyS: [0, 10], Space: [0, 10] };
   const pkGX = (gx) => NWf / 2 + gx, pkGY = (gh) => PKF.goal.line - gh;              // a point on the goal's face -> screen
   function startPK() {
@@ -2352,7 +2354,7 @@
     const others = [-1, 0, 1].filter((s) => s !== side);
     const dive = right ? side : others[Math.floor(Math.random() * 2)];
     // can it reach? diving low and middle on its side, jumping in the middle; never the top corners
-    const reach = dive === 0 ? Math.abs(gx) < 34 && gh < 62 : Math.sign(gx) === dive && Math.abs(gx) > 14 && Math.abs(gx) < PK_HALF + 4 && gh < 46;
+    const reach = dive === 0 ? Math.abs(gx) < 30 && gh < 48 : Math.sign(gx) === dive && Math.abs(gx) > 14 && Math.abs(gx) < PK_HALF + 4 && gh < 46;
     let res;
     if (gh > PK_TALL + 3 || Math.abs(gx) > PK_HALF + 5) res = 'miss';
     else if (Math.abs(Math.abs(gx) - PK_HALF) <= 4 || Math.abs(gh - PK_TALL) <= 3) res = 'post';
@@ -2419,26 +2421,38 @@
     }
     return { x, y, k };
   }
-  // the keeper at a time: its picture, where its middle is, turned (diving right is the left dive mirrored). It reacts
-  // 0.1 s after the kick and gets there in 0.3 s; to a shot it saves, its gloves go to the ball; else to where it guessed
+  // the keeper at a time: which picture, and where (its middle, or for the ready pose its feet's middle). It reacts 0.1 s
+  // after the kick: diving, a crouch, the leap, stretched out with the leading glove reaching where it guessed (on a
+  // save, the ball, as the ball gets there), stretched lower, then down on the ground; in the middle, it jumps (gloves up
+  // to the ball on a save)
   function pkKeeper(s) {
-    const zx = NWf / 2, y0 = PKF.goal.line - 17 * PK_KS;    // standing: feet on the goal line
-    if (!s) return { pose: 0, x: zx + Math.sin(G.t * 3.1) * 6, y: y0 + Math.abs(Math.sin(G.t * 6.2)) * -1.5, flip: false };
-    const d = Math.max(0, Math.min(1, (G.t - s.t0 - 0.1) / 0.3)), e = d * d * (3 - 2 * d), lift = Math.sin(Math.PI * d);
-    const fall = Math.max(0, Math.min(1, (G.t - s.t0 - Math.max(0.7, s.T + 0.15)) / 0.22));
-    const save = s.res === 'save';
-    if (s.dive !== 0) {                                      // a dive: the gloves (left of the middle in the picture; mirrored) to the ball
-      const gox = s.dive * 37.6 * PK_KS, goy = -8.4 * PK_KS;
-      const tx = save ? s.gx : s.dive * 50, th = save ? s.gh : 22;
-      const x1 = zx + tx - gox, y1 = Math.min(PKF.goal.line + 4, pkGY(th) - goy);
-      const y = y0 + (y1 - y0) * e - 7 * lift, yl = PKF.goal.line + 6 - 13 * PK_KS;      // (then down on the ground)
-      return { pose: d > 0.15 ? 1 : 0, x: zx + (x1 - zx) * e, y: y + (Math.max(y, yl) - y) * fall, flip: s.dive > 0 };
+    const zx = NWf / 2, line = PKF.goal.line + 1, t = s ? G.t - s.t0 : 0, R = 0.1;
+    if (!s || t < R) return { nm: 'pk_k0', x: zx + (s ? 0 : Math.sin(G.t * 3.1) * 4), y: line - (s ? 0 : Math.abs(Math.sin(G.t * 6.2)) * 1.2), at: 'feet' };
+    const save = s.res === 'save', Tc = s.T;
+    if (s.dive === 0) {                                     // in the middle: a jump, gloves (15 over its feet) up to the ball
+      const k0 = M.sprites.pk_k0, gy = k0.bottom - k0.hands[0][1];
+      const up = save ? Math.max(4, s.gh - gy + 2) : 8, tx = save ? Math.max(-14, Math.min(14, s.gx * 0.6)) : 0;
+      const q = Math.min(1, (t - R) / Math.max(0.15, Tc - R)), e = 1 - (1 - q) * (1 - q);
+      const down = Math.max(0, Math.min(1, (t - Tc - 0.15) / 0.3));
+      return { nm: 'pk_k0', x: zx + tx * e, y: line - up * e * (1 - down * down), at: 'feet' };
     }
-    // in the middle: a low one blocked with the body (arms out), a higher one jumped for (both gloves up, 34 above its middle)
-    const tx = save ? Math.max(-22, Math.min(22, s.gx)) : 0, th = save ? s.gh : 52;
-    if (th < 30) return { pose: 0, x: zx + tx * e, y: y0 - 2 * lift, flip: false };
-    const y1 = Math.min(y0, pkGY(th) + 34 * PK_KS);
-    return { pose: d > 0.15 && fall < 1 ? 2 : 0, x: zx + tx * e, y: y0 + (y1 - y0) * e * (1 - fall * fall), flip: false };
+    const d = s.dive, f = (k) => 'pk_d' + (d > 0 ? 'R' : 'L') + k, F = (k) => M.sprites[f(k)];
+    const t2 = R + 0.06, t3 = t2 + 0.45 * Math.max(0.1, Tc - t2);
+    if (t < t2) { const S = F(2); return { nm: f(2), x: zx + d * 2, y: line - (S.bottom - S.c[1]), at: 'c' }; }
+    // where the leading glove of the stretched picture goes, and so where its middle is then
+    const S4 = F(4), hx = save ? pkGX(s.gx) : zx + d * 58, hy = save ? pkGY(s.gh) : pkGY(26);
+    const cx4 = hx - (S4.lead[0] - S4.c[0]), cy4 = Math.min(line + 12 - (S4.bottom - S4.c[1]), hy - (S4.lead[1] - S4.c[1]));
+    const S2 = F(2), cx2 = zx + d * 2, cy2 = line - (S2.bottom - S2.c[1]);
+    if (t < Tc) {
+      const q = (t - t2) / (Tc - t2), e = 1 - (1 - q) * (1 - q);
+      return { nm: f(t < t3 ? 3 : 4), x: cx2 + (cx4 - cx2) * e, y: cy2 + (cy4 - cy2) * e - 4 * Math.sin(Math.PI * q), at: 'c' };
+    }
+    if (t < Tc + 0.1) { const q = (t - Tc) / 0.1; return { nm: f(4), x: cx4 + d * 3 * q, y: cy4 + 2 * q, at: 'c' }; }
+    const S5 = F(5), cx5 = cx4 + d * 3, cy5 = cy4 + 2;
+    if (t < Tc + 0.3) { const q = (t - Tc - 0.1) / 0.2; return { nm: f(5), x: cx5 + d * 4 * q, y: cy5 + 8 * q * q, at: 'c' }; }
+    const S6 = F(6), cx6 = cx5 + d * 6, cy6 = Math.max(cy5 + 8, line + 3 - (S6.bottom - S6.c[1]));
+    const q = Math.min(1, (t - Tc - 0.3) / 0.12);
+    return { nm: f(6), x: cx5 + d * 4 + (cx6 - cx5 - d * 4) * q, y: cy5 + 8 + (cy6 - cy5 - 8) * q * q, at: 'c' };
   }
   function drawPK() {
     const p = G.pk; if (!p) return;
@@ -2463,8 +2477,15 @@
     const spin = s ? (G.t - s.t0) * 16 * (s.gx < 0 ? -1 : 1) : 0;
     if (behind) ball(B, spin);
     // the keeper
-    { const K = pkKeeper(s), nm = 'pk_k' + K.pose, sp = M.sprites[nm];
-      if (sp) { ctx.save(); ctx.translate(K.x, K.y); if (K.flip) ctx.scale(-1, 1); spr(nm, -sp.c[0] * PK_KS, -sp.c[1] * PK_KS, 1, sp.w * PK_KS, sp.h * PK_KS); ctx.restore(); ctx.globalAlpha = al; } }
+    { const K = pkKeeper(s), sp = M.sprites[K.nm];
+      if (sp) {
+        const x0 = K.at === 'feet' ? K.x - sp.w / 2 : K.x - sp.c[0], y0 = K.at === 'feet' ? K.y - sp.bottom : K.y - sp.c[1];
+        // its shadow on the floor under it (fainter the higher it is)
+        const ground = PKF.goal.line + 1, hgt = Math.max(0, ground - (y0 + sp.bottom));
+        ctx.globalAlpha = al * 0.32 * Math.max(0.25, 1 - hgt / 50); ctx.fillStyle = '#000000';
+        ctx.beginPath(); ctx.ellipse(x0 + sp.w / 2, Math.max(ground, y0 + sp.bottom) + 0.5, sp.w * 0.36, 2.6, 0, 0, 6.2832); ctx.fill(); ctx.globalAlpha = al;
+        spr(K.nm, x0, y0, 1, sp.w, sp.h); ctx.globalAlpha = al;
+      } }
     // the ball in front: on the spot, in flight, saved (knocked away), off the post
     if (!s) ball({ x: zx + (PKF.spot[0] - 210), y: PKF.spot[1] - 7, k: 1 }, 0);
     else if (!behind) ball(B, spin);
@@ -2534,8 +2555,12 @@
   // is the jackpot), two the same a little. What each go comes to is drawn when the lever is pulled (like a real
   // machine; with a better chance on the last go if nothing three-of-a-kind came up); the reels stop where your taps
   // land, and slide on to it. Two alike on the first two reels: '리치' - the last reel slows down, a drum roll.
-  const SLF = M.sl || { win: [[54.5, 67], [116.5, 67], [178.5, 67]], winw: 50, winh: 56, stop_y: 110, lever: [229.5, 41], bulbs: [], marquee: [116.5, 10.5] };
-  const SL_N = 3, SL_INTRO = 2.6, SL_END = 2.8, SL_SPEED = 15, SL_REACH_V = 4.5, SL_GAP = 36, SL_AUTO = 4, SL_TOP = 40;
+  // (v45) the machine is the user's picture (slot_user.py): its windows, marquee bar, bulbs, buttons, foot light and lever
+  // found in it (M.sl, in units from its top left); its feet on the screen's bottom
+  const SLF = M.sl;
+  const SL_N = 3, SL_INTRO = 2.6, SL_END = 2.8, SL_SPEED = 15, SL_REACH_V = 4.5, SL_GAP = 31, SL_SYM = 31, SL_AUTO = 4;
+  const slMY = () => NH - SH('sl_machine');
+  const slWin = (i) => { const [x0, y0, x1, y1] = SLF.wins[i]; return { x0, y0, x1, y1, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w2: (x1 - x0) / 2, h2: (y1 - y0) / 2 }; };
   const SL_PAY = [5000, 2000, 1500, 1000, 700, 500], SL_PAIR = 100;
   const SL_NAME = ['황금똥', '고무오리', '뚫어뻥', '두루마리', '비누', '물방울'];
   // the strips: each symbol at least twice, the cheap ones more often, the golden poop twice
@@ -2547,7 +2572,7 @@
     G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
     G.slLap = stationAt(G.x).lap;
     G.sl = { st: 'intro', stT: G.t, inT: G.t, k: 0, res: [], gain: 0, best3: false, reels: [0, 1, 2].map((i) => ({ pos: Math.floor(Math.random() * 18), spin: false, stop: null, strip: SL_STRIP[i].slice(), vNow: 0 })),
-      want: null, msg: null, coins: [], leverT: -9, tick: 0, drum: 0, flash: -9 };
+      want: null, msg: null, coins: [], leverT: -9, tick: 0, drum: 0, flash: -9, press: [-9, -9, -9] };
     G.slideHeld = false; held.clear(); pressed.jump = false;
   }
   function endSlot() {
@@ -2594,9 +2619,9 @@
     if (s.st === 'ready') { slPull(); return; }
     if (s.st !== 'spin') return;
     // a reel's own button, or else the leftmost still spinning
-    const mx = slMX(), by = SL_TOP + SLF.stop_y;
-    for (let i = 0; i < 3; i++) if (Math.abs(x - (mx + SLF.win[i][0])) < 22 && Math.abs(y - by) < 12) { if (slStop(i)) { SND.play('ui'); buzz(BUZZ_TAP); } return; }
-    for (let i = 0; i < 3; i++) { const rl = s.reels[i]; if (rl.spin && !rl.stop) { if (slStop(i)) { SND.play('ui'); buzz(BUZZ_TAP); } return; } }
+    const mx = slMX(), my = slMY();
+    for (let i = 0; i < 3; i++) { const [bx, by, rx, ry] = SLF.btns[i]; if (Math.abs(x - (mx + bx)) < rx + 3 && Math.abs(y - (my + by)) < ry + 5) { s.press[i] = G.t; if (slStop(i)) { SND.play('ui'); buzz(BUZZ_TAP); } return; } }
+    for (let i = 0; i < 3; i++) { const rl = s.reels[i]; if (rl.spin && !rl.stop) { if (slStop(i)) { s.press[i] = G.t; SND.play('ui'); buzz(BUZZ_TAP); } return; } }
   }
   function slResult() {
     const s = G.sl, w = s.want;
@@ -2607,7 +2632,7 @@
     s.st = 'after'; s.stT = G.t; s.flash = G.t; s.reach = false;
     s.msg = { kind, pts, sym: w[0] === w[1] || w[0] === w[2] ? w[0] : w[1], t: G.t, near: w[0] === w[1] && w[2] !== w[0] };
     if (kind === 'jackpot') { SND.play('slJackpot'); buzz([60, 40, 60, 40, 120]); for (let i = 0; i < 140; i++) s.coins.push({ x: Math.random() * NWf, y: -10 - Math.random() * 180, vx: (Math.random() * 2 - 1) * 20, vy: 40 + Math.random() * 60, r: Math.random() * 6.28, vr: (Math.random() * 2 - 1) * 10 }); }
-    else if (kind === 'three') { SND.play('slWin'); buzz([40, 30, 60]); const mx = slMX(); for (let i = 0; i < 40; i++) s.coins.push({ x: mx + SLF.win[1][0], y: SL_TOP + SLF.win[1][1], vx: (Math.random() * 2 - 1) * 150, vy: -80 - Math.random() * 120, r: 0, vr: (Math.random() * 2 - 1) * 10 }); }
+    else if (kind === 'three') { SND.play('slWin'); buzz([40, 30, 60]); const w1 = slWin(1); for (let i = 0; i < 40; i++) s.coins.push({ x: slMX() + w1.cx, y: slMY() + w1.cy, vx: (Math.random() * 2 - 1) * 150, vy: -80 - Math.random() * 120, r: 0, vr: (Math.random() * 2 - 1) * 10 }); }
     else if (kind === 'two') SND.play('slSmall');
     else SND.play('miss');
   }
@@ -2668,78 +2693,105 @@
     world();
     let al = Math.min(1, (G.t - s.inT) / 0.35);
     if (s.st === 'done') al *= Math.max(0, Math.min(1, (SL_END - (G.t - s.stT)) / 0.35));
-    const zx = NWf / 2, mx = slMX(), my = SL_TOP;
+    const zx = NWf / 2, mx = slMX(), my = slMY();
+    const win = s.st === 'after' && s.msg && (s.msg.kind === 'three' || s.msg.kind === 'jackpot');
     // the toilet water behind, darkened, a glow behind the machine
-    ctx.globalAlpha = al * 0.78; ctx.fillStyle = '#04121a'; ctx.fillRect(0, 0, NWf, NH);
-    const g = ctx.createRadialGradient(zx, my + 70, 20, zx, my + 70, 170); g.addColorStop(0, 'rgba(80,180,220,0.35)'); g.addColorStop(1, 'rgba(80,180,220,0)');
+    ctx.globalAlpha = al * 0.8; ctx.fillStyle = '#04121a'; ctx.fillRect(0, 0, NWf, NH);
+    const g = ctx.createRadialGradient(zx, my + 70, 20, zx, my + 70, 170); g.addColorStop(0, win ? 'rgba(255,214,110,0.4)' : 'rgba(80,180,220,0.32)'); g.addColorStop(1, 'rgba(80,180,220,0)');
     ctx.fillStyle = g; ctx.fillRect(0, 0, NWf, NH); ctx.globalAlpha = al;
-    // the reels behind the windows: a cream drum, the symbols going by (smeared when fast), the pay line
-    const W2 = SLF.winw / 2, H2 = SLF.winh / 2;
+    // the reels behind the windows: a white drum, the symbols going by (smeared when fast), a shadow at the top and bottom
     for (let i = 0; i < 3; i++) {
-      const rl = s.reels[i], cx = mx + SLF.win[i][0], cy = my + SLF.win[i][1], strip = rl.strip, n = strip.length;
-      ctx.save(); ctx.beginPath(); ctx.rect(cx - W2, cy - H2, W2 * 2, H2 * 2); ctx.clip();
-      const dg = ctx.createLinearGradient(0, cy - H2, 0, cy + H2); dg.addColorStop(0, '#9a9488'); dg.addColorStop(0.5, '#fffaf0'); dg.addColorStop(1, '#9a9488');
-      ctx.fillStyle = dg; ctx.fillRect(cx - W2, cy - H2, W2 * 2, H2 * 2);
+      const rl = s.reels[i], W = slWin(i), cx = mx + W.cx, cy = my + W.cy, strip = rl.strip, n = strip.length;
+      ctx.save(); ctx.beginPath(); ctx.rect(mx + W.x0 - 1, my + W.y0 - 1, W.w2 * 2 + 2, W.h2 * 2 + 2); ctx.clip();
+      const dg = ctx.createLinearGradient(0, my + W.y0, 0, my + W.y1); dg.addColorStop(0, '#b8aebc'); dg.addColorStop(0.45, '#ffffff'); dg.addColorStop(0.6, '#fbf8fc'); dg.addColorStop(1, '#a89eae');
+      ctx.fillStyle = dg; ctx.fillRect(mx + W.x0 - 1, my + W.y0 - 1, W.w2 * 2 + 2, W.h2 * 2 + 2);
       const fast = Math.abs(rl.vNow) > 7;                       // (smeared when it goes by quickly)
-      const base = Math.floor(rl.pos), fr = rl.pos - base;
+      const base = Math.floor(rl.pos), fr = rl.pos - base, sz = SL_SYM;
       for (let j = -2; j <= 2; j++) {
-        const sym = strip[(((base + j) % n) + n) % n], y = cy + (j - fr) * SL_GAP * -1;     // (the strip moves down the window)
-        const sz = 32;
-        if (fast) { for (let k = 0; k < 6; k++) spr('sl_s' + sym, cx - sz / 2, y - sz / 2 - k * 3, 0.22 * al, sz, sz); }
+        const sym = strip[(((base + j) % n) + n) % n], y = cy - (j - fr) * SL_GAP;     // (the strip moves down the window)
+        if (fast) { for (let k = 0; k < 4; k++) spr('sl_s' + sym, cx - sz / 2, y - sz * 0.8 - k * 3.5, 0.3 * al, sz, sz * 1.6); }      // (stretched along the way it goes)
         else spr('sl_s' + sym, cx - sz / 2, y - sz / 2, 1, sz, sz);
         ctx.globalAlpha = al;
       }
-      const sh = ctx.createLinearGradient(0, cy - H2, 0, cy + H2); sh.addColorStop(0, 'rgba(20,10,10,0.45)'); sh.addColorStop(0.25, 'rgba(20,10,10,0)'); sh.addColorStop(0.75, 'rgba(20,10,10,0)'); sh.addColorStop(1, 'rgba(20,10,10,0.45)');
-      ctx.fillStyle = sh; ctx.fillRect(cx - W2, cy - H2, W2 * 2, H2 * 2);
+      const sh = ctx.createLinearGradient(0, my + W.y0, 0, my + W.y1);
+      sh.addColorStop(0, 'rgba(70,30,60,0.62)'); sh.addColorStop(0.2, 'rgba(70,30,60,0)'); sh.addColorStop(0.82, 'rgba(70,30,60,0)'); sh.addColorStop(1, 'rgba(70,30,60,0.4)');
+      ctx.fillStyle = sh; ctx.fillRect(mx + W.x0 - 1, my + W.y0 - 1, W.w2 * 2 + 2, W.h2 * 2 + 2);
       ctx.restore();
-      // a winning reel glows
-      if (s.st === 'after' && s.msg && s.msg.kind !== 'none' && s.want[i] === s.msg.sym && (s.msg.kind !== 'two' || s.want.filter((v) => v === s.msg.sym).length >= 2)) {
-        ctx.globalAlpha = al * (0.5 + 0.5 * Math.sin(G.t * 16)); ctx.lineWidth = 2.2; ctx.strokeStyle = '#ffe14a'; ctx.strokeRect(cx - W2 + 1, cy - H2 + 1, W2 * 2 - 2, H2 * 2 - 2); ctx.globalAlpha = al;
-      }
     }
-    // the pay line across the three windows
-    ctx.globalAlpha = al * 0.55; ctx.strokeStyle = '#ff3a4a'; ctx.lineWidth = 0.9; ctx.beginPath(); ctx.moveTo(mx + SLF.win[0][0] - W2, my + SLF.win[0][1]); ctx.lineTo(mx + SLF.win[2][0] + W2, my + SLF.win[2][1]); ctx.stroke(); ctx.globalAlpha = al;
-    // the machine itself, its lever (pulled for a moment), the marquee's name, the bulbs (chasing; all blinking on a win)
+    // the machine itself
     spr('sl_machine', mx, my, 1, SW('sl_machine'), SH('sl_machine'));
-    { const pulled = G.t - s.leverT < 0.3, nm = pulled ? 'sl_lever1' : 'sl_lever0', lv = M.sprites[nm];
-      if (lv) spr(nm, mx + SLF.lever[0] - lv.piv[0], my + SLF.lever[1] - lv.piv[1], 1, lv.w, lv.h); }
-    { const m = s.msg, qx = mx + SLF.marquee[0], qy = my + SLF.marquee[1] + 0.5, blink = 0.6 + 0.4 * Math.sin(G.t * 6);
-      if (s.reach) label('리치!', qx, qy, 11, 'center', al * (Math.floor(G.t * 8) % 2 ? 1 : 0.55), '#ff8a8a');
-      else if (m && s.st === 'after') {
-        if (m.kind === 'jackpot') label('JACKPOT', qx, qy, 10, 'center', al * (Math.floor(G.t * 10) % 2 ? 1 : 0.5), '#ffe68a');
-        else if (m.kind === 'three') label('당첨!', qx, qy, 10, 'center', al * (Math.floor(G.t * 10) % 2 ? 1 : 0.5), '#ffe68a');
-        else if (m.kind === 'two') label(m.near ? `아깝다! +${m.pts}점` : `두 개 같아요 +${m.pts}점`, qx, qy, m.near ? 9 : 7.5, 'center', al, '#ffffff');
-        else label('꽝', qx, qy, 10, 'center', al, '#d8c8d0');
-      }
-      else if (s.st === 'ready') label('탭해서 레버 당기기', qx, qy, 7.5, 'center', al * blink, '#ffffff');
-      else label('변기 잭팟', qx, qy, 10, 'center', al, '#ffe68a'); }
-    ctx.globalAlpha = al;
-    const win = s.st === 'after' && s.msg && (s.msg.kind === 'three' || s.msg.kind === 'jackpot');
-    SLF.bulbs.forEach(([bx, by], i) => {
-      const on = win ? Math.floor(G.t * 10) % 2 === 0 : s.st === 'spin' ? (i + Math.floor(G.t * 18)) % 4 === 0 : (i + Math.floor(G.t * 5)) % 3 === 0;
-      ctx.beginPath(); ctx.arc(mx + bx, my + by, 1.5, 0, 6.2832); ctx.fillStyle = on ? (s.reach ? '#ff5a5a' : '#fff2a8') : '#7a5a2a'; ctx.fill();
-      if (on) { ctx.globalAlpha = al * 0.35; ctx.beginPath(); ctx.arc(mx + bx, my + by, 3.4, 0, 6.2832); ctx.fill(); ctx.globalAlpha = al; }
-    });
-    // the stop buttons: lit while their reel can be stopped
+    // a winning reel: a gold glow round its window
     for (let i = 0; i < 3; i++) {
-      const rl = s.reels[i], bx = mx + SLF.win[i][0], by = my + SLF.stop_y, live = s.st === 'spin' && rl.spin && !rl.stop && G.t >= rl.t0 + 0.4;
-      ctx.beginPath(); ctx.ellipse(bx, by, 13, 6, 0, 0, 6.2832); ctx.fillStyle = '#1a0a14'; ctx.fill();
-      ctx.beginPath(); ctx.ellipse(bx, by - 1, 12, 5, 0, 0, 6.2832); ctx.fillStyle = live ? '#ff3a4a' : '#6a2a30'; ctx.fill();
-      label('STOP', bx, by - 0.8, 5.5, 'center', al, live ? '#ffffff' : '#c8a0a4');
-      ctx.globalAlpha = al;
+      if (!(s.st === 'after' && s.msg && s.msg.kind !== 'none' && s.want[i] === s.msg.sym && (s.msg.kind !== 'two' || s.want.filter((v) => v === s.msg.sym).length >= 2))) continue;
+      const W = slWin(i);
+      ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = al * (0.45 + 0.4 * Math.sin(G.t * 16));
+      rrect(mx + W.x0 + 0.6, my + W.y0 + 0.6, W.w2 * 2 - 1.2, W.h2 * 2 - 1.2, SLF.winr); ctx.lineWidth = 1.6; ctx.strokeStyle = '#ffd54a'; ctx.stroke();
+      ctx.restore(); ctx.globalAlpha = al;
     }
-    // reach!
-    // a win: the coins, the words
+    // the bulbs round the marquee: the picture's are all lit; off ones dimmed, on ones glowing (chasing slowly, fast while
+    // the reels turn, red on a reach, all flashing on a win)
+    SLF.bulbs.forEach(([bx, by, br], i) => {
+      const N = SLF.bulbs.length;
+      const on = win ? Math.floor(G.t * 8) % 2 === 0 : s.reach ? Math.floor(G.t * 10) % 2 === i % 2 : s.st === 'spin' ? ((i - Math.floor(G.t * 22)) % N + N) % N < 4 : ((i - Math.floor(G.t * 6)) % 3 + 3) % 3 === 0;
+      const x = mx + bx, y = my + by;
+      if (!on) { ctx.globalAlpha = al * 0.6; ctx.beginPath(); ctx.arc(x, y, br * 1.15, 0, 6.2832); ctx.fillStyle = '#5a2a10'; ctx.fill(); ctx.globalAlpha = al; return; }
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      const gg = ctx.createRadialGradient(x, y, 0, x, y, br * 3.2); const c = s.reach ? '255,90,90' : '255,226,150';
+      gg.addColorStop(0, `rgba(${c},0.85)`); gg.addColorStop(0.35, `rgba(${c},0.35)`); gg.addColorStop(1, `rgba(${c},0)`);
+      ctx.globalAlpha = al; ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(x, y, br * 3.2, 0, 6.2832); ctx.fill(); ctx.restore(); ctx.globalAlpha = al;
+    });
+    // the light at the foot: breathing; flashing on a win
+    { const [gx, gy, rx, ry] = SLF.glow, k = win ? 0.55 + 0.45 * Math.sin(G.t * 18) : 0.22 + 0.12 * Math.sin(G.t * 2.4);
+      ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.translate(mx + gx, my + gy); ctx.scale(1, ry / rx);
+      const gg = ctx.createRadialGradient(0, 0, 0, 0, 0, rx * 1.1); gg.addColorStop(0, win ? 'rgba(255,230,140,0.9)' : 'rgba(110,200,255,0.9)'); gg.addColorStop(1, 'rgba(110,200,255,0)');
+      ctx.globalAlpha = al * k; ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(0, 0, rx * 1.1, 0, 6.2832); ctx.fill(); ctx.restore(); ctx.globalAlpha = al; }
+    // the red buttons: glowing while their reel can be stopped, pressed in for a moment when tapped, dim when not live
+    for (let i = 0; i < 3; i++) {
+      const rl = s.reels[i], [bx, by, rx, ry] = SLF.btns[i], x = mx + bx, y = my + by;
+      const live = s.st === 'spin' && rl.spin && !rl.stop && G.t >= rl.t0 + 0.4, pr = G.t - s.press[i] < 0.15;
+      ctx.save(); ctx.translate(x, y); ctx.scale(1, ry / rx);
+      if (live && !pr) {
+        ctx.globalCompositeOperation = 'lighter';
+        const gg = ctx.createRadialGradient(0, -rx * 0.2, 0, 0, 0, rx * 1.15); gg.addColorStop(0, 'rgba(255,150,140,0.75)'); gg.addColorStop(0.6, 'rgba(255,60,60,0.3)'); gg.addColorStop(1, 'rgba(255,60,60,0)');
+        ctx.globalAlpha = al * (0.55 + 0.45 * Math.sin(G.t * 9 - i)); ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(0, 0, rx * 1.15, 0, 6.2832); ctx.fill();
+      } else if (pr || s.st === 'spin' || s.st === 'ready') {
+        ctx.globalAlpha = al * (pr ? 0.45 : 0.3); ctx.fillStyle = '#2a0008'; ctx.beginPath(); ctx.arc(0, 0, rx * 0.98, 0, 6.2832); ctx.fill();
+      }
+      ctx.restore(); ctx.globalAlpha = al;
+    }
+    // the lever: pulled down towards you and back (the arm turning on its pivot: the stick foreshortened, the knob coming
+    // nearer and bigger), then the knob and stick drawn over the drum
+    { const u = G.t - s.leverT, th = 2.2 * (u < 0 ? 0 : u < 0.13 ? u / 0.13 : u < 0.22 ? 1 : Math.max(0, 1 - (u - 0.22) / 0.32));
+      const e = th === 0 ? 0 : th, c = Math.cos(e), sn = Math.sin(e);
+      const [px, py] = SLF.piv, st = M.sprites.sl_stick, kn = M.sprites.sl_knob;
+      if (e > 0.02) { ctx.beginPath(); ctx.ellipse(mx + px, my + py, SLF.stick_w * 0.5, SLF.stick_w * 0.22, 0, 0, 6.2832); ctx.fillStyle = '#3a1a08'; ctx.fill(); }
+      ctx.save(); ctx.translate(mx + px, my + py); ctx.scale(1, c); spr('sl_stick', -SLF.stick_piv[0], -SLF.stick_piv[1], 1, st.w, st.h); ctx.restore(); ctx.globalAlpha = al;
+      const kx = mx + SLF.knob[0], ky = my + py + (SLF.knob[1] - py) * c, ks = 1 + 0.22 * sn;
+      spr('sl_knob', kx - SLF.knob_c[0] * ks, ky - SLF.knob_c[1] * ks, 1, kn.w * ks, kn.h * ks); ctx.globalAlpha = al; }
+    // the marquee bar: what is going on
+    { const m = s.msg, [qx0, qy0, qw] = SLF.marquee, qx = mx + qx0, qy = my + qy0 + 0.3, blink = 0.78 + 0.22 * Math.sin(G.t * 6), fs = Math.min(8, qw / 7);
+      if (s.reach) label('리치!', qx, qy, fs * 1.15, 'center', al * (Math.floor(G.t * 8) % 2 ? 1 : 0.6), '#ffe3e3');
+      else if (m && s.st === 'after') {
+        if (m.kind === 'jackpot') label('JACKPOT', qx, qy, fs * 1.1, 'center', al * (Math.floor(G.t * 10) % 2 ? 1 : 0.55), '#ffe68a');
+        else if (m.kind === 'three') label('당첨!', qx, qy, fs * 1.1, 'center', al * (Math.floor(G.t * 10) % 2 ? 1 : 0.55), '#ffe68a');
+        else if (m.kind === 'two') label(m.near ? `아깝다! +${m.pts}점` : `두 개 같아요 +${m.pts}점`, qx, qy, fs * 0.85, 'center', al, '#ffffff');
+        else label('꽝', qx, qy, fs, 'center', al, '#ffd8dc');
+      }
+      else if (s.st === 'ready') label('탭해서 레버 당기기', qx, qy, fs * 0.85, 'center', al * blink, '#ffffff');
+      else label('변기 잭팟', qx, qy, fs, 'center', al, '#ffe68a'); }
+    ctx.globalAlpha = al;
+    // a win: the coins, the words (over the reels)
     for (const c of s.coins) { ctx.save(); ctx.translate(c.x, c.y); ctx.scale(Math.cos(c.r), 1); spr('sl_coin', -4, -4, 1, 8, 8); ctx.restore(); ctx.globalAlpha = al; }
+    const ry = my + slWin(0).cy;
     if (s.msg && s.st !== 'done') {
       const v = G.t - s.msg.t, m = s.msg;
       if (m.kind === 'jackpot') {
         if (v < 0.5) { ctx.globalAlpha = al * (1 - v / 0.5) * 0.5; ctx.fillStyle = '#fff6c8'; ctx.fillRect(0, 0, NWf, NH); ctx.globalAlpha = al; }
         const sc = 1 + 0.3 * Math.max(0, 1 - v / 0.3) + 0.05 * Math.sin(G.t * 10);
-        label('JACKPOT!!', zx, 96, 26 * sc, 'center', al, ['#ffe14a', '#ff7a5a', '#7ae0ff', '#c88aff'][Math.floor(G.t * 8) % 4]);
-        label(`+${m.pts.toLocaleString('en-US')}점`, zx, 118, 12, 'center', al, '#ffe68a');
+        label('JACKPOT!!', zx, ry - 4, 26 * sc, 'center', al, ['#ffe14a', '#ff7a5a', '#7ae0ff', '#c88aff'][Math.floor(G.t * 8) % 4]);
+        label(`+${m.pts.toLocaleString('en-US')}점`, zx, ry + 16, 12, 'center', al, '#ffe68a');
       } else if (m.kind === 'three') {
-        label(`${SL_NAME[m.sym]} 3개! +${m.pts.toLocaleString('en-US')}점`, zx, 100, 13 * (1 + 0.2 * Math.max(0, 1 - v / 0.25)), 'center', al, '#ffe68a');
+        label(`${SL_NAME[m.sym]} 3개! +${m.pts.toLocaleString('en-US')}점`, zx, ry, 13 * (1 + 0.2 * Math.max(0, 1 - v / 0.25)), 'center', al, '#ffe68a');
       }
     }
     // the goes: three coins at the top left
@@ -2747,17 +2799,17 @@
     ctx.globalAlpha = al;
     if (s.st === 'intro') {
       const v = G.t - s.stT, a = Math.min(1, v / 0.3) * Math.max(0, Math.min(1, (SL_INTRO - v) / 0.3));
-      ctx.globalAlpha = al * a * 0.85; rrect(zx - 118, 64, 236, 56, 8); ctx.fillStyle = '#10141e'; ctx.fill(); ctx.globalAlpha = al;
-      label('변기 잭팟! 3번 돌려요', zx, 78, 15, 'center', a, '#ffe0a8');
-      label('탭하면 레버를 당겨 돌아가고, 다시 탭해서 하나씩 멈춰요', zx, 96, 7.5, 'center', a, '#ffffff');
-      label('같은 그림 3개면 당첨, 황금똥 3개면 잭팟 5,000점!', zx, 107, 7.5, 'center', a, '#ffe68a');
+      ctx.globalAlpha = al * a * 0.85; rrect(zx - 118, 72, 236, 56, 8); ctx.fillStyle = '#10141e'; ctx.fill(); ctx.globalAlpha = al;
+      label('변기 잭팟! 3번 돌려요', zx, 86, 15, 'center', a, '#ffe0a8');
+      label('탭하면 레버를 당겨 돌아가고, 다시 탭해서 하나씩 멈춰요', zx, 104, 7.5, 'center', a, '#ffffff');
+      label('같은 그림 3개면 당첨, 황금똥 3개면 잭팟 5,000점!', zx, 115, 7.5, 'center', a, '#ffe68a');
     }
     if (s.st === 'done') {
       const v = G.t - s.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (SL_END - v) / 0.35));
-      ctx.globalAlpha = a * 0.85; rrect(zx - 110, 66, 220, 56, 8); ctx.fillStyle = '#10141e'; ctx.fill(); ctx.globalAlpha = 1;
+      ctx.globalAlpha = a * 0.85; rrect(zx - 110, 74, 220, 56, 8); ctx.fillStyle = '#10141e'; ctx.fill(); ctx.globalAlpha = 1;
       const hit = s.res.filter((r) => r === 'three' || r === 'jackpot').length;
-      label(s.res.includes('jackpot') ? '잭팟 터졌다!' : hit ? `당첨 ${hit}번!` : '다음에 다시!', zx, 82, 14, 'center', a, s.gain ? '#ffe68a' : '#ffd0dc');
-      label(`+${s.gain.toLocaleString('en-US')}점`, zx, 104, 9, 'center', a, '#ffe68a');
+      label(s.res.includes('jackpot') ? '잭팟 터졌다!' : hit ? `당첨 ${hit}번!` : '다음에 다시!', zx, 90, 14, 'center', a, s.gain ? '#ffe68a' : '#ffd0dc');
+      label(`+${s.gain.toLocaleString('en-US')}점`, zx, 112, 9, 'center', a, '#ffe68a');
     }
     ctx.globalAlpha = 1;
   }
@@ -3884,7 +3936,7 @@
     window.__wm = () => { const w = G.wm; if (!w) return null; return { st: w.st, u: w.st === 'play' ? +(G.t - w.t0).toFixed(2) : null, caught: w.caught, missed: w.missed, oops: w.oops, gain: w.gain,
       moles: w.moles.map((m) => { const p = wmPlace(m), s = M.sprites[wmName(m)]; return { h: m.h, kind: m.kind, good: m.good, st: m.st, q: +p.q.toFixed(2), x: +p.x.toFixed(1), y: +(p.y - s.foot[1] * p.k * 0.55).toFixed(1) }; }) }; };
     window.__pk = () => { const p = G.pk; if (!p) return null; return { st: p.st, k: p.k, res: p.res.slice(), gain: p.gain, shot: p.shot ? { ...p.shot } : null }; };
-    window.__sl = () => { const s = G.sl; if (!s) return null; return { st: s.st, k: s.k, res: s.res.slice(), gain: s.gain, want: s.want && s.want.slice(), reach: !!s.reach, reels: s.reels.map((r) => ({ pos: +r.pos.toFixed(2), spin: r.spin, stop: !!r.stop })), mx: slMX() }; };
+    window.__sl = () => { const s = G.sl; if (!s) return null; return { st: s.st, k: s.k, res: s.res.slice(), gain: s.gain, want: s.want && s.want.slice(), reach: !!s.reach, reels: s.reels.map((r) => ({ pos: +r.pos.toFixed(2), spin: r.spin, stop: !!r.stop })), mx: slMX(), btns: SLF.btns.map(([x, y]) => [slMX() + x, slMY() + y]) }; };
     window.__pkKick = (gx, gh) => pkKick(gx, gh, 0.5);
     window.__memg = () => { const m = G.mem; if (!m) return null; return { st: m.st, seq: m.seq.slice(), k: m.k, round: m.round, res: m.res.slice(), gain: m.gain, best: m.best || 0, at: [0, 1, 2, 3, 4].map(memAt) }; };
     window.__bbTypes = BB_TYPES; window.__bbBallAt = (t) => bbBallAt(t);

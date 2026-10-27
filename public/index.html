@@ -2351,11 +2351,15 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   // The spleen's red pulp as a board seen from the front, nine openings of its sinuses in three rows (the picture and
   // where the openings are: minigames.py). Germs pop out of them for a moment: tap the bad ones (a purple E. coli, a
   // golden staph bunch, a red spiral) before they go down again, +50 each; the green lactobacillus is a good one:
-  // tapping it costs 100. 25 s, the germs coming quicker and staying up less as it goes. The run stands still; its
+  // tapping it costs 100. 45 s (v41; was 25), harder and harder as it goes. The run stands still; its
   // music goes on.
   const WMF = M.wm || { holes: [] };
-  const WM_T = 25, WM_INTRO = 2.4, WM_END = 2.4;
-  const WM_RISE = 0.14, WM_SINK = 0.16, WM_SQUASH = 0.11, WM_HITSINK = 0.24;
+  const WM_T = 45, WM_INTRO = 3.2, WM_END = 2.4;          // (v41: the intro longer, it shows the lactobacillus too)
+  const WM_RISE = 0.1, WM_SINK = 0.12, WM_SQUASH = 0.11, WM_HITSINK = 0.24;
+  // harder as it goes (v41), over the 45 s from start to end: how long a germ stays all the way up; the time between
+  // germs; how many can be up at once (from 0, 10, 20, 32 s); how often one is the good one, and from 25 s two good ones
+  // can be up together; germs coming two (from 20 s) or three (from 32 s) at a time. v40 (25 s): 1.15 -> 0.6 s up, 0.8 -> 0.38 s apart, 1/2/3 at once, 22%
+  const WM_STAY = [0.85, 0.35], WM_GAP = [0.6, 0.22], WM_MAXUP = [[0, 2], [10, 3], [20, 4], [32, 5]], WM_GOOD = [0.2, 0.33];
   const WM_PTS = 50, WM_OOPS = 100;
   const WM_K = 1.1;                                        // a germ's picture at the front row, scaled (its body ~42 tall)
   const WM_BAD_KINDS = ['ecoli', 'staph', 'spiral'];
@@ -2397,9 +2401,10 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     const open = WMF.holes.map((_, i) => i).filter((i) => !busyH.has(i) && G.t - w.free[i] > 0.25);
     if (!open.length) return;
     const h = open[Math.floor(Math.random() * open.length)];
-    const good = u > 3 && !w.moles.some((m) => m.good) && Math.random() < 0.22;
+    const goodUp = w.moles.filter((m) => m.good && m.st === 'up').length;
+    const good = u > 3 && goodUp < (u < 25 ? 1 : 2) && Math.random() < lerp(WM_GOOD[0], WM_GOOD[1], f);
     const kind = good ? 'lacto' : WM_BAD_KINDS[Math.floor(Math.random() * WM_BAD_KINDS.length)];
-    w.moles.push({ h, kind, good, t0: G.t, stay: lerp(1.15, 0.6, f) * (0.88 + Math.random() * 0.24) * (good ? 1.15 : 1), st: 'up' });
+    w.moles.push({ h, kind, good, t0: G.t, stay: lerp(WM_STAY[0], WM_STAY[1], f) * (0.88 + Math.random() * 0.24), st: 'up' });
     SND.play('wmUp');
   }
   function stepWhack() {
@@ -2407,10 +2412,12 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     if (w.st === 'intro') { if (G.t - w.stT > WM_INTRO) { w.st = 'play'; w.stT = G.t; w.t0 = G.t; w.next = G.t + 0.3; } return; }
     if (w.st === 'play') {
       const u = G.t - w.t0, f = u / WM_T;
-      const maxUp = u < 4 ? 1 : u < 11 ? 2 : 3;
+      const maxUp = WM_MAXUP.filter(([t0]) => u >= t0).pop()[1];
       if (u < WM_T - 0.4 && G.t >= w.next) {
-        if (w.moles.filter((m) => m.st === 'up').length < maxUp) wmSpawn();
-        w.next = G.t + lerp(0.8, 0.38, f) * (0.8 + Math.random() * 0.4);
+        // later on they come in twos (from 20 s) and threes (from 32 s), so more are up at once
+        const n = u >= 32 && Math.random() < 0.35 ? 3 : u >= 20 && Math.random() < 0.35 ? 2 : 1;
+        for (let k = 0; k < n; k++) if (w.moles.filter((m) => m.st === 'up').length < maxUp) wmSpawn();
+        w.next = G.t + lerp(WM_GAP[0], WM_GAP[1], f) * (0.8 + Math.random() * 0.4);
       }
       if (AUTO && !window.__noAuto) for (const m of w.moles) {      // the test pilot: a bad germ well out gets tapped where it is
         if (m.st !== 'up' || m.good || wmOut(m) < 0.6) continue;
@@ -2524,10 +2531,16 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     }
     if (w.st === 'intro') {
       const u = G.t - w.stT, a = Math.min(1, u / 0.3) * Math.max(0, Math.min(1, (WM_INTRO - u) / 0.3));
-      ctx.globalAlpha = al * a * 0.78; rrect(zx - 118, 52, 236, 54, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = al;
-      label('세균 잡기! 25초', zx, 66, 15, 'center', a, '#ffe0a8');
-      label('구멍에서 튀어나오는 나쁜 세균을 톡! 눌러 잡아요', zx, 84, 7.5, 'center', a, '#ffffff');
-      label('초록 유산균은 착한 균: 누르면 -100점', zx, 95, 7.5, 'center', a, '#b8f09a');
+      ctx.globalAlpha = al * a * 0.8; rrect(zx - 118, 46, 236, 86, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = al;
+      label(`세균 잡기! ${WM_T}초`, zx, 60, 15, 'center', a, '#ffe0a8');
+      label('구멍에서 튀어나오는 나쁜 세균을 톡! 눌러 잡아요', zx, 77, 7.5, 'center', a, '#ffffff');
+      // the good one, shown: its picture on the left of a lighter box, what it is and what tapping it costs beside it
+      ctx.globalAlpha = al * a; rrect(zx - 92, 86, 184, 40, 6); ctx.fillStyle = 'rgba(120,220,90,0.14)'; ctx.fill();
+      ctx.lineWidth = 0.9; ctx.strokeStyle = 'rgba(184,240,154,0.7)'; ctx.stroke();
+      const ls = M.sprites.wm_lacto;
+      if (ls) { const k = 34 / ls.foot[1]; spr('wm_lacto', zx - 70 - ls.foot[0] * k, 123 - ls.foot[1] * k, a, ls.w * k, ls.h * k); ctx.globalAlpha = al; }
+      label('이건 착한 유산균이에요', zx - 46, 99, 8.5, 'left', a, '#b8f09a');
+      label('잡으면 안 돼요! (누르면 -100점)', zx - 46, 113, 7.5, 'left', a, '#ffb0b8');
     }
     if (w.st === 'done') {
       const v = G.t - w.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (WM_END - v) / 0.35));
@@ -2545,12 +2558,19 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   // tap (or 5 s without one) shows the right one, and the next round is the same order again. A round right: 100 points
   // for each neuron in it. The run stands still and its music fades, so the bells are clear.
   const MG_N = 5, MG_ROUNDS = 5, MG_L0 = 3;
-  const MG_INTRO = 2.6, MG_END = 2.6, MG_LEAD = 0.75, MG_WAIT = 5, MG_OK = 1.0, MG_BAD = 1.6, MG_TAP = 0.3;
+  const MG_INTRO = 2.6, MG_END = 2.6, MG_LEAD = 0.5, MG_WAIT = 5, MG_OK = 1.0, MG_BAD = 1.6, MG_TAP = 0.3;
   const MG_R = 52, MG_CY = 110, MG_HIT = 28, MG_S = 50;   // the ring (its radius, middle), a tap's reach, a neuron's size
   const MG_COL = ['#ff5a80', '#ffb21e', '#3ad060', '#3a9aff', '#a464ff'];
   const memAt = (k) => { const a = -Math.PI / 2 + k * 2 * Math.PI / MG_N; return [NWf / 2 + Math.cos(a) * MG_R * 1.18, MG_CY + Math.sin(a) * MG_R]; };
-  const memStep = (L) => [Math.max(0.34, 0.5 - 0.035 * (L - MG_L0)), 0.17];       // a neuron's light in the show, the gap
-  function memNew(seq) { let n; do n = Math.floor(Math.random() * MG_N); while (seq.length && n === seq[seq.length - 1]); seq.push(n); }
+  // a neuron's light in the show, the gap after it (v41: quicker: 0.32 s at three long down to 0.24 at seven, 0.1 s off;
+  // v40 was 0.5 -> 0.36 and 0.17)
+  const memStep = (L) => [Math.max(0.22, 0.32 - 0.02 * (L - MG_L0)), 0.1];
+  // the next neuron of the order: one that has not come up yet if there is one (so the first round's three are all
+  // different and by five long every neuron has lit), never the one just before it
+  function memNew(seq) {
+    const last = seq[seq.length - 1], all = [...Array(MG_N).keys()].filter((n) => n !== last), fresh = all.filter((n) => !seq.includes(n));
+    const from = fresh.length ? fresh : all; seq.push(from[Math.floor(Math.random() * from.length)]);
+  }
   function startMemory() {
     holdBoost();
     G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);

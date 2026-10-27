@@ -20,7 +20,7 @@
   const V0 = 170, ACC = 0.6, VMAX = 900;
   const HP_MAX = 100, DRAIN = 1.0, HIT = 15, HEAL = 25, INVUL = 1.2;
   // the player's box: half-width and height running, sliding (the characters are drawn 0.8 of their old size)
-  const PW = 6.4, PH = 19.2, SLW = 8.8, SLH = 10.4;
+  const PW = 5.76, PH = 17.28, SLW = 7.92, SLH = 9.36;     // (v38: 0.9 of v15's 6.4, 19.2, 8.8, 10.4, with the pictures)
   const TOPY = CEIL + 10;                       // a safety stop only: a perfect triple jump tops out at about 104 (head at y 27)
   const MAXY = GY - TOPY - PH;                  // ... as a height of the feet above the floor
   const FLOAT_BOTTOM = GY - 15.5, HANG_BOTTOM = GY - 15.5;     // under it a sliding player passes, a running one does not
@@ -1327,18 +1327,31 @@
   const BBF = M.bb || { mound: [210, 100], plate: [210, 172] };                 // the field picture's numbers (baseball.py)
   const BB_N = 5;                                                               // pitches
   const BB_ZW = 44, BB_ZH = 50, BB_ZY = 128;                                    // the strike zone: width, height, centre y
-  const BB_CR = 9, BB_BR = 4.6;                                                 // the bat's ring, the ball at the plate
+  const BB_CR = 9, BB_BR = 4.6;                                                 // (the old ring's size), the ball at the plate
+  // the bat's aim: a bat's shape BB_AL long, slanting up to the right (the knob low on the left, the barrel high on the
+  // right), the aiming point at the middle of its barrel (BB_AS along it); thin at the grip, swelling to a fat barrel
+  const BB_AL = 44, BB_AS = 0.75, BB_ANG = -0.38;
+  const BB_AX = Math.cos(BB_ANG), BB_AY = Math.sin(BB_ANG);
+  const batRad = (t) => { const e = Math.max(0, Math.min(1, (t - 0.22) / 0.5)); return t < 0.04 ? 2.8 : 1.9 + (6.6 - 1.9) * e * e * (3 - 2 * e); };
+  // how far the ball's middle is outside the bat's aim (0 on it), the ball being (dx, dy) from the aiming point; it is
+  // hit within half the ball's size of it
+  function bbOff(dx, dy) {
+    const u = dx * BB_AX + dy * BB_AY + BB_AS * BB_AL, v = -dx * BB_AY + dy * BB_AX;      // along the bat from the knob, across it
+    if (u < 0) return Math.max(0, Math.hypot(u, v) - batRad(0));
+    if (u > BB_AL) return Math.max(0, Math.hypot(u - BB_AL, v) - batRad(1));
+    return Math.max(0, Math.abs(v) - batRad(u / BB_AL));
+  }
   const BB_WIN = 0.12, BB_FOUL = 0.2;                                           // timing (s): a home run this early or late; a foul
   const BB_INTRO = 2.2, BB_WIND = 1.0, BB_AFTER = 1.5, BB_AFTER_HR = 2.4, BB_END = 2.2;
   // the pitches (thrown from the mound farther off: 1.1 times the way on the screen at the same speed): flight time,
   // the break at the plate (units; sideways ones go either way), how late it comes (the
   // power of the flight it grows with: 2 early and long, 6 all at the end), and a rise on the way (the curve's arc)
-  const BB_TYPES = [                                                        // (T: the flight, 10% slower than v34)
-    { name: '직구', T: 0.378, bx: 0, by: 0, pw: 3, rise: 0 },
-    { name: '커브', T: 0.533, bx: 14, by: 26, pw: 2, rise: 16 },              // up first, then a long drop
-    { name: '포크볼', T: 0.422, bx: 0, by: 34, pw: 7, rise: 0 },             // looks straight, falls off the table at the end
-    { name: '슬라이더', T: 0.433, bx: 32, by: 4, pw: 3, rise: 0 },           // late, sideways
-    { name: '체인지업', T: 0.544, bx: 3, by: 9, pw: 2, rise: 0 },            // slow, sinking a little
+  const BB_TYPES = [                                                        // (T: the flight, v34's / 0.9 / 0.95: 10% then 5% slower)
+    { name: '직구', T: 0.398, bx: 0, by: 0, pw: 3, rise: 0 },
+    { name: '커브', T: 0.561, bx: 14, by: 26, pw: 2, rise: 16 },              // up first, then a long drop
+    { name: '포크볼', T: 0.444, bx: 0, by: 34, pw: 7, rise: 0 },             // looks straight, falls off the table at the end
+    { name: '슬라이더', T: 0.456, bx: 32, by: 4, pw: 3, rise: 0 },           // late, sideways
+    { name: '체인지업', T: 0.573, bx: 3, by: 9, pw: 2, rise: 0 },            // slow, sinking a little
   ];
   const BB_PTS = { hr: 1000 };
   // the hit: the bat meets the ball BB_DS after the tap (the swing down), the game stops a moment there (hit-stop,
@@ -1574,8 +1587,8 @@
       return;
     }
     p.swung = true; b.swingT = G.t; SND.play('bbSwing');
-    const dt = G.t - p.arr, d = Math.hypot(b.cur[0] - p.tx, b.cur[1] - p.ty);
-    if (Math.abs(dt) > BB_FOUL || d > BB_CR) return;                           // a miss is told when the ball goes by
+    const dt = G.t - p.arr, d = bbOff(p.tx - b.cur[0], p.ty - b.cur[1]);
+    if (Math.abs(dt) > BB_FOUL || d > BB_BR / 2) return;                       // a miss is told when the ball goes by
     b.pend = { res: Math.abs(dt) <= BB_WIN ? 'hr' : 'foul', dt, d, t: G.t + BB_DS };
   }
   // where the ball is met: at the plate, or where it was at the tap if that was late; it waits there for the bat
@@ -1726,6 +1739,17 @@
       ctx.beginPath(); ctx.arc(x + r * (1.25 + c), y, r * 0.95, 0.64 * Math.PI, 1.36 * Math.PI); ctx.stroke();
     }
   }
+  function batShape(cx, cy, k = 1) {                                            // the bat's aim as the path (k: smaller, for the pad)
+    const L = BB_AL * k, ox = cx - BB_AX * BB_AS * L, oy = cy - BB_AY * BB_AS * L, nx = -BB_AY, ny = BB_AX, N = 28;
+    const at = (t, side) => { const r = batRad(t) * k * side, d = L * t; return [ox + BB_AX * d + nx * r, oy + BB_AY * d + ny * r]; };
+    ctx.beginPath();
+    for (let i = 0; i <= N; i++) { const [x, y] = at(0.04 + 0.96 * i / N, 1); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
+    const ex = ox + BB_AX * L, ey = oy + BB_AY * L, a0 = Math.atan2(ny, nx);                 // the barrel's round end
+    ctx.arc(ex, ey, batRad(1) * k, a0, a0 - Math.PI, true);
+    for (let i = N; i >= 0; i--) { const [x, y] = at(0.04 + 0.96 * i / N, -1); ctx.lineTo(x, y); }
+    ctx.arc(ox, oy, batRad(0) * k, a0 + Math.PI, a0, true);                                  // the knob
+    ctx.closePath();
+  }
   function drawBaseball() {
     const b = G.bb; if (!b) return;
     world();
@@ -1806,10 +1830,10 @@
       }
       ctx.globalAlpha = al;
     }
-    // the bat's ring (where you will hit) and its sweet middle
+    // the bat's aim (where you will hit: the bat's own shape, slanting) and the middle of its barrel
     if (b.st !== 'done') {
       const cx = zx + b.cur[0], cy = zy + b.cur[1];
-      ctx.beginPath(); ctx.arc(cx, cy, BB_CR, 0, 6.29); ctx.fillStyle = 'rgba(255,214,110,0.16)'; ctx.fill();
+      batShape(cx, cy); ctx.fillStyle = 'rgba(255,214,110,0.16)'; ctx.fill();
       ctx.lineWidth = 2.8; ctx.strokeStyle = '#1a0a14'; ctx.stroke(); ctx.lineWidth = 1.5; ctx.strokeStyle = '#ffd66e'; ctx.stroke();
       ctx.beginPath(); ctx.arc(cx, cy, 1.1, 0, 6.29); ctx.fillStyle = '#ffd66e'; ctx.fill();
     }
@@ -1823,7 +1847,7 @@
       for (const q of [1, 2]) { ctx.moveTo(px0 + 6 + (pw - 12) * q / 3, py0 + 6); ctx.lineTo(px0 + 6 + (pw - 12) * q / 3, py0 + ph - 6); ctx.moveTo(px0 + 6, py0 + 6 + (ph - 12) * q / 3); ctx.lineTo(px0 + pw - 6, py0 + 6 + (ph - 12) * q / 3); }
       ctx.stroke();
       const kx = pcx + b.cur[0] / (BB_ZW / 2 + 6) * (pw / 2 - 6), ky = pcy + b.cur[1] / (BB_ZH / 2 + 6) * (ph / 2 - 6);
-      ctx.beginPath(); ctx.arc(kx, ky, 6, 0, 6.29); ctx.fillStyle = on ? 'rgba(255,214,110,0.4)' : 'rgba(255,214,110,0.2)'; ctx.fill();
+      batShape(kx, ky, 0.42); ctx.fillStyle = on ? 'rgba(255,214,110,0.4)' : 'rgba(255,214,110,0.2)'; ctx.fill();
       ctx.lineWidth = 2.4; ctx.strokeStyle = '#1a0a14'; ctx.stroke(); ctx.lineWidth = 1.3; ctx.strokeStyle = '#ffd66e'; ctx.stroke();
       ctx.beginPath(); ctx.arc(kx, ky, 1, 0, 6.29); ctx.fillStyle = '#ffd66e'; ctx.fill();
       label('조준', pcx, py0 - 6, 7.5, 'center', al, '#ffffff');

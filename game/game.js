@@ -148,11 +148,14 @@
     const jx = STARTS[COURSE.findIndex((st) => st[5] === JEJ)], dj = ((jx - s.lx) % LAP + LAP) % LAP;
     const nearBB = G.bb || dj < Math.max(2500, G.v * 8);
     if (nearBB) { files.add('bb_field.webp'); files.add('bb.webp'); files.add(`bat_${G.char}.webp`); }
+    const near = (id) => { const d = ((STARTS[COURSE.findIndex((st) => st[0] === id)] - s.lx) % LAP + LAP) % LAP; return d < Math.max(2500, G.v * 8); };
+    if (G.wm || near('spleen')) { files.add('wm_field.webp'); files.add('wm.webp'); }       // the germ game's, near the spleen
+    if (G.mem || near('hippocampus')) files.add('mem.webp');                                // the memory game's
     const dc = ((S2_X - s.lx) % LAP + LAP) % LAP;            // the flush cut scene's pictures, near the end of the body
     if (G.cut || G.cutTail || dc < Math.max(2500, G.v * 8)) files.add('cut_flush.webp');
     if (STAGES.bb && !CAPTURE) { if (nearBB) { SND.fetchSong(STAGES.bb).catch(() => {}); if (SND.ctx) SND.prepare(STAGES.bb).catch(() => {}); } else SND.release(STAGES.bb); }
     for (const f of files) decode(f).catch(() => {});
-    if (!PRELOAD) for (const f of Object.keys(bmp)) if (!files.has(f) && /^(th_|fx_fire|bb|bat_|cut_)/.test(f)) release(f);
+    if (!PRELOAD) for (const f of Object.keys(bmp)) if (!files.has(f) && /^(th_|fx_fire|bb|bat_|cut_|wm|mem)/.test(f)) release(f);
     manageSongs();
   }
 
@@ -216,7 +219,7 @@
       y: 0, vy: 0, jumps: 0, onGround: true, slide: false, slideHeld: false, fastFall: false,
       invul: 0, nudge: 0, char: charName, obs: [], items: [], pops: [], puffs: [],
       genX: 520, genStation: undefined, lastGate: -1e9, R: rng(12345), nextHeal: 1800, station: -1, theme: COURSE[0][3], prevTheme: null, fade: 1, banner: 0, lapShown: 0,
-      blinkAt: -1, blinkR: rng(4242), vt: 0, rh: null, orb: null, bb: null, cut: null, cutTail: null, bounce: false, pitObj: null,
+      blinkAt: -1, blinkR: rng(4242), vt: 0, rh: null, orb: null, bb: null, wm: null, mem: null, cut: null, cutTail: null, bounce: false, pitObj: null,
       o2n: 0, boost: 0, boostT0: -9, boostHeld: 0, boosts: 0, fire: [], fxR: rng(9191),
       intro: [[1950, 'spike'], [3650, 'drop'], [5420, 'pit'], [7250, 'shot'], [9130, 'door']],
     });
@@ -310,7 +313,7 @@
   // under water (stage 2) the speed carried in is cut by 30% and climbs from there at the same rate as ever (G.wPen: the
   // 30% of the speed it came in at, held while in the water)
   const wPen = () => (inWater() ? G.wPen || 0 : 0);
-  function curSpeed() { return G.orb || G.bb || G.cut ? 0 : G.rh ? G.rh.speed : (G.v - wPen()) * (0.3 + 0.7 * G.slow) * (G.boost > 0 ? BOOST_K : 1); }
+  function curSpeed() { return G.orb || G.bb || G.wm || G.mem || G.cut ? 0 : G.rh ? G.rh.speed : (G.v - wPen()) * (0.3 + 0.7 * G.slow) * (G.boost > 0 ? BOOST_K : 1); }
   function arriveIn(dist, v) { return ACC > 0 ? (-v + Math.sqrt(v * v + 2 * ACC * Math.max(0, dist))) / ACC : dist / v; }
   function aimDoor(o) {                              // set its beat so the wanted lip is half way through its hold on arrival
     const ta = G.t + arriveIn(o.x + o.w / 2 - G.x, curSpeed());
@@ -594,6 +597,8 @@
     if (G.rh) { SND.spin(null); endRhythm(); }
     if (G.orb) endOrbit();
     if (G.bb) endBaseball();
+    if (G.wm) endWhack();
+    if (G.mem) endMemory();
     if (G.cut) cutDone();
     const s = stationAt(G.x), here = COURSE[s.i][5];
     let j = s.i, lap = s.lap;
@@ -620,6 +625,8 @@
     if (G.rh) { SND.spin(null); endRhythm(); }
     if (G.orb) endOrbit();
     if (G.bb) endBaseball();
+    if (G.wm) endWhack();
+    if (G.mem) endMemory();
     if (G.cut) cutDone();
     const s = stationAt(G.x), lap = STARTS[j] + 1 > s.lx ? s.lap : s.lap + 1;
     G.x = lap * LAP + STARTS[j] + 1;
@@ -642,6 +649,8 @@
     if (G.rh) { rhDown(e.pointerId, nx, ny); e.preventDefault(); return; }
     if (G.orb) { orbTap(); e.preventDefault(); return; }
     if (G.bb) { bbDown(e.pointerId, nx, ny); e.preventDefault(); return; }
+    if (G.wm) { wmDown(nx, ny); e.preventDefault(); return; }
+    if (G.mem) { memDown(nx, ny); e.preventDefault(); return; }
     const side = (nx < NW / 2) !== SET.swap ? 'jump' : 'slide';    // the left half jumps (the right, swapped)
     held.set(e.pointerId, side);
     if (side === 'jump') doJump();
@@ -657,6 +666,9 @@
       if (BB_KEY[e.code]) { bbKeys.add(BB_KEY[e.code]); e.preventDefault(); return; }
       if (['Space', 'Enter', 'KeyJ', 'KeyF'].includes(e.code)) { bbSwing(); e.preventDefault(); return; }
     }
+    const dg = /^(Digit|Numpad)([0-9])$/.exec(e.code);                // the germ and memory games: the number keys
+    if (dg && G.wm && G.mode === 'play') { if (WM_KEY[dg[2]] !== undefined) wmKey(WM_KEY[dg[2]]); e.preventDefault(); return; }
+    if (dg && G.mem && G.mode === 'play') { memKey(+dg[2] - 1); e.preventDefault(); return; }
     if (G.orb && G.mode === 'play' && ['Space', 'ArrowUp', 'ArrowDown', 'KeyW', 'KeyS', 'Enter', 'KeyJ', 'KeyF'].includes(e.code)) { orbTap(); e.preventDefault(); return; }
     if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') { keyJump = true; doJump(); e.preventDefault(); }
     if (e.code === 'ArrowDown' || e.code === 'KeyS') { keySlide = true; setSlide(); e.preventDefault(); }
@@ -1088,7 +1100,7 @@
   const OB_PLANS = {};                                     // laid out once per song, when first needed
   const orbPlan = (song) => OB_PLANS[song.id] || (OB_PLANS[song.id] = planOrbit(song));
   let OB = orbPlan(songFor('orb'));                        // the path of the stage on now (or of the next one)
-  const busy = () => !!(G.rh || G.orb || G.bb || G.cut);
+  const busy = () => !!(G.rh || G.orb || G.bb || G.wm || G.mem || G.cut);
   function otime() {
     const o = G.orb;
     if (o.wait !== null) return -OB_LEAD;                    // the song still on its way
@@ -1889,6 +1901,367 @@
     ctx.globalAlpha = 1;
   }
 
+  // ---------------------------------------------------------------- the germ game (in the spleen) (v40)
+  // The spleen's red pulp as a board seen from the front, nine openings of its sinuses in three rows (the picture and
+  // where the openings are: minigames.py). Germs pop out of them for a moment: tap the bad ones (a purple E. coli, a
+  // golden staph bunch, a red spiral) before they go down again, +50 each; the green lactobacillus is a good one:
+  // tapping it costs 100. 25 s, the germs coming quicker and staying up less as it goes. The run stands still; its
+  // music goes on.
+  const WMF = M.wm || { holes: [] };
+  const WM_T = 25, WM_INTRO = 2.4, WM_END = 2.4;
+  const WM_RISE = 0.14, WM_SINK = 0.16, WM_SQUASH = 0.11, WM_HITSINK = 0.24;
+  const WM_PTS = 50, WM_OOPS = 100;
+  const WM_K = 1.1;                                        // a germ's picture at the front row, scaled (its body ~42 tall)
+  const WM_BAD_KINDS = ['ecoli', 'staph', 'spiral'];
+  // the number keys, laid out like the board on a number pad (7 8 9 the far row, 1 2 3 the near one)
+  const WM_KEY = { 7: 0, 8: 1, 9: 2, 4: 3, 5: 4, 6: 5, 1: 6, 2: 7, 3: 8 };
+  const ease = (v) => { v = Math.max(0, Math.min(1, v)); return v * v * (3 - 2 * v); };
+  const lerp = (a, b, k) => a + (b - a) * Math.max(0, Math.min(1, k));
+  function startWhack() {
+    holdBoost();
+    G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
+    G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
+    G.wm = { st: 'intro', stT: G.t, inT: G.t, t0: 0, next: 0, moles: [], free: WMF.holes.map(() => -9), caught: 0, missed: 0, oops: 0, gain: 0, fx: [], pops: [] };
+    G.slideHeld = false; held.clear(); pressed.jump = false;
+  }
+  function endWhack() {
+    G.wm = null; G.games = (G.games || 0) + 1; resumeBoost();
+    G.genX = Math.max(G.genX, G.x + NW * 0.8);
+    G.banner = G.t;
+  }
+  // how far a germ is out of its opening (0 down in it .. 1 all the way up)
+  function wmOut(m) {
+    if (m.st === 'hit') { const a = G.t - m.tH; return a < WM_SQUASH ? m.qH : m.qH * (1 - ease((a - WM_SQUASH) / WM_HITSINK)); }
+    const a = G.t - m.t0;
+    if (a < WM_RISE) { const k = a / WM_RISE; return 1 - (1 - k) * (1 - k); }
+    if (a < WM_RISE + m.stay) return 1;
+    const k = (a - WM_RISE - m.stay) / WM_SINK; return Math.max(0, 1 - k * k);
+  }
+  const wmName = (m) => 'wm_' + m.kind + (m.st === 'hit' ? '_hit' : '');
+  // where a germ is drawn: its base's x, y, its scale (its picture at full height has its base at the opening's middle
+  // plus a little; down in it, the picture is wholly under the opening)
+  function wmPlace(m) {
+    const h = WMF.holes[m.h], zx = NWf / 2, k = WM_K * h[4], s = M.sprites[wmName(m)], q = wmOut(m);
+    const up = h[1] + h[3] * 0.45, down = h[1] + h[3] + s.foot[1] * k + 1;
+    return { x: zx + h[0], y: down + (up - down) * q, k, q };
+  }
+  function wmSpawn() {
+    const w = G.wm, u = G.t - w.t0, f = u / WM_T;
+    const busyH = new Set(w.moles.map((m) => m.h));
+    const open = WMF.holes.map((_, i) => i).filter((i) => !busyH.has(i) && G.t - w.free[i] > 0.25);
+    if (!open.length) return;
+    const h = open[Math.floor(Math.random() * open.length)];
+    const good = u > 3 && !w.moles.some((m) => m.good) && Math.random() < 0.22;
+    const kind = good ? 'lacto' : WM_BAD_KINDS[Math.floor(Math.random() * WM_BAD_KINDS.length)];
+    w.moles.push({ h, kind, good, t0: G.t, stay: lerp(1.15, 0.6, f) * (0.88 + Math.random() * 0.24) * (good ? 1.15 : 1), st: 'up' });
+    SND.play('wmUp');
+  }
+  function stepWhack() {
+    const w = G.wm;
+    if (w.st === 'intro') { if (G.t - w.stT > WM_INTRO) { w.st = 'play'; w.stT = G.t; w.t0 = G.t; w.next = G.t + 0.3; } return; }
+    if (w.st === 'play') {
+      const u = G.t - w.t0, f = u / WM_T;
+      const maxUp = u < 4 ? 1 : u < 11 ? 2 : 3;
+      if (u < WM_T - 0.4 && G.t >= w.next) {
+        if (w.moles.filter((m) => m.st === 'up').length < maxUp) wmSpawn();
+        w.next = G.t + lerp(0.8, 0.38, f) * (0.8 + Math.random() * 0.4);
+      }
+      if (AUTO && !window.__noAuto) for (const m of w.moles) {      // the test pilot: a bad germ well out gets tapped where it is
+        if (m.st !== 'up' || m.good || wmOut(m) < 0.6) continue;
+        const p = wmPlace(m), s = M.sprites[wmName(m)];
+        wmDown(p.x, p.y - s.foot[1] * p.k * 0.55);
+      }
+      for (const m of w.moles) {
+        const gone = m.st === 'hit' ? G.t - m.tH > WM_SQUASH + WM_HITSINK : G.t - m.t0 > WM_RISE + m.stay + WM_SINK;
+        if (gone) { m.gone = true; w.free[m.h] = G.t; if (m.st === 'up' && !m.good) w.missed++; }
+      }
+      w.moles = w.moles.filter((m) => !m.gone);
+      if (u >= WM_T && !w.moles.length) { w.st = 'done'; w.stT = G.t; SND.play(w.caught ? 'orbClear' : 'bbOut'); }
+    }
+    w.fx = w.fx.filter((e) => G.t - e.t < 0.4);
+    w.pops = w.pops.filter((e) => G.t - e.t < 0.8);
+    if (w.st === 'done' && G.t - w.stT > WM_END) endWhack();
+  }
+  // a tap on the board: the germ under it that is out far enough (the nearest, if two overlap)
+  function wmDown(x, y) {
+    const w = G.wm; if (!w || w.st !== 'play') return;
+    let best = null, bd = 1e9;
+    for (const m of w.moles) {
+      if (m.st !== 'up') continue;
+      const p = wmPlace(m); if (p.q < 0.25) continue;
+      const s = M.sprites[wmName(m)], hw = Math.max(WMF.holes[m.h][2] * 0.72, 15 * p.k), top = p.y - s.foot[1] * p.k - 4;
+      const bot = WMF.holes[m.h][1] + WMF.holes[m.h][3] + 3;
+      if (Math.abs(x - p.x) > hw || y < top || y > bot) continue;
+      const d = Math.hypot(x - p.x, y - (top + bot) / 2);
+      if (d < bd) { bd = d; best = m; }
+    }
+    if (best) wmWhack(best, x, y);
+  }
+  function wmKey(i) { const w = G.wm; if (!w) return; const m = w.moles.find((q) => q.h === i && q.st === 'up' && wmOut(q) >= 0.25); if (m) { const p = wmPlace(m); wmWhack(m, p.x, p.y - 12 * p.k); } }
+  function wmWhack(m, x, y) {
+    const w = G.wm;
+    m.qH = wmOut(m); m.st = 'hit'; m.tH = G.t;
+    if (m.good) {
+      const lose = Math.min(WM_OOPS, G.score); G.score -= lose; w.gain -= lose; w.oops++;     // (the score never goes below 0)
+      SND.play('wmOops'); buzz([30, 40, 30]);
+      w.pops.push({ x, y: y - 6, s: lose ? '-' + lose : '앗!', t: G.t, bad: true });
+    } else {
+      G.score += WM_PTS; w.gain += WM_PTS; w.caught++;
+      SND.play('wmHit'); buzz(BUZZ_TAP);
+      w.pops.push({ x, y: y - 6, s: '+' + WM_PTS, t: G.t });
+    }
+    w.fx.push({ x, y, t: G.t, good: m.good });
+  }
+  // ---- drawing
+  function wmStar(x, y, r, col) {
+    ctx.beginPath();
+    for (let k = 0; k < 10; k++) { const a = -Math.PI / 2 + k * Math.PI / 5, rr = k % 2 ? r * 0.45 : r; ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
+    ctx.closePath(); ctx.fillStyle = col; ctx.fill(); ctx.lineWidth = 0.7; ctx.strokeStyle = '#1a0a14'; ctx.stroke();
+  }
+  function drawWhack() {
+    const w = G.wm; if (!w) return;
+    world();
+    let al = Math.min(1, (G.t - w.inT) / 0.35);
+    if (w.st === 'done') al *= Math.max(0, Math.min(1, (WM_END - (G.t - w.stT)) / 0.35));
+    ctx.globalAlpha = al;
+    const zx = NWf / 2;
+    ctx.fillStyle = '#1a0408'; ctx.fillRect(0, 0, NWf, NH);
+    spr('wm_field', zx - 210, 0, 1, 420, 180);
+    // the germs, far row first (a nearer one in front), each cut off where it goes down into its opening, darker inside it
+    const byHole = {}; for (const m of w.moles) byHole[m.h] = m;
+    WMF.holes.forEach((h, i) => {
+      const m = byHole[i]; if (!m) return;
+      const p = wmPlace(m), nm = wmName(m), s = M.sprites[nm], hx = zx + h[0];
+      if (p.q <= 0) return;
+      ctx.save();
+      ctx.beginPath(); ctx.rect(hx - 70, -20, 140, h[1] + 20); ctx.ellipse(hx, h[1], h[2], h[3], 0, 0, 6.2832); ctx.clip();
+      let sx = 1, sy = 1;
+      if (m.st === 'hit') { const a = (G.t - m.tH) / WM_SQUASH; if (a < 1) { const b = Math.sin(Math.min(1, a) * Math.PI); sx = 1 + 0.22 * b; sy = 1 - 0.3 * b; } }
+      ctx.translate(p.x, p.y); ctx.scale(p.k * sx, p.k * sy);
+      spr(nm, -s.foot[0], -s.foot[1], 1, s.w, s.h);
+      ctx.restore();
+      ctx.save();
+      ctx.beginPath(); ctx.ellipse(hx, h[1], h[2], h[3], 0, 0, 6.2832); ctx.clip();
+      const g = ctx.createLinearGradient(0, h[1] - h[3] * 0.1, 0, h[1] + h[3]);
+      g.addColorStop(0, 'rgba(10,0,4,0)'); g.addColorStop(1, 'rgba(10,0,4,0.6)');
+      ctx.fillStyle = g; ctx.fillRect(hx - h[2], h[1] - h[3], h[2] * 2, h[3] * 2);
+      ctx.restore();
+      ctx.globalAlpha = al;
+      // dizzy stars round a whacked bad one's head
+      if (m.st === 'hit' && !m.good) {
+        const a = G.t - m.tH, top = p.y - s.foot[1] * p.k * 0.92;
+        for (let k = 0; k < 3; k++) { const ang = a * 9 + k * 2.094; wmStar(p.x + Math.cos(ang) * 10 * p.k, top + Math.sin(ang) * 3 * p.k, 3.4 * p.k, '#ffe04a'); }
+      }
+    });
+    // the whack: a ring and rays bursting from the tap (white; red for the good one)
+    for (const e of w.fx) {
+      const u = (G.t - e.t) / 0.32; if (u >= 1) continue;
+      const R = 5 + 16 * (1 - (1 - u) * (1 - u)), col = e.good ? '#ff5a6a' : '#ffffff';
+      ctx.globalAlpha = al * (1 - u);
+      ctx.beginPath(); ctx.arc(e.x, e.y, R, 0, 6.2832); ctx.lineWidth = 2.4 * (1 - u) + 0.4; ctx.strokeStyle = col; ctx.stroke();
+      ctx.beginPath();
+      for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4 + 0.39; ctx.moveTo(e.x + Math.cos(a) * R * 0.55, e.y + Math.sin(a) * R * 0.55); ctx.lineTo(e.x + Math.cos(a) * R * 1.05, e.y + Math.sin(a) * R * 1.05); }
+      ctx.lineWidth = 1.6 * (1 - u) + 0.3; ctx.stroke();
+    }
+    ctx.globalAlpha = al;
+    for (const e of w.pops) { const v = G.t - e.t; label(e.s, e.x, e.y - v * 22, 9, 'center', al * Math.min(1, (0.8 - v) / 0.25), e.bad ? '#ff8a96' : '#ffe68a'); }
+    ctx.globalAlpha = al;
+    // the count and the time left
+    if (w.st === 'play' || w.st === 'done') {
+      const left = w.st === 'play' ? Math.max(0, WM_T - (G.t - w.t0)) : 0, bw = 96, bx = zx - bw / 2, by = 42;
+      rrect(bx - 1, by - 1, bw + 2, 5.4, 2.7); ctx.fillStyle = '#1a0a14'; ctx.fill();
+      rrect(bx, by, bw, 3.4, 1.7); ctx.fillStyle = '#4a3040'; ctx.fill();
+      if (left > 0) { rrect(bx, by, Math.max(3.4, bw * left / WM_T), 3.4, 1.7); ctx.fillStyle = left < 5 ? '#ff6a6a' : '#ffd66e'; ctx.fill(); }
+      label(`${Math.ceil(left)}초`, bx + bw + 4, by + 1.8, 7, 'left', al, '#ffffff');
+      label(`잡은 세균 ${w.caught}`, bx - 4, by + 1.8, 7, 'right', al, '#ffe0a8');
+      ctx.globalAlpha = al;
+    }
+    if (w.st === 'intro') {
+      const u = G.t - w.stT, a = Math.min(1, u / 0.3) * Math.max(0, Math.min(1, (WM_INTRO - u) / 0.3));
+      ctx.globalAlpha = al * a * 0.78; rrect(zx - 118, 52, 236, 54, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = al;
+      label('세균 잡기! 25초', zx, 66, 15, 'center', a, '#ffe0a8');
+      label('구멍에서 튀어나오는 나쁜 세균을 톡! 눌러 잡아요', zx, 84, 7.5, 'center', a, '#ffffff');
+      label('초록 유산균은 착한 균: 누르면 -100점', zx, 95, 7.5, 'center', a, '#b8f09a');
+    }
+    if (w.st === 'done') {
+      const v = G.t - w.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (WM_END - v) / 0.35));
+      ctx.globalAlpha = a * 0.78; rrect(zx - 110, 54, 220, 60, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = 1;
+      label(`세균 ${w.caught}마리!`, zx, 70, 14, 'center', a, '#ffe68a');
+      label(`잡음 ${w.caught} · 놓침 ${w.missed} · 유산균 누름 ${w.oops}`, zx, 90, 7.5, 'center', a, '#ffffff');
+      label(`${w.gain < 0 ? '-' : '+'}${Math.abs(w.gain).toLocaleString('en-US')}점`, zx, 104, 8.5, 'center', a, w.gain < 0 ? '#ff8a96' : '#ffe68a');
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ---------------------------------------------------------------- the memory game (in the hippocampus) (v40)
+  // Five neurons in a ring light up one after another, each with its own bell; tap them in the same order. Five
+  // rounds: the first is three long, and each round you get right adds one more to the end of the same order. A wrong
+  // tap (or 5 s without one) shows the right one, and the next round is the same order again. A round right: 100 points
+  // for each neuron in it. The run stands still and its music fades, so the bells are clear.
+  const MG_N = 5, MG_ROUNDS = 5, MG_L0 = 3;
+  const MG_INTRO = 2.6, MG_END = 2.6, MG_LEAD = 0.75, MG_WAIT = 5, MG_OK = 1.0, MG_BAD = 1.6, MG_TAP = 0.3;
+  const MG_R = 52, MG_CY = 110, MG_HIT = 28, MG_S = 50;   // the ring (its radius, middle), a tap's reach, a neuron's size
+  const MG_COL = ['#ff5a80', '#ffb21e', '#3ad060', '#3a9aff', '#a464ff'];
+  const memAt = (k) => { const a = -Math.PI / 2 + k * 2 * Math.PI / MG_N; return [NWf / 2 + Math.cos(a) * MG_R * 1.18, MG_CY + Math.sin(a) * MG_R]; };
+  const memStep = (L) => [Math.max(0.34, 0.5 - 0.035 * (L - MG_L0)), 0.17];       // a neuron's light in the show, the gap
+  function memNew(seq) { let n; do n = Math.floor(Math.random() * MG_N); while (seq.length && n === seq[seq.length - 1]); seq.push(n); }
+  function startMemory() {
+    holdBoost();
+    G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
+    G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
+    const seq = []; for (let i = 0; i < MG_L0; i++) memNew(seq);
+    G.mem = { st: 'intro', stT: G.t, inT: G.t, seq, round: 0, res: [], k: 0, shown: -1, lastTap: 0, flash: [], pulses: [], gain: 0, why: '' };
+    G.slideHeld = false; held.clear(); pressed.jump = false;
+    if (!CAPTURE && SND.live()) SND.ambience(false);
+  }
+  function endMemory() {
+    G.mem = null; G.games = (G.games || 0) + 1; resumeBoost();
+    if (!CAPTURE && SND.live()) SND.ambience(true);
+    G.genX = Math.max(G.genX, G.x + NW * 0.8);
+    G.banner = G.t;
+  }
+  function memLight(n, kind, dur) { G.mem.flash.push({ n, kind, t: G.t, dur }); SND.play('mem' + n); }
+  function memShow() { const m = G.mem; m.st = 'show'; m.stT = G.t; m.shown = -1; m.k = 0; }
+  function stepMemory() {
+    const m = G.mem;
+    if (m.st === 'intro' && G.t - m.stT > MG_INTRO) memShow();
+    if (m.st === 'show') {
+      const [on, gap] = memStep(m.seq.length), u = G.t - m.stT - MG_LEAD, i = Math.floor(u / (on + gap));
+      if (u >= 0 && i < m.seq.length && i > m.shown) {
+        m.shown = i; memLight(m.seq[i], 'show', on);
+        if (i > 0) m.pulses.push({ a: m.seq[i - 1], b: m.seq[i], t: G.t - gap, dur: gap + 0.06 });
+      }
+      if (u >= m.seq.length * (on + gap) + 0.1) { m.st = 'input'; m.stT = G.t; m.lastTap = G.t; m.k = 0; }
+    } else if (m.st === 'input') {
+      if (AUTO && !window.__noAuto && G.t - m.lastTap > 0.32) { const [x, y] = memAt(m.seq[m.k]); memDown(x, y); }   // the test pilot
+      else if (G.t - m.lastTap > MG_WAIT) memWrong(null, '시간 초과');
+    } else if (m.st === 'ok' && G.t - m.stT > MG_OK) {
+      if (++m.round >= MG_ROUNDS) memDone(); else { memNew(m.seq); memShow(); }
+    } else if (m.st === 'bad' && G.t - m.stT > MG_BAD) {
+      if (++m.round >= MG_ROUNDS) memDone(); else memShow();
+    }
+    m.flash = m.flash.filter((f) => G.t - f.t < f.dur + 0.3);
+    m.pulses = m.pulses.filter((p) => G.t - p.t < p.dur + 0.1);
+    if (m.st === 'done' && G.t - m.stT > MG_END) endMemory();
+  }
+  function memDone() { const m = G.mem; m.st = 'done'; m.stT = G.t; SND.play(m.res.includes('ok') ? 'orbClear' : 'bbOut'); }
+  function memWrong(n, why) {
+    const m = G.mem, right = m.seq[m.k];
+    m.res.push('bad'); m.st = 'bad'; m.stT = G.t; m.why = why;
+    if (n !== null) m.flash.push({ n, kind: 'wrong', t: G.t, dur: MG_BAD - 0.2 });
+    m.flash.push({ n: right, kind: 'right', t: G.t, dur: MG_BAD - 0.2 });
+    SND.play('memBad'); buzz([30, 40, 30]);
+  }
+  function memDown(x, y) {
+    const m = G.mem; if (!m || m.st !== 'input') return;
+    let n = -1, bd = MG_HIT;
+    for (let k = 0; k < MG_N; k++) { const [px, py] = memAt(k), d = Math.hypot(x - px, y - py); if (d < bd) { bd = d; n = k; } }
+    if (n < 0) return;
+    m.lastTap = G.t;
+    if (n !== m.seq[m.k]) { memWrong(n, '틀렸어요'); return; }
+    memLight(n, 'tap', MG_TAP); buzz(BUZZ_TAP);
+    if (m.k > 0) m.pulses.push({ a: m.seq[m.k - 1], b: n, t: G.t - 0.12, dur: 0.16 });
+    if (++m.k >= m.seq.length) {
+      const pts = m.seq.length * 100; G.score += pts; m.gain += pts; m.res.push('ok');
+      m.st = 'ok'; m.stT = G.t; m.okPts = pts; m.best = Math.max(m.best || 0, m.seq.length);
+      SND.play('memOk');
+    }
+  }
+  function memKey(n) { if (G.mem && n >= 0 && n < MG_N) { const [x, y] = memAt(n); memDown(x, y); } }
+  // ---- drawing
+  function drawMemory() {
+    const m = G.mem; if (!m) return;
+    world();
+    let al = Math.min(1, (G.t - m.inT) / 0.4);
+    if (m.st === 'done') al *= Math.max(0, Math.min(1, (MG_END - (G.t - m.stT)) / 0.4));
+    const cx = NWf / 2;
+    // the place goes dark behind the ring (its own light gathered in the middle)
+    ctx.globalAlpha = al * 0.86; ctx.fillStyle = '#0a0414'; ctx.fillRect(0, 0, NWf, NH);
+    const bg = ctx.createRadialGradient(cx, MG_CY, 10, cx, MG_CY, 120);
+    bg.addColorStop(0, 'rgba(70,40,110,0.55)'); bg.addColorStop(1, 'rgba(70,40,110,0)');
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, NWf, NH);
+    ctx.globalAlpha = al;
+    const P = []; for (let k = 0; k < MG_N; k++) P.push(memAt(k));
+    // the synapses: every two neurons joined by a faint line, bright while a signal runs along it
+    ctx.lineCap = 'round';
+    for (let a = 0; a < MG_N; a++) for (let b = a + 1; b < MG_N; b++) {
+      ctx.beginPath(); ctx.moveTo(P[a][0], P[a][1]); ctx.lineTo(P[b][0], P[b][1]);
+      ctx.lineWidth = 0.8; ctx.strokeStyle = 'rgba(200,170,255,0.18)'; ctx.stroke();
+    }
+    for (const p of m.pulses) {
+      const u = (G.t - p.t) / p.dur; if (u < 0 || u > 1.25) continue;
+      const A = P[p.a], B = P[p.b], f = Math.min(1, u), col = MG_COL[p.b];
+      ctx.globalAlpha = al * Math.min(1, (1.25 - u) * 4) * 0.8;
+      ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); ctx.lineWidth = 1.6; ctx.strokeStyle = col; ctx.stroke();
+      for (let i = 0; i < 6; i++) {                                               // the signal: a bright spark with a trail
+        const q = Math.max(0, f - i * 0.05), x = A[0] + (B[0] - A[0]) * q, y = A[1] + (B[1] - A[1]) * q;
+        ctx.globalAlpha = al * (1 - i / 6) * (u <= 1 ? 1 : 0);
+        ctx.beginPath(); ctx.arc(x, y, 2.6 - i * 0.3, 0, 6.2832); ctx.fillStyle = i ? col : '#ffffff'; ctx.fill();
+      }
+    }
+    ctx.globalAlpha = al;
+    // the neurons: dim; lit (with a glow behind and a little swell) while flashing; the wrong one shakes red, the right
+    // one it should have been blinks
+    for (let k = 0; k < MG_N; k++) {
+      const [x, y] = P[k];
+      let lit = 0, kind = null;
+      for (const f of m.flash) if (f.n === k) { const a = G.t - f.t; if (a >= 0 && a < f.dur) { const v = f.kind === 'right' ? (Math.floor(a * 6) % 2 ? 0 : 1) : 1; if (v >= lit) { lit = v; kind = f.kind; } } }
+      const sw = lit ? 1.08 : 1, S = MG_S * sw, sh = kind === 'wrong' ? Math.sin(G.t * 60) * 1.6 : 0;
+      if (lit) {
+        const g = ctx.createRadialGradient(x, y, 2, x, y, 38);
+        const c = kind === 'wrong' ? '255,60,70' : hexRGB(MG_COL[k]);
+        g.addColorStop(0, `rgba(${c},0.75)`); g.addColorStop(1, `rgba(${c},0)`);
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 38, 0, 6.2832); ctx.fill();
+      }
+      const nm = (lit ? 'mem_n' : 'mem_d') + k, s = M.sprites[nm];
+      if (s) { const kx = S / s.w; spr(nm, x + sh - s.c[0] * kx, y - s.c[1] * kx, 1, s.w * kx, s.h * kx); }
+      if (kind === 'right') { ctx.beginPath(); ctx.arc(x, y, 25, 0, 6.2832); ctx.lineWidth = 1.6; ctx.strokeStyle = '#ffffff'; ctx.stroke(); }
+      if (kind === 'wrong') {
+        ctx.lineWidth = 2.2; ctx.strokeStyle = '#ff3a4a'; ctx.beginPath();
+        ctx.moveTo(x - 7 + sh, y - 7); ctx.lineTo(x + 7 + sh, y + 7); ctx.moveTo(x + 7 + sh, y - 7); ctx.lineTo(x - 7 + sh, y + 7); ctx.stroke();
+      }
+    }
+    // in the middle: what to do now, and how far into the order you are
+    const L = m.seq.length;
+    if (m.st === 'show' || m.st === 'input' || m.st === 'ok' || m.st === 'bad') {
+      const t = m.st === 'show' ? '잘 보세요' : m.st === 'input' ? '따라 누르세요' : m.st === 'ok' ? `좋아요! +${m.okPts}` : m.why;
+      const col = m.st === 'ok' ? '#ffe68a' : m.st === 'bad' ? '#ff9aa4' : '#ffffff';
+      label(t, cx, MG_CY - 4, 8.5, 'center', al, col);
+      ctx.globalAlpha = al;
+      for (let i = 0; i < L; i++) {
+        const dx = cx + (i - (L - 1) / 2) * 6.5, on = m.st === 'input' ? i < m.k : m.st === 'ok';
+        ctx.beginPath(); ctx.arc(dx, MG_CY + 8, 2.1, 0, 6.2832); ctx.fillStyle = on ? '#ffe68a' : 'rgba(255,255,255,0.22)'; ctx.fill();
+        ctx.lineWidth = 0.6; ctx.strokeStyle = '#1a0a14'; ctx.stroke();
+      }
+    }
+    // the rounds: five dots (gold right, red wrong, the one on now ringed)
+    for (let i = 0; i < MG_ROUNDS; i++) {
+      const r = m.res[i], x = 20 + i * 9, y = 44;
+      ctx.globalAlpha = al;
+      ctx.beginPath(); ctx.arc(x, y, 3.2, 0, 6.2832); ctx.fillStyle = r === 'ok' ? '#ffd23a' : r === 'bad' ? '#ff5a6a' : 'rgba(255,255,255,0.18)'; ctx.fill();
+      ctx.lineWidth = i === m.round && m.st !== 'done' ? 1.3 : 0.8; ctx.strokeStyle = i === m.round && m.st !== 'done' ? '#ffffff' : '#1a0a14'; ctx.stroke();
+    }
+    label(`${Math.min(m.round + 1, MG_ROUNDS)}/${MG_ROUNDS} 라운드 · ${L}개`, 20 + MG_ROUNDS * 9, 44.3, 6.5, 'left', al, '#e8dcff');
+    ctx.globalAlpha = al;
+    if (m.st === 'intro') {
+      const u = G.t - m.stT, a = Math.min(1, u / 0.3) * Math.max(0, Math.min(1, (MG_INTRO - u) / 0.3));
+      ctx.globalAlpha = al * a * 0.8; rrect(cx - 118, 78, 236, 54, 8); ctx.fillStyle = '#120a1e'; ctx.fill(); ctx.globalAlpha = al;
+      label('기억 시냅스! 5라운드', cx, 92, 15, 'center', a, '#e8d4ff');
+      label('뉴런이 빛나는 순서를 잘 보고', cx, 110, 7.5, 'center', a, '#ffffff');
+      label('똑같은 순서로 눌러요 (맞힐수록 하나씩 길어져요)', cx, 121, 7.5, 'center', a, '#ffffff');
+    }
+    if (m.st === 'done') {
+      const v = G.t - m.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (MG_END - v) / 0.35));
+      const ok = m.res.filter((r) => r === 'ok').length;
+      ctx.globalAlpha = a * 0.82; rrect(cx - 110, 76, 220, 60, 8); ctx.fillStyle = '#120a1e'; ctx.fill(); ctx.globalAlpha = 1;
+      label(`${ok}/${MG_ROUNDS} 라운드 성공${ok ? '!' : ''}`, cx, 92, 14, 'center', a, ok ? '#ffe68a' : '#ffd0dc');
+      label(`가장 길게 맞힌 순서 ${m.best || 0}개`, cx, 111, 7.5, 'center', a, '#ffffff');
+      label(`+${m.gain.toLocaleString('en-US')}점`, cx, 125, 8.5, 'center', a, '#ffe68a');
+    }
+    ctx.globalAlpha = 1;
+  }
+  const hexRGB = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)).join(',');
+
   // ---------------------------------------------------------------- stage 2: under water
   // Holding (either button, anywhere on the screen, the up key) swims up; let go and you sink slowly; you can rest on
   // the bottom; the surface stops you. Things are in the water at every height: columns from the bottom and paper hung
@@ -2022,6 +2395,8 @@
     if (G.rh) stepRhythm(dt);
     if (G.orb) stepOrbit(dt);
     if (G.bb) stepBaseball(dt);
+    if (G.wm) stepWhack();
+    if (G.mem) stepMemory();
     if (G.cut) stepCut(dt);
     else if (!busy() && G.station >= 0 && COURSE[G.station][5] === STAGE2 - 1) cutCheck();
     G.nudge = Math.max(0, G.nudge - dt * 30);
@@ -2114,7 +2489,8 @@
         else if (!S2_L.has(th)) G.wPen = 0;
       }
       if (!themeFiles(th).every((f) => bmp[f])) { G.missing = (G.missing || 0) + 1; (G.missList = G.missList || []).push(th); }   // (tests: a look not ready on arrival)
-      if (arrived) { if (!busy()) G.banner = G.t; setLabel(s.st, s.lap); if (s.st[0] === 'ra' && !busy()) startRhythm(); if (s.st[0] === 'vertebral' && !busy()) startOrbit(); if (s.st[0] === 'jejunum' && !busy()) startBaseball(); }
+      if (arrived) { if (!busy()) G.banner = G.t; setLabel(s.st, s.lap); if (s.st[0] === 'ra' && !busy()) startRhythm(); if (s.st[0] === 'vertebral' && !busy()) startOrbit(); if (s.st[0] === 'jejunum' && !busy()) startBaseball();
+        if (s.st[0] === 'spleen' && !busy()) startWhack(); if (s.st[0] === 'hippocampus' && !busy()) startMemory(); }
       manageThemes(); G.memT = G.t;
     }
     G.fade = Math.min(1, G.fade + dt / 0.7);
@@ -2665,9 +3041,10 @@
     label(text, cx, cy + 0.4, fit, 'center', 1, '#ffffff');
   }
   // the mini-games on the progress bar: where in the lap each comes (the start of its place), and its mark: the rhythm
-  // stage a pink disc with a note, the orbit stage a violet disc with a little orbit, baseball a ball. More games: add them here.
+  // stage a pink disc with a note, the orbit stage a violet disc with a little orbit, baseball a ball, the germ game
+  // (v40) a germ, the memory game a neuron. More games: add them here.
   const BAR_W = 160;
-  const MINI_MARKS = [['ra', 'rh'], ['vertebral', 'orb'], ['jejunum', 'bb']].map(([id, kind]) => { const i = COURSE.findIndex((st) => st[0] === id); return { kind, i, lx: STARTS[i] }; });
+  const MINI_MARKS = [['spleen', 'wm'], ['ra', 'rh'], ['vertebral', 'orb'], ['hippocampus', 'mem'], ['jejunum', 'bb']].map(([id, kind]) => { const i = COURSE.findIndex((st) => st[0] === id); return { kind, i, lx: STARTS[i] }; });
   function miniMark(kind, x, y, alpha) {
     ctx.globalAlpha = alpha * GA;
     ctx.beginPath(); ctx.arc(x, y, 4.6, 0, 6.29); ctx.fillStyle = '#1a0a14'; ctx.fill();
@@ -2689,6 +3066,26 @@
         ctx.stroke();
       }
       ctx.restore();
+      ctx.globalAlpha = GA; return;
+    }
+    if (kind === 'wm') {                                    // a purple germ with little spikes and two eyes
+      ctx.beginPath();
+      for (let k = 0; k < 16; k++) { const a = k * Math.PI / 8, r = k % 2 ? 3.0 : 3.9; ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); }
+      ctx.closePath(); ctx.fillStyle = '#9a5ad0'; ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y, 2.7, 0, 6.29); ctx.fillStyle = '#b07ae0'; ctx.fill();
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(x - 1.05, y - 0.3, 0.75, 0, 6.29); ctx.arc(x + 1.05, y - 0.3, 0.75, 0, 6.29); ctx.fill();
+      ctx.fillStyle = '#1a0a14'; ctx.beginPath(); ctx.arc(x - 0.95, y - 0.2, 0.38, 0, 6.29); ctx.arc(x + 1.15, y - 0.2, 0.38, 0, 6.29); ctx.fill();
+      ctx.globalAlpha = GA; return;
+    }
+    if (kind === 'mem') {                                   // a teal disc with a little neuron: a round body, forking branches
+      ctx.beginPath(); ctx.arc(x, y, 3.7, 0, 6.29); ctx.fillStyle = '#2ab0a0'; ctx.fill();
+      ctx.strokeStyle = '#ffffff'; ctx.fillStyle = '#ffffff'; ctx.lineWidth = 0.55; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(x, y, 1.2, 0, 6.29); ctx.fill();
+      ctx.beginPath();
+      for (let k = 0; k < 6; k++) { const a = -Math.PI / 2 + k * Math.PI / 3, c = Math.cos(a), sn = Math.sin(a);
+        ctx.moveTo(x + c * 1.1, y + sn * 1.1); ctx.lineTo(x + c * 2.75, y + sn * 2.75);
+        ctx.moveTo(x + c * 2.1, y + sn * 2.1); ctx.lineTo(x + Math.cos(a + 0.55) * 2.85, y + Math.sin(a + 0.55) * 2.85); }
+      ctx.stroke();
       ctx.globalAlpha = GA; return;
     }
     ctx.beginPath(); ctx.arc(x, y, 3.7, 0, 6.29); ctx.fillStyle = kind === 'rh' ? '#ff5a8a' : '#9a6cff'; ctx.fill();
@@ -2826,7 +3223,7 @@
     device();
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, GW, GH);
     if (PROF) {
-      for (const [k, f] of [['scene', drawScene], ['lids', drawLids], ['rhythm', drawRhythm], ['orbit', drawOrbit], ['baseball', drawBaseball], ['cut', drawCut], ['hud', drawHud]]) {
+      for (const [k, f] of [['scene', drawScene], ['lids', drawLids], ['rhythm', drawRhythm], ['orbit', drawOrbit], ['baseball', drawBaseball], ['whack', drawWhack], ['memory', drawMemory], ['cut', drawCut], ['hud', drawHud]]) {
         const t0 = performance.now(); f(); PROF[k] = (PROF[k] || 0) + performance.now() - t0;
       }
       PROF.n = (PROF.n || 0) + 1;
@@ -2836,6 +3233,8 @@
       drawRhythm();
       drawOrbit();
       drawBaseball();
+      drawWhack();
+      drawMemory();
       if (G.cut || G.cutTail) drawCut();
       drawHud();
     }
@@ -2935,7 +3334,7 @@
     window.__settle = async () => { while (Object.keys(pending).length) await Promise.all(Object.values(pending)).catch(() => {}); render(); return Object.keys(bmp).length; };
     window.__state = () => ({ mode: G.mode, t: +G.t.toFixed(2), x: Math.round(G.x), v: +G.v.toFixed(1), hp: +G.hp.toFixed(1), score: G.score, eaten: G.eaten, hits: G.hits,
       station: COURSE[Math.max(0, G.station)][0], seg: G.station, theme: G.theme, lid: +lidAmount().toFixed(2), lastHit: G.lastHit, rot, lap: stationAt(G.x).lap, y: +G.y.toFixed(1), slide: G.slide, obs: G.obs.length, items: G.items.length,
-      NW, RS: +RS.toFixed(3), GW, GH, rhSong: G.rh ? G.rh.song.id : null, orbSong: G.orb ? OB.song.id : null, rotation: { ...ROT }, o2n: G.o2n, boost: +G.boost.toFixed(2), boostHeld: +G.boostHeld.toFixed(2), boosts: G.boosts, decoded: Object.keys(bmp).length, atp: G.atp || 0, orbits: G.orbits || 0, orb: G.orb ? G.orb.st : null, bb: G.bb ? G.bb.st : null, games: G.games || 0, huge: G.obs.filter((o) => o.kind === 'huge').length });
+      NW, RS: +RS.toFixed(3), GW, GH, rhSong: G.rh ? G.rh.song.id : null, orbSong: G.orb ? OB.song.id : null, rotation: { ...ROT }, o2n: G.o2n, boost: +G.boost.toFixed(2), boostHeld: +G.boostHeld.toFixed(2), boosts: G.boosts, decoded: Object.keys(bmp).length, atp: G.atp || 0, orbits: G.orbits || 0, orb: G.orb ? G.orb.st : null, bb: G.bb ? G.bb.st : null, wm: G.wm ? G.wm.st : null, mem: G.mem ? G.mem.st : null, games: G.games || 0, huge: G.obs.filter((o) => o.kind === 'huge').length });
     window.__G = G;
     window.__mem = () => { let px = 0; const files = {}; for (const [f, b] of Object.entries(bmp)) { const n = b.width * b.height; px += n; files[f] = +(n * 4 / 1e6).toFixed(1); } return { MB: +(px * 4 / 1e6).toFixed(1), files }; };
     window.__prof = PROF;
@@ -2952,6 +3351,9 @@
     window.__bb = () => { const b = G.bb; if (!b) return null;
       return { st: b.st, k: b.k, res: b.res.slice(), hr: b.hr, gain: b.gain, cur: b.cur.slice(), p: b.p && { type: b.p.type.name, tx: +b.p.tx.toFixed(1), ty: +b.p.ty.toFixed(1), rel: +(b.p.rel - G.t).toFixed(3), arr: +(b.p.arr - G.t).toFixed(3), dt: b.p.dt, d: b.p.d, res: b.p.res } }; };
     window.__bbSwing = () => bbSwing();
+    window.__wm = () => { const w = G.wm; if (!w) return null; return { st: w.st, u: w.st === 'play' ? +(G.t - w.t0).toFixed(2) : null, caught: w.caught, missed: w.missed, oops: w.oops, gain: w.gain,
+      moles: w.moles.map((m) => { const p = wmPlace(m), s = M.sprites[wmName(m)]; return { h: m.h, kind: m.kind, good: m.good, st: m.st, q: +p.q.toFixed(2), x: +p.x.toFixed(1), y: +(p.y - s.foot[1] * p.k * 0.55).toFixed(1) }; }) }; };
+    window.__memg = () => { const m = G.mem; if (!m) return null; return { st: m.st, seq: m.seq.slice(), k: m.k, round: m.round, res: m.res.slice(), gain: m.gain, best: m.best || 0, at: [0, 1, 2, 3, 4].map(memAt) }; };
     window.__bbTypes = BB_TYPES; window.__bbBallAt = (t) => bbBallAt(t);
     window.__bbAim = (x, y) => { if (G.bb) G.bb.cur = [x, y]; };
     window.__rh = () => { const r = G.rh; if (!r) return null; const t = rtime();

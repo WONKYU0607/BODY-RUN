@@ -136,7 +136,32 @@ window.BodySound = (() => {
       burst(c, o, t + 0.012, 'bandpass', 700, 380, 2.2, 0.12, 0.22, 0.004);
     },
     bbOut: (c, o, t) => { [67, 63, 60].forEach((n, i) => tone(c, o, t + i * 0.16, 'triangle', NOTE(n), null, 0.24, 0.18, 0.01)); },
+    // the germ game (v40): a germ popping out (a small wet pop), a bad one whacked (a soft punchy thump with a squelch
+    // and a bright tick on top), the good one tapped by mistake (a sad falling boing)
+    wmUp: (c, o, t) => { const w = water(c, o, 2400); tone(c, w, t, 'sine', 330, 760, 0.07, 0.11, 0.003, 0.05); },
+    wmHit: (c, o, t) => {
+      tone(c, o, t, 'sine', 240, 70, 0.13, 0.55, 0.002, 0.11);
+      burst(c, o, t, 'bandpass', 1900, 520, 1.6, 0.09, 0.38, 0.001);
+      tone(c, o, t + 0.004, 'triangle', NOTE(91), null, 0.05, 0.08, 0.002);
+    },
+    wmOops: (c, o, t) => {
+      tone(c, o, t, 'triangle', 620, 230, 0.32, 0.22, 0.004, 0.3);
+      tone(c, o, t, 'square', 310, 115, 0.26, 0.05, 0.004, 0.24);
+    },
+    // the memory game (v40): each neuron its own bell (a pentatonic scale: C D E G A, so any order sounds fine), a round
+    // right (the bells running up), wrong (two low buzzes)
+    mem0: (c, o, t) => bell(c, o, t, 72), mem1: (c, o, t) => bell(c, o, t, 74), mem2: (c, o, t) => bell(c, o, t, 76),
+    mem3: (c, o, t) => bell(c, o, t, 79), mem4: (c, o, t) => bell(c, o, t, 81),
+    memOk: (c, o, t) => { [72, 76, 79, 84].forEach((n, i) => bell(c, o, t + i * 0.07, n, 0.6)); },
+    memBad: (c, o, t) => { for (const d of [0, 0.16]) { tone(c, o, t + d, 'square', 150, 132, 0.12, 0.07, 0.004); tone(c, o, t + d, 'sine', 75, 70, 0.12, 0.25, 0.004); } },
   };
+  // a soft bell: the note, a quieter octave above and a faint inharmonic overtone, ringing out
+  function bell(c, out, t, n, k = 1) {
+    const f = NOTE(n);
+    tone(c, out, t, 'sine', f, null, 0.7, 0.26 * k, 0.003);
+    tone(c, out, t, 'triangle', f * 2, null, 0.35, 0.07 * k, 0.003);
+    tone(c, out, t, 'sine', f * 2.76, null, 0.18, 0.04 * k, 0.002);
+  }
 
   // ---------------------------------------------------------------- the live context and its buses
   function unlock() {

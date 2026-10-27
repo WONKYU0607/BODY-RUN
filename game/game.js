@@ -24,57 +24,58 @@
   const TOPY = CEIL + 10;                       // a safety stop only: a perfect triple jump tops out at about 104 (head at y 27)
   const MAXY = GY - TOPY - PH;                  // ... as a height of the feet above the floor
   const FLOAT_BOTTOM = GY - 15.5, HANG_BOTTOM = GY - 15.5;     // under it a sliding player passes, a running one does not
-  // the course: places (id, Korean name, English name, [look, length in units] ...). Every place has a look of its own
+  // the course: places (id, Korean name, English name, [look, length in units] ...). v42: each place about 30 s on the
+  // first lap (work/placelen.py: the speed there then, less in the water; 13x the old lengths). Every place has a look of its own
   // (the pancreas and the efferent arteriole pass through two); its name shows once, on arrival. Stage 1 is the body;
   // at the anus a cut scene takes you out into the toilet: stage 2, down the drains (after its last place, for now, the
   // body again)
   const PLACES = [
-    ['esophagus', '식도', 'Esophagus', ['eso', 1500]], ['stomach', '위', 'Stomach', ['stomach', 1900]],
-    ['duodenum', '십이지장', 'Duodenum', ['duodenum', 2200]],
-    ['liver', '간', 'Liver', ['liver', 2100]],
-    ['gallbladder', '담낭', 'Gallbladder', ['gallbladder', 1700]],
-    ['pancreas', '췌장', 'Pancreas', ['pancreas', 1700], ['islet', 800]],
-    ['spleen', '비장', 'Spleen', ['spleen', 1800]],
-    ['capillary', '모세혈관', 'Capillary', ['adrenal', 800]],
-    ['renalArt', '신동맥', 'Renal artery', ['renalart', 900]], ['glomerulus', '사구체', 'Glomerulus', ['glomerulus', 800]],
-    ['efferent', '수출세동맥', 'Efferent arteriole', ['efferent', 700], ['kidney', 800]],
-    ['vein', '정맥', 'Vein', ['ivc', 1500]],
-    ['ra', '우심방', 'Right atrium', ['atrium', 900]], ['rv', '우심실', 'Right ventricle', ['ventricle', 1000]],
-    ['pulmArt', '폐동맥', 'Pulmonary artery', ['pulmart', 1100]],
-    ['lung', '폐', 'Lung', ['bronchiole', 900]], ['alveoli', '폐포', 'Alveoli', ['lung', 900]],
-    ['pulmVein', '폐정맥', 'Pulmonary vein', ['pulmvein', 1000]],
-    ['la', '좌심방', 'Left atrium', ['latrium', 900]], ['lv', '좌심실', 'Left ventricle', ['lventricle', 1000]],
-    ['myoCap', '심근 모세혈관', 'Myocardial capillary', ['myocard', 1700]],
-    ['aorta', '대동맥', 'Aorta', ['artery', 1300]], ['carotid', '총경동맥', 'Common carotid artery', ['carotid', 1000]],
-    ['thyroid', '갑상선', 'Thyroid', ['thyroid', 800]], ['vertebral', '척추동맥', 'Vertebral artery', ['vertebral', 1100]],
+    ['esophagus', '식도', 'Esophagus', ['eso', 5350]], ['stomach', '위', 'Stomach', ['stomach', 5900]],
+    ['duodenum', '십이지장', 'Duodenum', ['duodenum', 6450]],
+    ['liver', '간', 'Liver', ['liver', 7000]],
+    ['gallbladder', '담낭', 'Gallbladder', ['gallbladder', 7550]],
+    ['pancreas', '췌장', 'Pancreas', ['pancreas', 5500], ['islet', 2600]],
+    ['spleen', '비장', 'Spleen', ['spleen', 8600]],
+    ['capillary', '모세혈관', 'Capillary', ['adrenal', 9150]],
+    ['renalArt', '신동맥', 'Renal artery', ['renalart', 9700]], ['glomerulus', '사구체', 'Glomerulus', ['glomerulus', 10250]],
+    ['efferent', '수출세동맥', 'Efferent arteriole', ['efferent', 5050], ['kidney', 5750]],
+    ['vein', '정맥', 'Vein', ['ivc', 11300]],
+    ['ra', '우심방', 'Right atrium', ['atrium', 14150]], ['rv', '우심실', 'Right ventricle', ['ventricle', 12400]],
+    ['pulmArt', '폐동맥', 'Pulmonary artery', ['pulmart', 12950]],
+    ['lung', '폐', 'Lung', ['bronchiole', 13450]], ['alveoli', '폐포', 'Alveoli', ['lung', 14000]],
+    ['pulmVein', '폐정맥', 'Pulmonary vein', ['pulmvein', 14550]],
+    ['la', '좌심방', 'Left atrium', ['latrium', 15100]], ['lv', '좌심실', 'Left ventricle', ['lventricle', 15650]],
+    ['myoCap', '심근 모세혈관', 'Myocardial capillary', ['myocard', 16150]],
+    ['aorta', '대동맥', 'Aorta', ['artery', 16700]], ['carotid', '총경동맥', 'Common carotid artery', ['carotid', 17250]],
+    ['thyroid', '갑상선', 'Thyroid', ['thyroid', 17800]], ['vertebral', '척추동맥', 'Vertebral artery', ['vertebral', 18350]],
     // the brain from below: in by the medulla, up round the back, the side and the top to the front, out from the middle
-    ['medulla', '연수', 'Medulla oblongata', ['medulla', 2000]], ['cerebellum', '소뇌', 'Cerebellum', ['purkinje', 1100]],
-    ['occipital', '후두엽', 'Occipital lobe', ['occipital', 1000]], ['temporal', '측두엽', 'Temporal lobe', ['temporal', 1000]],
-    ['hippocampus', '해마', 'Hippocampus', ['hippo', 1100]], ['parietal', '두정엽', 'Parietal lobe', ['parietal', 1000]],
-    ['frontal', '전두엽', 'Frontal lobe', ['arach', 2100]], ['cortex', '대뇌피질', 'Cerebral cortex', ['pyramidal', 1100]],
-    ['callosum', '뇌량', 'Corpus callosum', ['fibres', 2000]],
+    ['medulla', '연수', 'Medulla oblongata', ['medulla', 18850]], ['cerebellum', '소뇌', 'Cerebellum', ['purkinje', 19400]],
+    ['occipital', '후두엽', 'Occipital lobe', ['occipital', 19950]], ['temporal', '측두엽', 'Temporal lobe', ['temporal', 20500]],
+    ['hippocampus', '해마', 'Hippocampus', ['hippo', 21050]], ['parietal', '두정엽', 'Parietal lobe', ['parietal', 21550]],
+    ['frontal', '전두엽', 'Frontal lobe', ['arach', 22100]], ['cortex', '대뇌피질', 'Cerebral cortex', ['pyramidal', 22650]],
+    ['callosum', '뇌량', 'Corpus callosum', ['fibres', 23200]],
     // out along the optic nerve into the back of the eye, then through it to the front (no blood in the clear parts)
-    ['opticNerve', '시신경', 'Optic nerve', ['opticnerve', 900]], ['retina', '망막', 'Retina', ['retina', 1200]],
-    ['vitreous', '유리체', 'Vitreous body', ['vitreous', 1200]], ['lens', '수정체', 'Lens', ['lens', 1100]],
-    ['pupil', '눈동자', 'Pupil', ['iris', 1000]], ['cornea', '각막', 'Cornea', ['cornea', 1300]],      // the eye blinks here
-    ['jugular', '경정맥', 'Jugular vein', ['vein', 1300]],
-    ['sma', '상장간막동맥', 'Superior mesenteric artery', ['sma', 2400]],
-    ['jejunalWall', '공장벽', 'Jejunal wall', ['villus', 800]], ['jejunum', '공장', 'Jejunum', ['gut', 2000]], ['ileum', '회장', 'Ileum', ['ileum', 2000]],
-    ['cecum', '맹장', 'Cecum', ['cecum', 1100]], ['colon', '대장', 'Large intestine', ['colon', 5700]],
-    ['rectum', '직장', 'Rectum', ['rectum', 1100]], ['anus', '항문', 'Anus', ['anus', 900]],
+    ['opticNerve', '시신경', 'Optic nerve', ['opticnerve', 23750]], ['retina', '망막', 'Retina', ['retina', 24250]],
+    ['vitreous', '유리체', 'Vitreous body', ['vitreous', 24800]], ['lens', '수정체', 'Lens', ['lens', 25350]],
+    ['pupil', '눈동자', 'Pupil', ['iris', 25900]], ['cornea', '각막', 'Cornea', ['cornea', 26450]],      // the eye blinks here
+    ['jugular', '경정맥', 'Jugular vein', ['vein', 26900]],
+    ['sma', '상장간막동맥', 'Superior mesenteric artery', ['sma', 27000]],
+    ['jejunalWall', '공장벽', 'Jejunal wall', ['villus', 27000]], ['jejunum', '공장', 'Jejunum', ['gut', 27000]], ['ileum', '회장', 'Ileum', ['ileum', 27000]],
+    ['cecum', '맹장', 'Cecum', ['cecum', 27000]], ['colon', '대장', 'Large intestine', ['colon', 27000]],
+    ['rectum', '직장', 'Rectum', ['rectum', 27000]], ['anus', '항문', 'Anus', ['anus', 27000]],
   ];
   const STAGE2 = PLACES.length;                     // the first place of stage 2
-  PLACES.push(['toiletBowl', '변기 물속', 'Toilet bowl', ['toilet', 1500]],
+  PLACES.push(['toiletBowl', '변기 물속', 'Toilet bowl', ['toilet', 18900]],
     // down the drains, the way the water really goes: out of the building, the sewers, the treatment works, the river
-    ['trap', 'S자 트랩', 'S-trap', ['trap', 1200]], ['soilStack', '오수 수직관', 'Soil stack', ['stack', 1200]],
-    ['drainPipe', '집 배수관', 'Drain pipe', ['drain', 1200]], ['septic', '정화조', 'Septic tank', ['septic', 1200]],
-    ['chamber', '오수받이', 'Inspection chamber', ['chamber', 1200]], ['sewerPipe', '하수관', 'Sewer pipe', ['sewer', 1200]],
-    ['manhole', '맨홀 아래', 'Manhole', ['manhole', 1200]], ['trunkSewer', '하수 간선', 'Trunk sewer', ['trunk', 1200]],
-    ['combined', '빗물 합류', 'Combined sewer', ['combined', 1200]], ['interceptor', '차집관로', 'Interceptor', ['interceptor', 1200]],
-    ['pumpStation', '중계펌프장', 'Pumping station', ['pump', 1200]], ['barScreen', '유입 스크린', 'Bar screen', ['screen', 1200]],
-    ['grit', '침사지', 'Grit chamber', ['grit', 1200]], ['clarifier1', '1차 침전지', 'Primary clarifier', ['clarifier1', 1200]],
-    ['aeration', '포기조', 'Aeration tank', ['aeration', 1200]], ['clarifier2', '2차 침전지', 'Secondary clarifier', ['clarifier2', 1200]],
-    ['uv', '소독조', 'UV disinfection', ['uv', 1200]], ['outfall', '방류구', 'Outfall', ['outfall', 1200]]);
+    ['trap', 'S자 트랩', 'S-trap', ['trap', 18900]], ['soilStack', '오수 수직관', 'Soil stack', ['stack', 18900]],
+    ['drainPipe', '집 배수관', 'Drain pipe', ['drain', 18900]], ['septic', '정화조', 'Septic tank', ['septic', 18900]],
+    ['chamber', '오수받이', 'Inspection chamber', ['chamber', 18900]], ['sewerPipe', '하수관', 'Sewer pipe', ['sewer', 18900]],
+    ['manhole', '맨홀 아래', 'Manhole', ['manhole', 18900]], ['trunkSewer', '하수 간선', 'Trunk sewer', ['trunk', 18900]],
+    ['combined', '빗물 합류', 'Combined sewer', ['combined', 18900]], ['interceptor', '차집관로', 'Interceptor', ['interceptor', 18900]],
+    ['pumpStation', '중계펌프장', 'Pumping station', ['pump', 18900]], ['barScreen', '유입 스크린', 'Bar screen', ['screen', 18900]],
+    ['grit', '침사지', 'Grit chamber', ['grit', 18900]], ['clarifier1', '1차 침전지', 'Primary clarifier', ['clarifier1', 18900]],
+    ['aeration', '포기조', 'Aeration tank', ['aeration', 18900]], ['clarifier2', '2차 침전지', 'Secondary clarifier', ['clarifier2', 18900]],
+    ['uv', '소독조', 'UV disinfection', ['uv', 18900]], ['outfall', '방류구', 'Outfall', ['outfall', 18900]]);
   // the course as stretches of one look: id, Korean name, English name, look, length, place number
   const COURSE = [];
   PLACES.forEach((p, k) => { for (const [look, len] of p.slice(3)) COURSE.push([p[0], p[1], p[2], look, len, k]); });
@@ -154,6 +155,10 @@
     const dc = ((S2_X - s.lx) % LAP + LAP) % LAP;            // the flush cut scene's pictures, near the end of the body
     if (G.cut || G.cutTail || dc < Math.max(2500, G.v * 8)) files.add('cut_flush.webp');
     if (STAGES.bb && !CAPTURE) { if (nearBB) { SND.fetchSong(STAGES.bb).catch(() => {}); if (SND.ctx) SND.prepare(STAGES.bb).catch(() => {}); } else SND.release(STAGES.bb); }
+    for (const [k, on] of [['wm', !!G.wm || near('spleen')], ['mem', !!G.mem || near('hippocampus')]]) {     // (v42) the germ and memory games' music
+      if (!STAGES[k] || CAPTURE) continue;
+      if (on) { SND.fetchSong(STAGES[k]).catch(() => {}); if (SND.ctx) SND.prepare(STAGES[k]).catch(() => {}); } else SND.release(STAGES[k]);
+    }
     for (const f of files) decode(f).catch(() => {});
     if (!PRELOAD) for (const f of Object.keys(bmp)) if (!files.has(f) && /^(th_|fx_fire|bb|bat_|cut_|wm|mem)/.test(f)) release(f);
     manageSongs();
@@ -429,7 +434,9 @@
     while (G.genX < horizon) {
       { const lx = mod(G.genX, LAP), q0 = S2_X - CUT_FACE - Math.max(90, curSpeed() * CUT_TJ * 1.2) - CUT_CLEAR;   // the cut scene's stretch
         const q1 = S2_X + Math.max(CUT_AFTER, G.v * 1.5);            // (and after it, time to swim up from the bottom)
-        if (lx > q0 && lx < q1) { G.genX += q1 - lx; continue; } }
+        // (v42: at least a unit on: far into a long lap the step past it can be smaller than the float's precision at
+        // these x values, and genX would not move: the loop went on for ever, the game hung)
+        if (lx > q0 && lx < q1) { G.genX += Math.max(1, q1 - lx); continue; } }
       const theme = themeAt(G.genX), th = M.themes[theme], fam = hzFam(theme);
       const coin = th.coin, special = th.special;
       // how hard: from the speed (0 at the start .. 1 at 460/s, about 5 minutes in), then a little more up to 900
@@ -1905,8 +1912,8 @@
   // The spleen's red pulp as a board seen from the front, nine openings of its sinuses in three rows (the picture and
   // where the openings are: minigames.py). Germs pop out of them for a moment: tap the bad ones (a purple E. coli, a
   // golden staph bunch, a red spiral) before they go down again, +50 each; the green lactobacillus is a good one:
-  // tapping it costs 100. 45 s (v41; was 25), harder and harder as it goes. The run stands still; its
-  // music goes on.
+  // tapping it costs 100. 45 s (v41; was 25), harder and harder as it goes. The run stands still; the
+  // game has its own song (v42).
   const WMF = M.wm || { holes: [] };
   const WM_T = 45, WM_INTRO = 3.2, WM_END = 2.4;          // (v41: the intro longer, it shows the lactobacillus too)
   const WM_RISE = 0.1, WM_SINK = 0.12, WM_SQUASH = 0.11, WM_HITSINK = 0.24;
@@ -1925,10 +1932,20 @@
     holdBoost();
     G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
     G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
-    G.wm = { st: 'intro', stT: G.t, inT: G.t, t0: 0, next: 0, moles: [], free: WMF.holes.map(() => -9), caught: 0, missed: 0, oops: 0, gain: 0, fx: [], pops: [] };
+    G.wm = { st: 'intro', stT: G.t, inT: G.t, t0: 0, next: 0, moles: [], free: WMF.holes.map(() => -9), caught: 0, missed: 0, oops: 0, gain: 0, fx: [], pops: [], music: false };
     G.slideHeld = false; held.clear(); pressed.jump = false;
+    wmMusic();
+  }
+  // its song (v42, stages.js 'wm'): once through from the intro, its sections laid on the game's (the play's 0, 9.6, 19.2,
+  // 32 s, the end hit at 45); the running music goes down under it. Not decoded yet: tried again each step, started as
+  // far in as the game is (so it stays in time)
+  function wmMusic() {
+    const w = G.wm; if (!w || w.music || CAPTURE || !STAGES.wm || !SND.live()) return;
+    if (!SND.ready(STAGES.wm)) { SND.prepare(STAGES.wm).catch(() => {}); return; }
+    if (SND.playSong(STAGES.wm, SND.ctx.currentTime - (G.t - w.inT))) { w.music = true; SND.ambience(false); }
   }
   function endWhack() {
+    if (G.wm && G.wm.music) { SND.stopSong(0.8); SND.ambience(true); }
     G.wm = null; G.games = (G.games || 0) + 1; resumeBoost();
     G.genX = Math.max(G.genX, G.x + NW * 0.8);
     G.banner = G.t;
@@ -1963,6 +1980,7 @@
   }
   function stepWhack() {
     const w = G.wm;
+    if (!w.music && w.st !== 'done') wmMusic();
     if (w.st === 'intro') { if (G.t - w.stT > WM_INTRO) { w.st = 'play'; w.stT = G.t; w.t0 = G.t; w.next = G.t + 0.3; } return; }
     if (w.st === 'play') {
       const u = G.t - w.t0, f = u / WM_T;
@@ -2108,18 +2126,18 @@
 
   // ---------------------------------------------------------------- the memory game (in the hippocampus) (v40)
   // Five neurons in a ring light up one after another, each with its own bell; tap them in the same order. Five
-  // rounds: the first is three long, and each round you get right adds one more to the end of the same order. A wrong
+  // rounds: the first is five long (v42; was three), and each round you get right adds one more to the end of the same order. A wrong
   // tap (or 5 s without one) shows the right one, and the next round is the same order again. A round right: 100 points
-  // for each neuron in it. The run stands still and its music fades, so the bells are clear.
-  const MG_N = 5, MG_ROUNDS = 5, MG_L0 = 3;
+  // for each neuron in it. The run stands still; its music gives way to a quiet loop of the game's own (v42) under the bells.
+  const MG_N = 5, MG_ROUNDS = 5, MG_L0 = 5;
   const MG_INTRO = 2.6, MG_END = 2.6, MG_LEAD = 0.5, MG_WAIT = 5, MG_OK = 1.0, MG_BAD = 1.6, MG_TAP = 0.3;
   const MG_R = 52, MG_CY = 110, MG_HIT = 28, MG_S = 50;   // the ring (its radius, middle), a tap's reach, a neuron's size
   const MG_COL = ['#ff5a80', '#ffb21e', '#3ad060', '#3a9aff', '#a464ff'];
   const memAt = (k) => { const a = -Math.PI / 2 + k * 2 * Math.PI / MG_N; return [NWf / 2 + Math.cos(a) * MG_R * 1.18, MG_CY + Math.sin(a) * MG_R]; };
-  // a neuron's light in the show, the gap after it (v41: quicker: 0.32 s at three long down to 0.24 at seven, 0.1 s off;
-  // v40 was 0.5 -> 0.36 and 0.17)
+  // a neuron's light in the show, the gap after it (v41: quicker: 0.32 s in the first round down to 0.24 in the fifth,
+  // 0.1 s off; v40 was 0.5 -> 0.36 and 0.17)
   const memStep = (L) => [Math.max(0.22, 0.32 - 0.02 * (L - MG_L0)), 0.1];
-  // the next neuron of the order: one that has not come up yet if there is one (so the first round's three are all
+  // the next neuron of the order: one that has not come up yet if there is one (so the first round's five are all
   // different and by five long every neuron has lit), never the one just before it
   function memNew(seq) {
     const last = seq[seq.length - 1], all = [...Array(MG_N).keys()].filter((n) => n !== last), fresh = all.filter((n) => !seq.includes(n));
@@ -2130,11 +2148,19 @@
     G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
     G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
     const seq = []; for (let i = 0; i < MG_L0; i++) memNew(seq);
-    G.mem = { st: 'intro', stT: G.t, inT: G.t, seq, round: 0, res: [], k: 0, shown: -1, lastTap: 0, flash: [], pulses: [], gain: 0, why: '' };
+    G.mem = { st: 'intro', stT: G.t, inT: G.t, seq, round: 0, res: [], k: 0, shown: -1, lastTap: 0, flash: [], pulses: [], gain: 0, why: '', music: false };
     G.slideHeld = false; held.clear(); pressed.jump = false;
     if (!CAPTURE && SND.live()) SND.ambience(false);
+    memMusic();
+  }
+  // its music (v42, stages.js 'mem'): a quiet loop under the bells, in when decoded (tried again each step)
+  function memMusic() {
+    const m = G.mem; if (!m || m.music || CAPTURE || !STAGES.mem || !SND.live()) return;
+    if (!SND.ready(STAGES.mem)) { SND.prepare(STAGES.mem).catch(() => {}); return; }
+    m.music = SND.playLoop(STAGES.mem, 1.0);
   }
   function endMemory() {
+    if (G.mem && G.mem.music) SND.stopLoop(0.8);
     G.mem = null; G.games = (G.games || 0) + 1; resumeBoost();
     if (!CAPTURE && SND.live()) SND.ambience(true);
     G.genX = Math.max(G.genX, G.x + NW * 0.8);
@@ -2144,6 +2170,7 @@
   function memShow() { const m = G.mem; m.st = 'show'; m.stT = G.t; m.shown = -1; m.k = 0; }
   function stepMemory() {
     const m = G.mem;
+    if (!m.music && m.st !== 'done') memMusic();
     if (m.st === 'intro' && G.t - m.stT > MG_INTRO) memShow();
     if (m.st === 'show') {
       const [on, gap] = memStep(m.seq.length), u = G.t - m.stT - MG_LEAD, i = Math.floor(u / (on + gap));

@@ -274,6 +274,8 @@ GameSongs.orb.forEach((f, i) => {
 });
 { const m = META.bgm || {}; out.bgm = { id: 'bgm', name: '몸속 물결', en: 'Inner Tide', file: 'assets/bgm.mp3', gain: m.gain ?? 0.5, lead: 0, loop: m.loop || [0.25, 57.85] }; }
 { const m = META.bb || {}; if (META.bb) out.bb = { id: 'bb', name: '몸속 야구장', en: 'Inner Ballpark', file: 'assets/bbmusic.mp3', gain: m.gain ?? 0.7, lead: 0, loop: m.loop || [0.25, 29.3409] }; }   // the baseball stage's loop
+{ const m = META.wm || {}; if (META.wm) out.wm = { id: 'wm', name: '세균 소탕 작전', en: 'Germ Smash', file: 'assets/wmmusic.mp3', gain: m.gain ?? 0.75, lead: 0.05 }; }   // the germ game's song, once through (v42, work/mgcut.py)
+{ const m = META.mem || {}; if (META.mem) out.mem = { id: 'mem', name: '시냅스 사색', en: 'Synapse Reverie', file: 'assets/memmusic.mp3', gain: m.gain ?? 0.43, lead: 0, loop: m.loop || [0.25, 42.9167] }; }   // the memory game's loop (v42)
 const js = '// made by work/mkstages.js from the game songs (chip/gamesongs.js): the rhythm maps and the orbit tiles, per song\nwindow.BodyStages = ' + JSON.stringify(out) + ';\n';
 if (process.argv.includes('--write')) { fs.writeFileSync('/home/claude/runner_hd/stages.js', js); console.log('wrote stages.js', js.length); }
 module.exports = { rhythmChart, orbitTiles, planOK };

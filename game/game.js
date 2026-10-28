@@ -3754,7 +3754,7 @@
   // the mini-games on the progress bar: where in the lap each comes (the start of its place), and its mark: the rhythm
   // stage a pink disc with a note, the orbit stage a violet disc with a little orbit, baseball a ball, the germ game
   // (v40) a germ, the memory game a neuron. More games: add them here.
-  const BAR_W = 160;
+  const BAR_W = 160, SCORE_Y = 21.4;                       // (v50: the score sits over the bar)
   const MINI_MARKS = [['spleen', 'wm'], ['ra', 'rh'], ['vertebral', 'orb'], ['hippocampus', 'mem'], ['jejunum', 'bb'], ['toiletBowl', 'sl'], ['manhole', 'pk']].map(([id, kind]) => { const i = COURSE.findIndex((st) => st[0] === id); return { kind, i, lx: STARTS[i] }; });
   function miniMark(kind, x, y, alpha) {
     ctx.globalAlpha = alpha * GA;
@@ -3870,14 +3870,15 @@
       spr('it_' + (M.themes[G.theme].coin || 'o2'), gx - 10, gy - 2.6, 1, 9.2, 9.2);     // the coin of this place
       if (!on) label(`${G.o2n}/${boostNeed()}`, gx + gw + 3, gy + gh / 2 + 0.2, 6, 'left', 1, '#cdeeff');
     }
-    // score
-    const s = G.score.toLocaleString('en-US');
-    const right = NW - 27;
-    ctx.font = '900 10px system-ui, -apple-system, "Noto Sans KR", sans-serif';
-    const tw = ctx.measureText(s).width;
-    spr('it_vitC', right - tw - 19.5, 4.5);
-    label(s, right, 11.6, 10, 'right');
-    label(`${G.distM.toLocaleString('en-US')}m`, right, 21.5, 6.5, 'right', 1, '#d8e8ff');          // (v49) how far
+    // (v50) the score: in the middle, over the progress bar (between the place's name and the bar's marks), as points
+    // with no coin by it (a coin there read as the coins you collect); how far, small, at its right
+    {
+      const s = PT(G.score), SC = 9.5, y = SCORE_Y;
+      label(s, NW / 2, y, SC, 'center');
+      ctx.font = `900 ${SC}px system-ui, -apple-system, "Noto Sans KR", sans-serif`;
+      const tw = ctx.measureText(s).width;
+      label(`${G.distM.toLocaleString('en-US')}m`, NW / 2 + tw / 2 + 4, y + 0.6, 6, 'left', 1, '#d8e8ff');
+    }
     if (SET.god) label(TR('디버그: 안 죽음', 'Debug: no death'), 16, 30, 6, 'left', 0.85, '#8af0ff');
     // pause
     rrect(NW - 20, 4.5, 14, 14, 3); ctx.fillStyle = '#1a0a14'; ctx.fill();

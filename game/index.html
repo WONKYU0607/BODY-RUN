@@ -14,9 +14,11 @@
   #ov { position: absolute; inset: 0; pointer-events: none; }
   .txt { color: #fff; font-weight: 900; paint-order: stroke; -webkit-text-stroke: calc(var(--u) * 1.3) #1a0a14; letter-spacing: 0.02em; }
   #place { position: absolute; left: 0; right: 0; top: calc(var(--u) * 3); text-align: center; transition: transform 0.35s ease, top 0.35s ease; transform-origin: 50% 0; }
-  #place.big { transform: scale(1.35); top: calc(var(--u) * 6); }
-  #pname { font-size: calc(var(--u) * 11); line-height: 1.1; }
-  #pen { font-size: calc(var(--u) * 5); color: #ffd696; -webkit-text-stroke: calc(var(--u) * 0.9) #1a0a14; }
+  #place.big { transform: scale(1.2); top: calc(var(--u) * 2); }
+  #place { line-height: 1.1; }
+  #pname { display: inline; font-size: calc(var(--u) * 11); }
+  #pen { display: inline; margin-left: calc(var(--u) * 2.5); font-size: calc(var(--u) * 5.5); color: #ffd696; -webkit-text-stroke: calc(var(--u) * 0.9) #1a0a14; }
+  #pen:empty { display: none; }
   .panel { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(var(--u) * 6); background: rgba(10, 4, 12, 0.72); pointer-events: auto; }
   .panel[hidden], #loading[hidden], #hudText[hidden] { display: none; }
   .panel h1 { margin: 0; font-size: calc(var(--u) * 12); }

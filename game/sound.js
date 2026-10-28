@@ -200,6 +200,19 @@ window.BodySound = (() => {
       [84, 88, 91].forEach((n) => tone(c, o, t + 0.38, 'triangle', NOTE(n), null, 0.7, 0.1, 0.01));
       coins(c, o, t + 0.1, 16, 0.9);
     },
+    // (v53) the poop tower: let go (a short whoosh), landing (a soft wet thud), a perfect (a bright two-note chime and
+    // the thud), off the edge (a falling whistle, a splash), toppling (a long rumble, a big splash)
+    twDrop: (c, o, t) => burst(c, o, t, 'bandpass', 900, 2200, 1.2, 0.12, 0.12, 0.01),
+    twLand: (c, o, t) => { tone(c, o, t, 'sine', 140, 70, 0.12, 0.42, 0.002, 0.1); burst(c, o, t, 'lowpass', 900, 300, 0.7, 0.09, 0.3, 0.001); },
+    twPerfect: (c, o, t) => { SFX.twLand(c, o, t); [84, 91].forEach((n, i) => tone(c, o, t + 0.04 + i * 0.07, 'triangle', NOTE(n), null, 0.22, 0.14, 0.003)); },
+    twMiss: (c, o, t) => { tone(c, o, t, 'sine', 1200, 300, 0.5, 0.12, 0.01, 0.5); const w = water(c, o, 1600); burst(c, w, t + 0.5, 'lowpass', 1400, 400, 0.8, 0.4, 0.3, 0.01); },
+    twTopple: (c, o, t) => { burst(c, o, t, 'lowpass', 500, 120, 0.7, 1.2, 0.45, 0.05); tone(c, o, t, 'sine', 90, 45, 1.0, 0.35, 0.02, 1.0); const w = water(c, o, 1800); burst(c, w, t + 0.9, 'lowpass', 1800, 300, 0.8, 0.7, 0.4, 0.01); },
+    // (v53) the fruit archery: the bow (a twang), a fruit hit (a juicy splat and a pop), a golden apple (a sparkle), a
+    // fruit into the river (a plop)
+    arBow: (c, o, t) => { tone(c, o, t, 'triangle', 330, 180, 0.12, 0.16, 0.001, 0.1); burst(c, o, t, 'bandpass', 2400, 900, 2, 0.08, 0.16, 0.001); },
+    arHit: (c, o, t) => { burst(c, o, t, 'bandpass', 1600, 500, 1.2, 0.14, 0.4, 0.001); tone(c, o, t, 'sine', 620, 240, 0.08, 0.22, 0.001, 0.07); tone(c, o, t + 0.03, 'triangle', NOTE(88), null, 0.1, 0.08, 0.002); },
+    arGold: (c, o, t) => { SFX.arHit(c, o, t); [84, 88, 91, 96, 100].forEach((n, i) => tone(c, o, t + 0.05 + i * 0.05, 'triangle', NOTE(n), null, 0.2, 0.11, 0.003)); coins(c, o, t + 0.1, 8, 0.6); },
+    arSplash: (c, o, t) => { const w = water(c, o, 1500); burst(c, w, t, 'lowpass', 1200, 380, 0.8, 0.25, 0.16, 0.005); bubble(c, w, t + 0.05, 500, 0.06); },
     // (v52) the shell game: a lid sliding across the felt (a short scrape, a tick of iron), lifted (an iron clink),
     // set down (a soft clank), a win (the slot's), a loss (a sad 'wah wah wah')
     ybSlide: (c, o, t) => { burst(c, o, t, 'bandpass', 2600, 1300, 1.3, 0.085, 0.2, 0.004); tone(c, o, t + 0.06, 'triangle', 1900, null, 0.02, 0.05, 0.001); },

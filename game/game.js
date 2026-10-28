@@ -169,6 +169,8 @@
     if (G.pk || near('manhole')) { files.add('pk_field.webp'); files.add('pk.webp'); files.add(`bat_${G.char}.webp`); }      // (v44) the penalty shoot-out's (v46: the runner kicks)
     if (G.sl || near('toiletBowl')) files.add('sl.webp');                                   // (v44) the toilet jackpot's
     if (G.yb || near('combined')) { files.add('yb.webp'); files.add('pk.webp'); files.add('sl.webp'); }     // (v52) the shell game's (its dealer, its poop)
+    if (G.tw || near('clarifier1')) files.add('tw.webp');                                    // (v53) the poop tower's
+    if (G.ar || near('outfall')) { files.add('ar.webp'); files.add('ar_field.webp'); files.add(`bat_${G.char}.webp`); }   // (v53) the fruit archery's (the runner from behind)
     const dc = ((S2_X - s.lx) % LAP + LAP) % LAP;            // the flush cut scene's pictures, near the end of the body
     if (G.cut || G.cutTail || dc < Math.max(2500, G.v * 8)) files.add('cut_flush.webp');
     if (STAGES.bb && !CAPTURE) { if (nearBB) { SND.fetchSong(STAGES.bb).catch(() => {}); if (SND.ctx) SND.prepare(STAGES.bb).catch(() => {}); } else SND.release(STAGES.bb); }
@@ -243,7 +245,7 @@
       y: 0, vy: 0, jumps: 0, onGround: true, slide: false, slideHeld: false, fastFall: false,
       invul: 0, nudge: 0, char: charName, obs: [], items: [], pops: [], puffs: [],
       genX: 520, genStation: undefined, lastGate: -1e9, R: rng(12345), nextHeal: 1800, station: -1, theme: COURSE[0][3], prevTheme: null, fade: 1, banner: 0, lapShown: 0,
-      blinkAt: -1, blinkR: rng(4242), vt: 0, rh: null, orb: null, bb: null, wm: null, mem: null, pk: null, sl: null, yb: null, slLap: -1, cut: null, cutTail: null, bounce: false, pitObj: null,
+      blinkAt: -1, blinkR: rng(4242), vt: 0, rh: null, orb: null, bb: null, wm: null, mem: null, pk: null, sl: null, yb: null, tw: null, ar: null, slLap: -1, cut: null, cutTail: null, bounce: false, pitObj: null,
       o2n: 0, boost: 0, boostT0: -9, boostHeld: 0, boosts: 0, fire: [], fxR: rng(9191),
       intro: [[1950, 'spike'], [3650, 'drop'], [5420, 'pit'], [7250, 'shot'], [9130, 'door']],
     });
@@ -347,7 +349,7 @@
   // under water (stage 2) the speed carried in is cut by 30% and climbs from there at the same rate as ever (G.wPen: the
   // 30% of the speed it came in at, held while in the water)
   const wPen = () => (inWater() ? G.wPen || 0 : 0);
-  function curSpeed() { return G.orb || G.bb || G.wm || G.mem || G.pk || G.sl || G.yb || G.cut ? 0 : G.rh ? G.rh.speed : (G.v - wPen()) * (0.3 + 0.7 * G.slow) * (G.boost > 0 ? BOOST_K : 1) * pitSlow(); }
+  function curSpeed() { return G.orb || G.bb || G.wm || G.mem || G.pk || G.sl || G.yb || G.tw || G.ar || G.cut ? 0 : G.rh ? G.rh.speed : (G.v - wPen()) * (0.3 + 0.7 * G.slow) * (G.boost > 0 ? BOOST_K : 1) * pitSlow(); }
   // (v47) in a hole: slowed as you sink (you go down into it, not along to its far wall), stopped at the bottom
   function pitSlow() { return G.pitObj && G.y < 0 && !G.bounce ? (G.pitHoldT ? 0 : PIT_SLOW) : 1; }
   function arriveIn(dist, v) { return ACC > 0 ? (-v + Math.sqrt(v * v + 2 * ACC * Math.max(0, dist))) / ACC : dist / v; }
@@ -647,6 +649,8 @@
     if (G.pk) endPK();
     if (G.sl) endSlot();
     if (G.yb) endYB();
+    if (G.tw) endTW();
+    if (G.ar) endAR();
     if (G.cut) cutDone();
     const s = stationAt(G.x), here = COURSE[s.i][5];
     let j = s.i, lap = s.lap;
@@ -684,6 +688,8 @@
     if (G.pk) endPK();
     if (G.sl) endSlot();
     if (G.yb) endYB();
+    if (G.tw) endTW();
+    if (G.ar) endAR();
     if (G.cut) cutDone();
     const s = stationAt(G.x), lap = STARTS[j] + 1 > s.lx ? s.lap : s.lap + 1;
     G.x = lap * LAP + STARTS[j] + 1;
@@ -714,6 +720,8 @@
     if (G.pk) { pkDown(e.pointerId, nx, ny); e.preventDefault(); return; }
     if (G.sl) { slTap(nx, ny); e.preventDefault(); return; }
     if (G.yb) { ybDown(nx, ny); e.preventDefault(); return; }
+    if (G.tw) { twDrop(); e.preventDefault(); return; }
+    if (G.ar) { arDown(nx, ny); e.preventDefault(); return; }
     const side = (nx < NW / 2) !== SET.swap ? 'jump' : 'slide';    // the left half jumps (the right, swapped)
     held.set(e.pointerId, side);
     if (side === 'jump') doJump();
@@ -731,6 +739,12 @@
       if (['Space', 'Enter', 'KeyJ', 'KeyF'].includes(e.code)) { bbSwing(); e.preventDefault(); return; }
     }
     if (G.yb && G.mode === 'play' && ybKey(e.code)) { e.preventDefault(); return; }    // (v52) the shell game: arrows, space, 1-3
+    if (G.tw && G.mode === 'play' && ['Space', 'Enter', 'ArrowDown', 'KeyJ', 'KeyF', 'KeyS'].includes(e.code)) { twDrop(); e.preventDefault(); return; }    // (v53) the tower: drop
+    if (G.ar && G.mode === 'play') {                        // (v53) the archery: the arrows turn the bow, space shoots
+      if (['ArrowLeft', 'KeyA'].includes(e.code)) { G.ar.keys.L = true; e.preventDefault(); return; }
+      if (['ArrowRight', 'KeyD'].includes(e.code)) { G.ar.keys.R = true; e.preventDefault(); return; }
+      if (['Space', 'Enter', 'ArrowUp', 'KeyJ', 'KeyF', 'KeyW'].includes(e.code)) { arShoot(); e.preventDefault(); return; }
+    }
     const dg = /^(Digit|Numpad)([0-9])$/.exec(e.code);                // the germ and memory games: the number keys
     if (dg && G.wm && G.mode === 'play') { if (WM_KEY[dg[2]] !== undefined) wmKey(WM_KEY[dg[2]]); e.preventDefault(); return; }
     if (dg && G.mem && G.mode === 'play') { memKey(+dg[2] - 1); e.preventDefault(); return; }
@@ -744,7 +758,7 @@
     if (e.code === 'ArrowDown' || e.code === 'KeyS') { keySlide = true; setSlide(); e.preventDefault(); }
     if (e.code === 'Escape' || e.code === 'KeyP') { if (G.mode === 'play') pause(); else if (G.mode === 'pause') resume(); }
   });
-  addEventListener('keyup', (e) => { if (BB_KEY[e.code]) bbKeys.delete(BB_KEY[e.code]); if (PK_KEYS[e.code]) pkKeys.delete(PK_KEYS[e.code]); if (e.code === 'ArrowDown' || e.code === 'KeyS') { keySlide = false; setSlide(); } if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') keyJump = false; });
+  addEventListener('keyup', (e) => { if (G.ar) { if (['ArrowLeft', 'KeyA'].includes(e.code)) G.ar.keys.L = false; if (['ArrowRight', 'KeyD'].includes(e.code)) G.ar.keys.R = false; } if (BB_KEY[e.code]) bbKeys.delete(BB_KEY[e.code]); if (PK_KEYS[e.code]) pkKeys.delete(PK_KEYS[e.code]); if (e.code === 'ArrowDown' || e.code === 'KeyS') { keySlide = false; setSlide(); } if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') keyJump = false; });
 
   // ---------------------------------------------------------------- the mini-games' songs (stages.js): five each, in turn
   // Each go of a mini-game takes the next of its songs; the turn is kept (the next run goes on from it). The songs are
@@ -1170,7 +1184,7 @@
   const OB_PLANS = {};                                     // laid out once per song, when first needed
   const orbPlan = (song) => OB_PLANS[song.id] || (OB_PLANS[song.id] = planOrbit(song));
   let OB = orbPlan(songFor('orb'));                        // the path of the stage on now (or of the next one)
-  const busy = () => !!(G.rh || G.orb || G.bb || G.wm || G.mem || G.pk || G.sl || G.yb || G.cut);
+  const busy = () => !!(G.rh || G.orb || G.bb || G.wm || G.mem || G.pk || G.sl || G.yb || G.tw || G.ar || G.cut);
   function otime() {
     const o = G.orb;
     if (o.wait !== null) return -OB_LEAD;                    // the song still on its way
@@ -3237,6 +3251,324 @@
     ctx.globalAlpha = 1;
   }
 
+  // ---------------------------------------------------------------- the poop tower (in the primary clarifier) (v53)
+  // '똥 탑 쌓기': a crane swings a poop brick to and fro over the clarifier's concrete pier; tap (anywhere, or space) to
+  // let it go. It drops straight down onto the top of the tower: right on the one below ('퍼펙트!': it snaps square, and
+  // perfects in a row pay more), a little off (it stays off, and the tower leans that way), or off the edge (it tumbles
+  // into the tank: three of those and it is over). The tower's weight off its middle (the pier's) past the pier's edge:
+  // it topples, and that is the end too. 30 seconds; the swing gets faster as it grows. 100 a brick, a perfect +50,
+  // +100, +150 in a row (pictures: minigames3.py, tw.webp)
+  const TW_TIME = 30, TW_INTRO = 2.6, TW_END = 2.8, TW_BW = 44, TW_BH = 14.6, TW_PERF = 2.4, TW_LIVES = 3, TW_PIER = 30;
+  const TW_JIB = 47, TW_HANG = 76, TW_FLOOR = 158, TW_KEEP = 122, TW_G = 900;     // the jib's line; the brick's top hanging; the pier's top; the tower's top kept at
+  function startTW() {
+    holdBoost();
+    G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
+    G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
+    G.tw = { st: 'intro', stT: G.t, inT: G.t, t0: 0, gain: 0, blocks: [], cur: null, fall: [], streak: 0, best: 0, misses: 0, perf: 0, cam: 0, camS: 0,
+      ph: Math.random() * 6.28, pops: [], topple: null, why: '', pressT: -9 };
+    G.slideHeld = false; held.clear(); pressed.jump = false;
+  }
+  function endTW() {
+    bankGame(G.tw); G.tw = null; G.games = (G.games || 0) + 1; resumeBoost();
+    G.genX = Math.max(G.genX, G.x + NW * 0.8);
+    G.banner = G.t;
+  }
+  const twTopX = (p) => (p.blocks.length ? p.blocks[p.blocks.length - 1].x : NWf / 2);
+  const twSwing = (p) => { const n = p.blocks.length, w = 1.5 + Math.min(2.1, n * 0.13), A = Math.min(84, NWf * 0.32, 46 + n * 3); return NWf / 2 + A * Math.sin(p.ph + (G.t - p.t0) * w); };     // (narrower at first)
+  const twSY = (p, h) => TW_FLOOR - h + p.camS;              // a height over the pier's top -> the screen
+  function twNew(p) { p.cur = { v: Math.floor(Math.random() * 3), t: G.t }; }
+  function twDrop() {
+    const p = G.tw; if (!p || p.st !== 'play' || !p.cur) return;
+    p.fall.push({ x: twSwing(p), y: TW_HANG, vy: 0, v: p.cur.v }); p.cur = null; p.pressT = G.t;
+    SND.play('twDrop');
+  }
+  // a brick reaching the top: perfect, on, or off
+  function twLand(p, f) {
+    const n = p.blocks.length, top = twTopX(p), dx = f.x - top, half = n ? TW_BW / 2 : TW_PIER - 2;
+    if (n && Math.abs(dx) <= TW_PERF) {
+      f.x = top; p.streak++; p.perf++; p.best = Math.max(p.best, p.streak);
+      const pts = 100 + 50 * Math.min(3, p.streak); p.gain += pts; p.pops.push({ x: f.x, h: (n + 1) * TW_BH, s: `${TR('퍼펙트!', 'Perfect!')} +${pts}`, t: G.t, gold: true });
+      SND.play('twPerfect'); buzz([20, 20, 30]);
+    } else if (Math.abs(dx) < half) {
+      p.streak = 0; p.gain += 100; p.pops.push({ x: f.x, h: (n + 1) * TW_BH, s: '+100', t: G.t, gold: false });
+      SND.play('twLand'); buzz(25);
+    } else {                                                  // off the edge: it tumbles down into the tank
+      p.streak = 0; p.misses++; f.off = true; f.vx = (dx > 0 ? 1 : -1) * 60; f.vr = (dx > 0 ? 1 : -1) * 5; f.r = 0; f.t = G.t;
+      SND.play('twMiss'); buzz(60);
+      if (p.misses >= TW_LIVES) { p.st = 'over'; p.stT = G.t; p.why = 'miss'; }
+      return false;
+    }
+    p.blocks.push({ x: f.x, v: f.v, t: G.t });
+    // the tower's weight against the pier: past its edge, it goes over
+    const com = p.blocks.reduce((a, b) => a + b.x, 0) / p.blocks.length - NWf / 2;
+    if (Math.abs(com) > TW_PIER) { p.topple = { dir: com > 0 ? 1 : -1, t: G.t }; p.st = 'over'; p.stT = G.t; p.why = 'topple'; SND.play('twTopple'); buzz([60, 40, 120]); }
+    return true;
+  }
+  function stepTW(dt) {
+    const p = G.tw; if (!p) return;
+    p.cam = Math.max(0, p.blocks.length * TW_BH - (TW_FLOOR - TW_KEEP)); p.camS += (p.cam - p.camS) * Math.min(1, dt * 6);
+    for (const f of p.fall) {
+      f.vy += TW_G * dt; f.y += f.vy * dt;
+      if (f.off) { f.x += f.vx * dt; f.r += f.vr * dt; continue; }
+      const surf = twSY(p, p.blocks.length * TW_BH);           // the top of the tower (the brick's bottom lands there)
+      if (f.y + TW_BH >= surf) { f.done = true; twLand(p, f); }
+    }
+    p.fall = p.fall.filter((f) => !f.done && f.y < NH + 40);
+    const u = G.t - p.stT;                                    // (after the landings: one may have ended it just now)
+    if (p.st === 'intro') { if (u >= TW_INTRO) { p.st = 'play'; p.stT = G.t; p.t0 = G.t; twNew(p); } return; }
+    if (p.st === 'play') {
+      if (!p.cur && !p.fall.some((f) => !f.off) && G.t - p.pressT > 0.35) twNew(p);
+      if (AUTO && !window.__noAuto && p.cur && G.t - p.cur.t > 0.3) {     // the test pilot: when it is over the top (or off, to test a miss)
+        const dx = twSwing(p) - twTopX(p);
+        const half = p.blocks.length ? TW_BW / 2 : TW_PIER - 2;      // (__twMiss: off the edge; __twOff: this far off each time)
+        if (window.__twMiss ? Math.abs(dx) > half + 3 : window.__twOff !== undefined ? Math.abs(dx - window.__twOff) < 1.2 : Math.abs(dx) < 1.2) twDrop();
+      }
+      if (u >= TW_TIME && !p.fall.some((f) => !f.off)) { p.st = 'over'; p.stT = G.t; p.why = 'time'; }
+      return;
+    }
+    if (p.st === 'over') { if (u >= (p.why === 'topple' ? 1.8 : 1.0)) { p.st = 'done'; p.stT = G.t; if (p.blocks.length >= 10) SND.play('slWin'); } return; }
+    if (p.st === 'done' && u >= TW_END) endTW();
+  }
+  // one brick (its body's middle at x, its bottom at y); a tint over it (the newest flashes gold on a perfect)
+  function twBrick(v, x, yb, rot = 0, glow = 0) {
+    const s = M.sprites['tw_block' + v], k = TW_BW / 44;      // (the picture: a 44-wide body on a 48 x 19 canvas)
+    ctx.save(); ctx.translate(x, yb - TW_BH / 2); if (rot) ctx.rotate(rot);
+    spr('tw_block' + v, -s.w * k / 2, -TW_BH / 2 - 2.6 * k, 1, s.w * k, s.h * k);
+    if (glow > 0) { ctx.globalCompositeOperation = 'lighter'; const a = ctx.globalAlpha; ctx.globalAlpha = a * glow * 0.6; rrect(-TW_BW / 2, -TW_BH / 2, TW_BW, TW_BH, 6); ctx.fillStyle = '#ffd860'; ctx.fill(); ctx.globalAlpha = a; ctx.globalCompositeOperation = 'source-over'; }
+    ctx.restore();
+  }
+  function drawTW() {
+    const p = G.tw; if (!p) return;
+    world();
+    let al = Math.min(1, (G.t - p.inT) / 0.35);
+    if (p.st === 'done') al *= Math.max(0, Math.min(1, (TW_END - (G.t - p.stT)) / 0.35));
+    const zx = NWf / 2, A = (a) => { ctx.globalAlpha = al * a; };
+    // the tank: dark green water, its concrete walls going up (ribs that move with the tower), lighter in the middle
+    { const g = ctx.createLinearGradient(0, 0, 0, NH); g.addColorStop(0, '#0a1c1e'); g.addColorStop(1, '#04100f'); A(1); ctx.fillStyle = g; ctx.fillRect(0, 0, NWf, NH);
+      A(0.5); ctx.fillStyle = '#16302f'; for (const sx of [-1, 1]) { const x = zx + sx * Math.min(150, NWf * 0.42); ctx.fillRect(x - 9, 0, 18, NH); }
+      A(0.35); ctx.fillStyle = '#2a4a46'; for (let k = 0; k < 40; k++) { const y = ((k * 40 + p.camS) % (NH + 40)) - 20; for (const sx of [-1, 1]) ctx.fillRect(zx + sx * Math.min(150, NWf * 0.42) - 9, y, 18, 2); }
+      const r = ctx.createRadialGradient(zx, 120, 10, zx, 120, 190); r.addColorStop(0, 'rgba(150,210,195,0.2)'); r.addColorStop(1, 'rgba(150,210,195,0)'); A(1); ctx.fillStyle = r; ctx.fillRect(0, 0, NWf, NH);
+      A(0.25); for (let k = 0; k < 14; k++) { const bx = ((k * 53.7) % NWf), by = NH - ((G.t * (9 + k % 4 * 3) + k * 31) % (NH + 10)); ctx.beginPath(); ctx.arc(bx, by, 0.8 + (k % 3) * 0.5, 0, 6.2832); ctx.fillStyle = '#bfeee6'; ctx.fill(); } }
+    // height marks up the right side (every 5 bricks), moving with the tower
+    for (let k = 5; k < 200; k += 5) { const y = twSY(p, k * TW_BH); if (y < 74) break; if (y > NH) continue;
+      A(0.55); ctx.fillStyle = '#9ad8d0'; ctx.fillRect(NWf - 46, y - 0.4, 10, 0.8); label(TR(`${k}층`, `${k}`), NWf - 49, y, 6, 'right', al * 0.7, '#bff0e8'); }
+    // the pier
+    { const s = M.sprites.tw_base, y = twSY(p, 0) - s.top; A(1); spr('tw_base', zx - s.w / 2, y, 1, s.w, s.h); A(1); }
+    // the tower (leaning a little with its weight off the middle; going over when it topples)
+    const n = p.blocks.length, com = n ? p.blocks.reduce((a, b) => a + b.x, 0) / n - zx : 0;
+    let lean = com / 900 * Math.min(1, n / 6) + Math.sin(G.t * 2.6) * 0.0016 * Math.min(n, 20);
+    let px = zx, py = twSY(p, 0);
+    if (p.topple) { const v = G.t - p.topple.t; px = zx + p.topple.dir * TW_PIER; lean = p.topple.dir * Math.min(1.6, 0.4 * v + 1.6 * v * v); }
+    ctx.save(); ctx.translate(px, py); ctx.rotate(lean);
+    p.blocks.forEach((b, i) => { const gl = i === n - 1 && G.t - b.t < 0.4 && p.pops.length && p.pops[p.pops.length - 1].gold ? 1 - (G.t - b.t) / 0.4 : 0;
+      A(p.topple ? Math.max(0, 1 - (G.t - p.topple.t) / 1.6) : 1); twBrick(b.v, b.x - px, -i * TW_BH, 0, gl); });
+    ctx.restore(); A(1);
+    // falling bricks (and the ones tumbling off)
+    for (const f of p.fall) twBrick(f.v, f.x, f.y + TW_BH, f.r || 0);
+    // the crane: its jib across the top (a yellow lattice), the trolley, the cable, the hook, the brick on it
+    { const y = TW_JIB; A(1);
+      rrect(-4, y - 4.5, NWf + 8, 9, 2); ctx.fillStyle = '#1a1006'; ctx.fill();
+      const g = ctx.createLinearGradient(0, y - 3.5, 0, y + 3.5); g.addColorStop(0, '#ffe27a'); g.addColorStop(0.5, '#f0a800'); g.addColorStop(1, '#a86400');
+      ctx.fillStyle = g; ctx.fillRect(-4, y - 3.5, NWf + 8, 7);
+      ctx.strokeStyle = '#5a3200'; ctx.lineWidth = 0.9; ctx.beginPath();
+      for (let x = -4; x < NWf + 8; x += 9) { ctx.moveTo(x, y - 3.2); ctx.lineTo(x + 4.5, y + 3.2); ctx.lineTo(x + 9, y - 3.2); } ctx.stroke();
+      const tx = p.cur ? twSwing(p) : null;
+      if (tx !== null && p.st === 'play') {
+        rrect(tx - 7, y - 5.5, 14, 6.5, 2); ctx.fillStyle = '#2a2e38'; ctx.fill();
+        const hk = M.sprites.tw_hook, hy = TW_HANG - hk.hang[1] + 1;
+        ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 0.9; ctx.beginPath(); ctx.moveTo(tx - 1, y + 1); ctx.lineTo(tx - 1, hy + 1); ctx.moveTo(tx + 1, y + 1); ctx.lineTo(tx + 1, hy + 1); ctx.stroke();
+        twBrick(p.cur.v, tx, TW_HANG + TW_BH);
+        spr('tw_hook', tx - hk.hang[0], hy, 1, hk.w, hk.h); A(1);
+        // where it would land: a faint line down to the top
+        A(0.22); ctx.setLineDash([2, 3]); ctx.strokeStyle = '#ffffff'; ctx.beginPath(); ctx.moveTo(tx, TW_HANG + TW_BH + 2); ctx.lineTo(tx, twSY(p, n * TW_BH)); ctx.stroke(); ctx.setLineDash([]); A(1);
+      } }
+    // what each landing came to; the score, the height, the lives
+    for (const q of p.pops) { const v = G.t - q.t; if (v > 0.9 || p.st === 'over') continue;
+      label(q.s, q.x, twSY(p, q.h) - 10 - v * 18, q.gold ? 9 : 7.5, 'center', al * Math.min(1, (0.9 - v) / 0.3), q.gold ? '#ffe14a' : '#ffffff'); }
+    p.pops = p.pops.filter((q) => G.t - q.t < 0.9);
+    if (p.st === 'play' || p.st === 'over') {
+      label(TR(`${n}층`, `${n} high`), 16, 63, 11, 'left', al, '#ffe0a8');
+      label(`${PT(p.gain)}`, 16, 75, 7.5, 'left', al, '#ffe68a');
+      for (let i = 0; i < TW_LIVES; i++) { A(i < TW_LIVES - p.misses ? 1 : 0.25); spr('tw_block0', 16 + i * 13, 81, 1, 11, 4.75); }
+      A(1);
+      const left = Math.max(0, TW_TIME - (G.t - p.t0));
+      if (p.st === 'play') label(`${Math.ceil(left)}${TR('초', 's')}`, NWf - 49, 63, 9, 'right', al, left < 5 ? '#ff9aa8' : '#ffffff');
+      if (p.st === 'play' && n === 0 && !p.fall.length) label(TR('탭해서 떨어뜨리기!', 'Tap to drop!'), zx, 104, 9.5, 'center', al * (0.75 + 0.25 * Math.sin(G.t * 6)), '#ffffff');
+      if (p.st === 'over') label(p.why === 'topple' ? TR('무너졌다!', 'It fell!') : p.why === 'miss' ? TR('세 번 놓쳤어요', 'Three missed') : TR('시간 끝!', "Time's up!"), zx, 96, 15, 'center', al, p.why === 'time' ? '#ffe68a' : '#ff9aa8');
+    }
+    if (p.st === 'intro') {
+      const v = G.t - p.stT, a = Math.min(1, v / 0.3) * Math.max(0, Math.min(1, (TW_INTRO - v) / 0.3)), bw = Math.min(262, NWf - 16), t0 = TR('똥 탑 쌓기!', 'Poop tower!');
+      A(a * 0.86); rrect(zx - bw / 2, 70, bw, 58, 8); ctx.fillStyle = '#10141e'; ctx.fill(); A(1);
+      label(t0, zx, 85, 15, 'center', al * a, '#ffe0a8');
+      label(TR('흔들리는 똥을 탭해서 떨어뜨려 높이 쌓아요', 'Tap to drop each swinging brick - stack them high'), zx, 103, 7.5, 'center', al * a, '#ffffff');
+      label(TR('딱 맞으면 퍼펙트! 많이 삐끗하면 무너져요', 'Square on: Perfect! Too far off and it topples'), zx, 116, 7.5, 'center', al * a, '#ffe68a');
+    }
+    if (p.st === 'done') {
+      const v = G.t - p.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (TW_END - v) / 0.35));
+      A(a * 0.86); rrect(zx - 112, 66, 224, 62, 8); ctx.fillStyle = '#10141e'; ctx.fill(); A(1);
+      label(TR(`${n}층 쌓았다!`, `${n} high!`), zx, 81, 14, 'center', a, '#ffe68a');
+      label(TR(`퍼펙트 ${p.perf}번 · 최고 연속 ${p.best}`, `Perfect ${p.perf} · best run ${p.best}`), zx, 98, 7.5, 'center', a, '#ffffff');
+      label(`+${PT(p.gain)}`, zx, 113, 10, 'center', a, '#ffe68a');
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ---------------------------------------------------------------- the fruit archery (at the outfall) (v53)
+  // '과일 화살': out of the pipe at last, under the sky: fruit comes flying over the river (thrown in from the sides, or
+  // falling from high up); your runner, from behind on the bank, has a bow. Tap where to shoot (or the arrows to aim and
+  // space): the arrow flies there and on, through all it meets (two with one arrow: double, three: triple). 30 seconds.
+  // An apple or an orange 100, a banana or a peach 120, grapes 150, a watermelon 200, a golden apple 500 (rare, quick).
+  // (pictures: minigames3.py, ar.webp + ar_field.webp; the runner from behind: bat_<char>.webp's 180)
+  const AR_TIME = 30, AR_INTRO = 2.6, AR_END = 2.8, AR_V = 640, AR_COOL = 0.2, AR_RIVER = 124;
+  const AR_KINDS = [['apple', 100, 22], ['orange', 100, 20], ['banana', 120, 16], ['peach', 120, 14], ['grapes', 150, 12], ['melon', 200, 8], ['gold', 500, 4]];
+  const AR_JUICE = { apple: '#ff3a4a', orange: '#ff9a1a', banana: '#ffe24a', peach: '#ffa07a', grapes: '#9a4ad8', melon: '#ff4a6a', gold: '#ffd84a' };
+  const arBow = () => [NWf / 2, 133];                         // the bow's grip (over the runner's head)
+  function startAR() {
+    holdBoost();
+    G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
+    G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
+    G.ar = { st: 'intro', stT: G.t, inT: G.t, t0: 0, gain: 0, aim: 0, fireT: -9, arrows: [], fruit: [], halves: [], juice: [], pops: [], next: 0, hits: 0, shots: 0, gold: 0,
+      clouds: [[0.15, 30, 0], [0.62, 18, 1], [0.95, 40, 0]], keys: { L: false, R: false } };
+    G.slideHeld = false; held.clear(); pressed.jump = false;
+  }
+  function endAR() {
+    bankGame(G.ar); G.ar = null; G.games = (G.games || 0) + 1; resumeBoost();
+    G.genX = Math.max(G.genX, G.x + NW * 0.8);
+    G.banner = G.t;
+  }
+  function arSpawn(p) {
+    let r = Math.random() * AR_KINDS.reduce((a, k) => a + k[2], 0), k = AR_KINDS[0];
+    for (const q of AR_KINDS) { if ((r -= q[2]) <= 0) { k = q; break; } }
+    const kind = k[0], fast = kind === 'gold' ? 1.45 : kind === 'melon' ? 0.8 : 1, s = M.sprites['ar_' + kind];
+    if (Math.random() < 0.6) {                               // thrown in from a side, in an arc over the river
+      const left = Math.random() < 0.5, y = 70 + Math.random() * 45;
+      p.fruit.push({ kind, pts: k[1], x: left ? -12 : NWf + 12, y, vx: (left ? 1 : -1) * (70 + Math.random() * 60) * fast, vy: -(55 + Math.random() * 40) * fast, g: 48 * fast, r: Math.random() * 6, vr: (Math.random() - 0.5) * 5, rad: s.rad, size: s.w });
+    } else {                                                  // falling from high up
+      p.fruit.push({ kind, pts: k[1], x: 40 + Math.random() * (NWf - 80), y: -14, vx: (Math.random() - 0.5) * 30, vy: (18 + Math.random() * 18) * fast, g: 26 * fast, r: Math.random() * 6, vr: (Math.random() - 0.5) * 3, rad: s.rad, size: s.w });
+    }
+  }
+  function arShoot(tx, ty) {
+    const p = G.ar; if (!p || p.st !== 'play' || G.t - p.fireT < AR_COOL) return;
+    const [bx, by] = arBow();
+    if (tx !== undefined) {                                   // a tap near a fruit: aimed to meet it where it will be
+      let best = null;
+      for (const f of p.fruit) { const d = Math.hypot(f.x - tx, f.y - ty); if (d < f.rad + 16 && (!best || d < best.d)) best = { f, d }; }
+      if (best) { const m = arMeet(best.f); if (m) { tx = m[0]; ty = m[1]; } }
+      p.aim = Math.max(-1.35, Math.min(1.35, Math.atan2(tx - bx, by - ty)));
+    }
+    const dx = Math.sin(p.aim), dy = -Math.cos(p.aim);
+    p.arrows.push({ x: bx + dx * 6, y: by + dy * 6, vx: dx * AR_V, vy: dy * AR_V, hit: 0, t: G.t });
+    p.fireT = G.t; p.shots++;
+    SND.play('arBow');
+  }
+  function arHit(p, a, f) {
+    a.hit++; f.dead = true; p.hits++;
+    const pts = f.pts * a.hit; p.gain += pts; if (f.kind === 'gold') p.gold++;
+    p.pops.push({ x: f.x, y: f.y, s: `${a.hit > 1 ? TR(`${a.hit}연속! `, `x${a.hit}! `) : ''}+${pts}`, t: G.t, big: a.hit > 1 || f.kind === 'gold' });
+    const ang = Math.atan2(a.vy, a.vx) + Math.PI / 2;           // it splits across the arrow's way
+    for (const sd of [-1, 1]) p.halves.push({ kind: f.kind, x: f.x, y: f.y, vx: f.vx * 0.3 + Math.cos(ang) * sd * 55, vy: f.vy * 0.3 + Math.sin(ang) * sd * 55 - 30, r: f.r, vr: sd * 6, sd, size: f.size, t: G.t });
+    for (let i = 0; i < 14; i++) { const t = Math.random() * 6.28, v = 30 + Math.random() * 90; p.juice.push({ x: f.x, y: f.y, vx: Math.cos(t) * v, vy: Math.sin(t) * v - 25, r: 0.8 + Math.random() * 1.6, c: AR_JUICE[f.kind], t: G.t }); }
+    SND.play(f.kind === 'gold' ? 'arGold' : 'arHit'); buzz(f.kind === 'gold' ? [30, 30, 50] : 18);
+  }
+  // where an arrow shot now meets a fruit (a few rounds of: how long to get there, where it is by then)
+  function arMeet(f) {
+    const [bx, by] = arBow(); let t = 0, x = f.x, y = f.y;
+    for (let i = 0; i < 5; i++) { t = Math.hypot(x - bx, y - by) / AR_V; x = f.x + f.vx * t; y = f.y + f.vy * t + 0.5 * f.g * t * t; }
+    return y < AR_RIVER - 2 ? [x, y, t] : null;
+  }
+  function arDown(x, y) { const p = G.ar; if (!p || p.st !== 'play') return; arShoot(x, y); }
+  function stepAR(dt) {
+    const p = G.ar; if (!p) return;
+    const u = G.t - p.stT;
+    for (const c of p.clouds) { c[0] += dt * (0.004 + 0.003 * c[2]); if (c[0] > 1.15) c[0] = -0.15; }
+    for (const f of p.fruit) { f.vy += f.g * dt; f.x += f.vx * dt; f.y += f.vy * dt; f.r += f.vr * dt; if (f.y > AR_RIVER && !f.splash) { f.splash = G.t; f.dead = true; p.juice.push({ x: f.x, y: AR_RIVER + 2, ring: true, t: G.t }); SND.play('arSplash'); } }
+    for (const a of p.arrows) {
+      const steps = 3; for (let k = 0; k < steps; k++) {        // (in small steps: quick arrows, small fruit)
+        a.x += a.vx * dt / steps; a.y += a.vy * dt / steps;
+        for (const f of p.fruit) if (!f.dead && Math.hypot(f.x - a.x, f.y - a.y) < f.rad + 1.5) arHit(p, a, f);
+      }
+    }
+    for (const h of p.halves) { h.vy += 160 * dt; h.x += h.vx * dt; h.y += h.vy * dt; h.r += h.vr * dt; }
+    for (const j of p.juice) if (!j.ring) { j.vy += 150 * dt; j.x += j.vx * dt; j.y += j.vy * dt; }
+    p.fruit = p.fruit.filter((f) => !f.dead && f.x > -40 && f.x < NWf + 40 && f.y < NH + 20);
+    p.arrows = p.arrows.filter((a) => a.y > -30 && a.x > -30 && a.x < NWf + 30);
+    p.halves = p.halves.filter((h) => G.t - h.t < 1.4); p.juice = p.juice.filter((j) => G.t - j.t < (j.ring ? 0.7 : 0.8)); p.pops = p.pops.filter((q) => G.t - q.t < 0.9);
+    if (p.st === 'intro') { if (u >= AR_INTRO) { p.st = 'play'; p.stT = G.t; p.t0 = G.t; p.next = G.t + 0.3; } return; }
+    if (p.st === 'play') {
+      const el = G.t - p.t0;
+      if (el < AR_TIME - 1.2 && G.t >= p.next) { arSpawn(p); if (el > 8 && Math.random() < 0.25) arSpawn(p); p.next = G.t + Math.max(0.42, 0.85 - el * 0.014) * (0.75 + 0.5 * Math.random()); }
+      if (p.keys.L) p.aim = Math.max(-1.35, p.aim - dt * 2.2); if (p.keys.R) p.aim = Math.min(1.35, p.aim + dt * 2.2);
+      if (AUTO && !window.__noAuto && G.t - p.fireT >= AR_COOL) {    // the test pilot: at the fruit it can get to first, ahead of it
+        let best = null;
+        for (const f of p.fruit) { if (f.y < 42 || f.y > AR_RIVER - 8) continue;   /* (under the top bar) */ const m = arMeet(f); if (m && m[0] > 4 && m[0] < NWf - 4 && (!best || m[2] < best.t)) best = { f, t: m[2] }; }
+        if (best) arShoot(best.f.x, best.f.y);
+      }
+      if (el >= AR_TIME) { p.st = 'done'; p.stT = G.t; if (p.gain >= 3000) SND.play('slWin'); }
+      return;
+    }
+    if (p.st === 'done' && u >= AR_END) endAR();
+  }
+  function drawAR() {
+    const p = G.ar; if (!p) return;
+    world();
+    let al = Math.min(1, (G.t - p.inT) / 0.35);
+    if (p.st === 'done') al *= Math.max(0, Math.min(1, (AR_END - (G.t - p.stT)) / 0.35));
+    const zx = NWf / 2, A = (a) => { ctx.globalAlpha = al * a; };
+    // the place: the sky, the hills, the river, the pipe, the bank (the picture wider than the screen: its middle)
+    { const s = M.sprites.ar_field; A(1); spr('ar_field', zx - s.w / 2, 0, 1, s.w, s.h); A(1); }
+    for (const [cx, cy, k] of p.clouds) { const s = M.sprites['ar_cloud' + k]; A(0.95); spr('ar_cloud' + k, cx * (NWf + 80) - 40 - s.w / 2, cy, 1, s.w, s.h); }
+    // the water out of the pipe: a few white streaks running down it, a little spray where it meets the river
+    { const fx = zx - 210 + 38; A(0.5); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.9; ctx.beginPath();
+      for (let i = 0; i < 6; i++) { const x = fx - 12 + i * 5, ph = ((G.t * 1.6 + i * 0.37) % 1), y0 = 121 + ph * 22; ctx.moveTo(x + ph * (i - 2.5) * 1.2, y0); ctx.lineTo(x + (ph + 0.12) * (i - 2.5) * 1.2, y0 + 5); } ctx.stroke(); A(1); }
+    // the fruit in the air (turning)
+    for (const f of p.fruit) { const s = M.sprites['ar_' + f.kind]; ctx.save(); ctx.translate(f.x, f.y); ctx.rotate(f.r); A(1); spr('ar_' + f.kind, -s.w / 2, -s.h / 2, 1, s.w, s.h); ctx.restore();
+      if (f.kind === 'gold') { A(0.5 + 0.3 * Math.sin(G.t * 14)); const g = ctx.createRadialGradient(f.x, f.y, 2, f.x, f.y, 16); g.addColorStop(0, 'rgba(255,230,120,0.6)'); g.addColorStop(1, 'rgba(255,230,120,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(f.x, f.y, 16, 0, 6.2832); ctx.fill(); } }
+    A(1);
+    // the halves of the ones hit (each the fruit's picture cut along the arrow's way), the juice, the rings on the water
+    for (const h of p.halves) { const s = M.sprites['ar_' + h.kind], v = (G.t - h.t) / 1.4;
+      ctx.save(); ctx.translate(h.x, h.y); ctx.rotate(h.r); ctx.beginPath(); ctx.rect(h.sd < 0 ? -s.w : 0, -s.h, s.w, s.h * 2); ctx.clip(); A(1 - v * v); spr('ar_' + h.kind, -s.w / 2, -s.h / 2, 1, s.w, s.h); ctx.restore(); }
+    for (const j of p.juice) { const v = (G.t - j.t) / (j.ring ? 0.7 : 0.8);
+      if (j.ring) { A(0.6 * (1 - v)); ctx.beginPath(); ctx.ellipse(j.x, j.y, 3 + v * 12, 1 + v * 3, 0, 0, 6.2832); ctx.lineWidth = 1; ctx.strokeStyle = '#ffffff'; ctx.stroke(); continue; }
+      A(1 - v); ctx.beginPath(); ctx.arc(j.x, j.y, j.r * (1 - v * 0.5), 0, 6.2832); ctx.fillStyle = j.c; ctx.fill(); }
+    A(1);
+    // the arrows (pointing the way they fly)
+    for (const a of p.arrows) { const s = M.sprites.ar_arrow, sc = 0.85; ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(Math.atan2(a.vy, a.vx) + Math.PI / 2); A(1); spr('ar_arrow', -s.w * sc / 2, 0, 1, s.w * sc, s.h * sc); ctx.restore(); }
+    // the runner from behind on the bank, the bow over its head turned to the aim, the string drawn back and let go
+    { const nm = `bt_${G.char}_180`, s = M.sprites[nm], sc = 0.78, [bx, by] = arBow(), since = G.t - p.fireT;
+      if (s) { A(1); spr(nm, zx - s.foot[0] * sc, 186 - s.foot[1] * sc + (since < 0.08 ? 0.8 : 0), 1, s.w * sc, s.h * sc); }
+      const bw = M.sprites.ar_bow, k = 0.72, pull = p.st === 'play' ? Math.min(1, since / AR_COOL) : 0.3;
+      ctx.save(); ctx.translate(bx, by); ctx.rotate(p.aim);
+      const tipY = (bw.tips[0][1] - bw.grip[1]) * k, tipX = (bw.tips[1][0] - bw.grip[0]) * k, nock = tipY + 3 + 5 * pull;
+      A(1); ctx.strokeStyle = '#f4f0e8'; ctx.lineWidth = 0.7; ctx.beginPath(); ctx.moveTo(-tipX, tipY); ctx.lineTo(0, nock); ctx.lineTo(tipX, tipY); ctx.stroke();
+      spr('ar_bow', -bw.grip[0] * k, -bw.grip[1] * k, 1, bw.w * k, bw.h * k);
+      if (pull > 0.95 && p.st === 'play') { const s2 = M.sprites.ar_arrow, sc2 = 0.85; A(1); spr('ar_arrow', -s2.w * sc2 / 2, nock - s2.h * sc2 + 1, 1, s2.w * sc2, s2.h * sc2); }
+      ctx.restore(); A(1); }
+    // the points, the time, the count
+    for (const q of p.pops) { const v = G.t - q.t; label(q.s, q.x, q.y - 8 - v * 20, q.big ? 10 : 8, 'center', al * Math.min(1, (0.9 - v) / 0.3), q.big ? '#ffe14a' : '#ffffff'); }
+    if (p.st === 'play') {
+      const left = Math.max(0, AR_TIME - (G.t - p.t0));
+      label(`${Math.ceil(left)}${TR('초', 's')}`, NWf - 49, 58, 9, 'right', al, left < 5 ? '#ff9aa8' : '#ffffff');
+      label(TR(`과일 ${p.hits}개`, `${p.hits} fruit`), 16, 46, 10, 'left', al, '#ffe0a8');
+      label(`${PT(p.gain)}`, 16, 58, 7.5, 'left', al, '#ffe68a');
+      if (G.t - p.t0 < 3) label(TR('과일을 탭해서 쏴요!', 'Tap the fruit to shoot!'), zx, 104, 9.5, 'center', al * (0.75 + 0.25 * Math.sin(G.t * 6)), '#ffffff');
+    }
+    if (p.st === 'intro') {
+      const v = G.t - p.stT, a = Math.min(1, v / 0.3) * Math.max(0, Math.min(1, (AR_INTRO - v) / 0.3)), bw = Math.min(262, NWf - 16);
+      A(a * 0.86); rrect(zx - bw / 2, 66, bw, 60, 8); ctx.fillStyle = '#10141e'; ctx.fill(); A(1);
+      label(TR('과일 화살! 30초', 'Fruit archery! 30 s'), zx, 81, 15, 'center', al * a, '#ffe0a8');
+      label(TR('날아오는 과일을 탭하면 화살이 날아가요', 'Tap a flying fruit and the arrow flies at it'), zx, 99, 7.5, 'center', al * a, '#ffffff');
+      label(TR('한 발에 여러 개면 2배·3배! 황금사과 500점', 'Several with one arrow: x2, x3! Golden apple: 500'), zx, 112, 7.5, 'center', al * a, '#ffe68a');
+    }
+    if (p.st === 'done') {
+      const v = G.t - p.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (AR_END - v) / 0.35));
+      A(a * 0.86); rrect(zx - 112, 66, 224, 62, 8); ctx.fillStyle = '#10141e'; ctx.fill(); A(1);
+      label(TR(`과일 ${p.hits}개 명중!`, `${p.hits} fruit hit!`), zx, 81, 14, 'center', a, '#ffe68a');
+      label(TR(`화살 ${p.shots}발${p.gold ? ` · 황금사과 ${p.gold}개` : ''}`, `${p.shots} arrows${p.gold ? ` · ${p.gold} golden` : ''}`), zx, 98, 7.5, 'center', a, '#ffffff');
+      label(`+${PT(p.gain)}`, zx, 113, 10, 'center', a, '#ffe68a');
+    }
+    ctx.globalAlpha = 1;
+  }
+
   // ---------------------------------------------------------------- stage 2: under water
   // Holding (either button, anywhere on the screen, the up key) swims up; let go and you sink slowly; you can rest on
   // the bottom; the surface stops you. Things are in the water at every height: columns from the bottom and paper hung
@@ -3383,6 +3715,8 @@
     if (G.pk) stepPK(dt);
     if (G.sl) stepSlot(dt);
     if (G.yb) stepYB(dt);
+    if (G.tw) stepTW(dt);
+    if (G.ar) stepAR(dt);
     if (G.cut) stepCut(dt);
     else if (!busy() && G.station >= 0 && COURSE[G.station][5] === STAGE2 - 1) cutCheck();
     G.nudge = Math.max(0, G.nudge - dt * 30);
@@ -3479,7 +3813,7 @@
       }
       if (!themeFiles(th).every((f) => bmp[f])) { G.missing = (G.missing || 0) + 1; (G.missList = G.missList || []).push(th); }   // (tests: a look not ready on arrival)
       if (arrived) { if (!busy()) G.banner = G.t; setLabel(s.st, s.lap); if (s.st[0] === 'ra' && !busy()) startRhythm(); if (s.st[0] === 'vertebral' && !busy()) startOrbit(); if (s.st[0] === 'jejunum' && !busy()) startBaseball();
-        if (s.st[0] === 'spleen' && !busy()) startWhack(); if (s.st[0] === 'hippocampus' && !busy()) startMemory(); if (s.st[0] === 'manhole' && !busy()) startPK(); if (s.st[0] === 'combined' && !busy()) startYB(); }
+        if (s.st[0] === 'spleen' && !busy()) startWhack(); if (s.st[0] === 'hippocampus' && !busy()) startMemory(); if (s.st[0] === 'manhole' && !busy()) startPK(); if (s.st[0] === 'combined' && !busy()) startYB(); if (s.st[0] === 'clarifier1' && !busy()) startTW(); if (s.st[0] === 'outfall' && !busy()) startAR(); }
       manageThemes(); G.memT = G.t;
     }
     // (v44) the toilet jackpot: in the toilet bowl, once the flush has settled (arriving there is in the cut scene)
@@ -4045,7 +4379,7 @@
   // stage a pink disc with a note, the orbit stage a violet disc with a little orbit, baseball a ball, the germ game
   // (v40) a germ, the memory game a neuron. More games: add them here.
   const BAR_W = 160, SCORE_Y = 21.4;                       // (v50: the score sits over the bar)
-  const MINI_MARKS = [['spleen', 'wm'], ['ra', 'rh'], ['vertebral', 'orb'], ['hippocampus', 'mem'], ['jejunum', 'bb'], ['toiletBowl', 'sl'], ['manhole', 'pk'], ['combined', 'yb']].map(([id, kind]) => { const i = COURSE.findIndex((st) => st[0] === id); return { kind, i, lx: STARTS[i] }; });
+  const MINI_MARKS = [['spleen', 'wm'], ['ra', 'rh'], ['vertebral', 'orb'], ['hippocampus', 'mem'], ['jejunum', 'bb'], ['toiletBowl', 'sl'], ['manhole', 'pk'], ['combined', 'yb'], ['clarifier1', 'tw'], ['outfall', 'ar']].map(([id, kind]) => { const i = COURSE.findIndex((st) => st[0] === id); return { kind, i, lx: STARTS[i] }; });
   function miniMark(kind, x, y, alpha) {
     ctx.globalAlpha = alpha * GA;
     ctx.beginPath(); ctx.arc(x, y, 4.6, 0, 6.29); ctx.fillStyle = '#1a0a14'; ctx.fill();
@@ -4093,6 +4427,18 @@
       ctx.fillStyle = '#1a0a14'; ctx.fillRect(x - 2.85, y - 1.75, 5.7, 3.5);
       ctx.fillStyle = '#fffaf0'; for (let k = -1; k <= 1; k++) ctx.fillRect(x + k * 1.85 - 0.75, y - 1.3, 1.5, 2.6);
       ctx.fillStyle = '#e8343c'; for (let k = -1; k <= 1; k++) ctx.fillRect(x + k * 1.85 - 0.45, y - 0.3, 0.9, 0.6);
+      ctx.globalAlpha = GA; return;
+    }
+    if (kind === 'tw') {                                    // (v53) the poop tower: a teal disc, three brown bricks stacked
+      ctx.beginPath(); ctx.arc(x, y, 3.9, 0, 6.29); ctx.fillStyle = '#2a9a8e'; ctx.fill();
+      ctx.fillStyle = '#7a4218'; for (const [dx, dy] of [[-0.6, 1.6], [0.5, 0.1], [-0.2, -1.4]]) { rrect(x + dx - 2.2, y + dy - 0.65, 4.4, 1.3, 0.6); ctx.fill(); }
+      ctx.globalAlpha = GA; return;
+    }
+    if (kind === 'ar') {                                    // (v53) the archery: a sky-blue disc, a red apple, an arrow through
+      ctx.beginPath(); ctx.arc(x, y, 3.9, 0, 6.29); ctx.fillStyle = '#4aa8e8'; ctx.fill();
+      ctx.beginPath(); ctx.arc(x - 0.3, y + 0.5, 2.1, 0, 6.29); ctx.fillStyle = '#e8343c'; ctx.fill();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.55; ctx.beginPath(); ctx.moveTo(x - 2.8, y + 2.8); ctx.lineTo(x + 2.6, y - 2.6); ctx.stroke();
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.moveTo(x + 3.0, y - 3.0); ctx.lineTo(x + 1.6, y - 2.6); ctx.lineTo(x + 2.6, y - 1.6); ctx.closePath(); ctx.fill();
       ctx.globalAlpha = GA; return;
     }
     if (kind === 'yb') {                                    // (v52) the shell game: a red disc, a silver lid with a gold ring
@@ -4274,6 +4620,8 @@
       drawPK();
       drawSlot();
       drawYB();
+      drawTW();
+      drawAR();
       if (G.cut || G.cutTail) drawCut();
       drawHud();
     }
@@ -4301,7 +4649,7 @@
   }
   function gameOver() {
     G.mode = 'over'; show('overBox', true);
-    if (busy()) { for (const g of [G.rh, G.orb, G.bb, G.wm, G.mem, G.pk, G.sl, G.yb]) bankGame(g); G.rh = null; G.orb = null; G.bb = null; G.wm = null; G.mem = null; G.pk = null; G.sl = null; G.yb = null; G.cut = null; SND.stopSong(0.3); SND.stopLoop(0.3); SND.spin(null); }
+    if (busy()) { for (const g of [G.rh, G.orb, G.bb, G.wm, G.mem, G.pk, G.sl, G.yb, G.tw, G.ar]) bankGame(g); G.rh = null; G.orb = null; G.bb = null; G.wm = null; G.mem = null; G.pk = null; G.sl = null; G.yb = null; G.tw = null; G.ar = null; G.cut = null; SND.stopSong(0.3); SND.stopLoop(0.3); SND.spin(null); }
     SND.ambience(false); SND.play('over');
     // (v49) the end card: the score big, where it came from, how long and how far, the best (kept in this browser)
     const P = scoreParts(), f = (n) => n.toLocaleString('en-US');
@@ -4447,7 +4795,7 @@
     window.__settle = async () => { while (Object.keys(pending).length) await Promise.all(Object.values(pending)).catch(() => {}); render(); return Object.keys(bmp).length; };
     window.__state = () => ({ mode: G.mode, t: +G.t.toFixed(2), x: Math.round(G.x), v: +G.v.toFixed(1), hp: +G.hp.toFixed(1), score: G.score, eaten: G.eaten, hits: G.hits,
       station: COURSE[Math.max(0, G.station)][0], seg: G.station, theme: G.theme, lid: +lidAmount().toFixed(2), lastHit: G.lastHit, rot, lap: stationAt(G.x).lap, y: +G.y.toFixed(1), slide: G.slide, obs: G.obs.length, items: G.items.length,
-      NW, RS: +RS.toFixed(3), GW, GH, rhSong: G.rh ? G.rh.song.id : null, orbSong: G.orb ? OB.song.id : null, rotation: { ...ROT }, o2n: G.o2n, boost: +G.boost.toFixed(2), boostHeld: +G.boostHeld.toFixed(2), boosts: G.boosts, decoded: Object.keys(bmp).length, atp: G.atp || 0, orbits: G.orbits || 0, orb: G.orb ? G.orb.st : null, bb: G.bb ? G.bb.st : null, wm: G.wm ? G.wm.st : null, mem: G.mem ? G.mem.st : null, pk: G.pk ? G.pk.st : null, sl: G.sl ? G.sl.st : null, yb: G.yb ? G.yb.st : null, games: G.games || 0, huge: G.obs.filter((o) => o.kind === 'huge').length });
+      NW, RS: +RS.toFixed(3), GW, GH, rhSong: G.rh ? G.rh.song.id : null, orbSong: G.orb ? OB.song.id : null, rotation: { ...ROT }, o2n: G.o2n, boost: +G.boost.toFixed(2), boostHeld: +G.boostHeld.toFixed(2), boosts: G.boosts, decoded: Object.keys(bmp).length, atp: G.atp || 0, orbits: G.orbits || 0, orb: G.orb ? G.orb.st : null, bb: G.bb ? G.bb.st : null, wm: G.wm ? G.wm.st : null, mem: G.mem ? G.mem.st : null, pk: G.pk ? G.pk.st : null, sl: G.sl ? G.sl.st : null, yb: G.yb ? G.yb.st : null, tw: G.tw ? G.tw.st : null, ar: G.ar ? G.ar.st : null, games: G.games || 0, huge: G.obs.filter((o) => o.kind === 'huge').length });
     window.__G = G;
     window.__parts = () => scoreParts();
     window.__die = () => { G.hp = 0; };
@@ -4472,6 +4820,8 @@
       moles: w.moles.map((m) => { const p = wmPlace(m), s = M.sprites[wmName(m)]; return { h: m.h, kind: m.kind, good: m.good, st: m.st, q: +p.q.toFixed(2), x: +p.x.toFixed(1), y: +(p.y - s.foot[1] * p.k * 0.55).toFixed(1) }; }) }; };
     window.__pk = () => { const p = G.pk; if (!p) return null; return { st: p.st, k: p.k, res: p.res.slice(), gain: p.gain, shot: p.shot ? { ...p.shot } : null, aim: p.aim.slice(), power: p.power, kind: p.kind, needle: pkNeedle(p), pad: p.pad && { ...p.pad } }; };
     window.__pkForce = (gx, gh, power) => { const p = G.pk; if (!p || p.st !== 'aim') return; p.aim = [gx, gh]; pkShoot(); p.power = power; p.kind = pkZone(power); };
+    window.__tw = () => { const p = G.tw; if (!p) return null; return { st: p.st, n: p.blocks.length, xs: p.blocks.map((b) => +b.x.toFixed(1)), misses: p.misses, perf: p.perf, best: p.best, gain: p.gain, why: p.why, swing: p.cur ? +twSwing(p).toFixed(1) : null, top: +twTopX(p).toFixed(1), falling: p.fall.length, cam: +p.camS.toFixed(1) }; };
+    window.__ar = () => { const p = G.ar; if (!p) return null; return { st: p.st, hits: p.hits, shots: p.shots, gold: p.gold, gain: p.gain, aim: +p.aim.toFixed(3), fruit: p.fruit.map((f) => ({ kind: f.kind, x: +f.x.toFixed(1), y: +f.y.toFixed(1) })), arrows: p.arrows.length, bow: arBow() }; };
     window.__yb = () => { const p = G.yb; if (!p) return null; return { st: p.st, k: p.k, res: p.res.slice(), gain: p.gain, pot: p.pot, gold: p.gold, slot: p.slot.slice(), goldSlot: p.slot[p.gold], pick: p.pick, ok: p.ok, moved: p.moved, mv: !!p.mv, lift: p.lift.map((v) => +v.toFixed(1)), cur: p.cur, ask: p.ask, x: [0, 1, 2].map(ybX), foot: YB_FOOT, btn: { ...YB_BTN, cx: NWf / 2 } }; };
     window.__sl = () => { const s = G.sl; if (!s) return null; return { st: s.st, k: s.k, res: s.res.slice(), gain: s.gain, want: s.want && s.want.slice(), reach: !!s.reach, reels: s.reels.map((r) => ({ pos: +r.pos.toFixed(2), spin: r.spin, stop: !!r.stop })), mx: slMX(), btns: SLF.btns.map(([x, y]) => [slMX() + x, slMY() + y]) }; };
     window.__pkKick = (gx, gh) => pkKick(gx, gh, 0.5, 'good');

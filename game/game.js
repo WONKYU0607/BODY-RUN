@@ -24,7 +24,7 @@
   const GRAV = 900, JUMP = 326, JUMP2 = 226, JUMP3 = 184, FASTFALL = 2.4;   // single 59 high, double 87.4, triple ~105 (v20: single +10%)
   const JMAX = (JUMP * JUMP + JUMP2 * JUMP2 + JUMP3 * JUMP3) / (2 * GRAV);    // the triple jump at its best (106.2): the 4th and on stop there
   const V0 = 170, ACC = 0.8, VMAX = Infinity;               // (v47: +0.8/s; v43: +1/s, was 0.6; no top speed, was 900)
-  const HP_MAX = 100, DRAIN = 1.0, HIT = 15, HEAL = 25, INVUL = 1.2;
+  const HP_MAX = 100, DRAIN = 1.0, HIT = 20, HEAL = 25, INVUL = 1.2;     // (v51: a bump costs 20, was 15)
   // the player's box: half-width and height running, sliding (the characters are drawn 0.8 of their old size)
   const PW = 5.76, PH = 17.28, SLW = 7.92, SLH = 9.36;     // (v38: 0.9 of v15's 6.4, 19.2, 8.8, 10.4, with the pictures)
   const TOPY = CEIL + 10;                       // a safety stop only: a perfect triple jump tops out at about 104 (head at y 27)
@@ -168,6 +168,7 @@
     if (G.mem || near('hippocampus')) files.add('mem.webp');                                // the memory game's
     if (G.pk || near('manhole')) { files.add('pk_field.webp'); files.add('pk.webp'); files.add(`bat_${G.char}.webp`); }      // (v44) the penalty shoot-out's (v46: the runner kicks)
     if (G.sl || near('toiletBowl')) files.add('sl.webp');                                   // (v44) the toilet jackpot's
+    if (G.yb || near('combined')) { files.add('yb.webp'); files.add('pk.webp'); files.add('sl.webp'); }     // (v52) the shell game's (its dealer, its poop)
     const dc = ((S2_X - s.lx) % LAP + LAP) % LAP;            // the flush cut scene's pictures, near the end of the body
     if (G.cut || G.cutTail || dc < Math.max(2500, G.v * 8)) files.add('cut_flush.webp');
     if (STAGES.bb && !CAPTURE) { if (nearBB) { SND.fetchSong(STAGES.bb).catch(() => {}); if (SND.ctx) SND.prepare(STAGES.bb).catch(() => {}); } else SND.release(STAGES.bb); }
@@ -211,10 +212,12 @@
   function device() { if (rot) ctx.setTransform(0, 1, -1, 0, GH, 0); else ctx.setTransform(1, 0, 0, 1, 0, 0); }
 
   let GA = 1;                                        // what is drawn now is drawn this much (the HUD fading in the cut scene)
+  let curO = null;                                   // (tests: the obstacle being drawn, for window.__drawLog)
   function spr(name, x, y, alpha = 1, w = null, h = null) {
     const s = M.sprites[name]; if (!s) return;
     const im = bmp[s.f]; if (!im) return;
     const a = alpha * GA;
+    if (window.__drawLog && /^(ch|ob|hz)_/.test(name)) { const m = ctx.getTransform(); window.__drawLog.push([name, x, y, w ?? s.w, h ?? s.h, a, m.a, m.b, m.c, m.d, m.e, m.f, curO]); }
     if (a !== 1) ctx.globalAlpha = a;
     ctx.drawImage(im, s.r[0], s.r[1], s.r[2], s.r[3], x, y, w ?? s.w, h ?? s.h);
     if (a !== 1) ctx.globalAlpha = GA;
@@ -240,7 +243,7 @@
       y: 0, vy: 0, jumps: 0, onGround: true, slide: false, slideHeld: false, fastFall: false,
       invul: 0, nudge: 0, char: charName, obs: [], items: [], pops: [], puffs: [],
       genX: 520, genStation: undefined, lastGate: -1e9, R: rng(12345), nextHeal: 1800, station: -1, theme: COURSE[0][3], prevTheme: null, fade: 1, banner: 0, lapShown: 0,
-      blinkAt: -1, blinkR: rng(4242), vt: 0, rh: null, orb: null, bb: null, wm: null, mem: null, pk: null, sl: null, slLap: -1, cut: null, cutTail: null, bounce: false, pitObj: null,
+      blinkAt: -1, blinkR: rng(4242), vt: 0, rh: null, orb: null, bb: null, wm: null, mem: null, pk: null, sl: null, yb: null, slLap: -1, cut: null, cutTail: null, bounce: false, pitObj: null,
       o2n: 0, boost: 0, boostT0: -9, boostHeld: 0, boosts: 0, fire: [], fxR: rng(9191),
       intro: [[1950, 'spike'], [3650, 'drop'], [5420, 'pit'], [7250, 'shot'], [9130, 'door']],
     });
@@ -314,6 +317,15 @@
   const PIT_EDGE = PW * 0.6;                       // standing this far over a hole's edge you still stand
   const PIT_HIT = 20;                              // falling in costs more than a bump
   const PIT_DEPTH = 34, PIT_HOLD = 0.22, PIT_SLOW = 0.3;   // (v47) how deep you sink; how long you stay at the bottom; how slow you go in it
+  // (v51) the pictures fitted to what hurts. The characters are drawn much bigger than their boxes, so passing a thing
+  // right could still look like touching it. Sliding: the four tall characters (phage, jelly, daphnia, sub) still stood
+  // 16-17 over the floor at 0.62 of their height, into what hangs at slide height (its picture down to 15.7, its red rim
+  // to 14.9); their slide picture is now at most SLIDE_MAXH tall (the others are lower anyway). (Drawing what is slid
+  // under higher was tried: the short characters, running, were then hurt by it with a gap between the pictures.)
+  // The triple jump: a tower's picture stood 9 over what hurts; it is drawn smaller, from the floor, so its top comes to
+  // about 1.4 over what hurts, like everything else
+  const SLIDE_MAXH = 14.5, TRIM = { huge: 7.8 };
+  const slideH = (h) => Math.min(h * 0.62, SLIDE_MAXH);
   const DROP_Y0 = 9, DROP_G = 900;                 // a drop hangs with its top here (behind the ceiling band), falls this fast
   const DOOR_UP = 131, DOOR_B = 30;                // how far a door's hanging lip draws up into the ceiling; its standing lip's rise
   const smooth3 = (k) => k * k * (3 - 2 * k);
@@ -335,7 +347,7 @@
   // under water (stage 2) the speed carried in is cut by 30% and climbs from there at the same rate as ever (G.wPen: the
   // 30% of the speed it came in at, held while in the water)
   const wPen = () => (inWater() ? G.wPen || 0 : 0);
-  function curSpeed() { return G.orb || G.bb || G.wm || G.mem || G.pk || G.sl || G.cut ? 0 : G.rh ? G.rh.speed : (G.v - wPen()) * (0.3 + 0.7 * G.slow) * (G.boost > 0 ? BOOST_K : 1) * pitSlow(); }
+  function curSpeed() { return G.orb || G.bb || G.wm || G.mem || G.pk || G.sl || G.yb || G.cut ? 0 : G.rh ? G.rh.speed : (G.v - wPen()) * (0.3 + 0.7 * G.slow) * (G.boost > 0 ? BOOST_K : 1) * pitSlow(); }
   // (v47) in a hole: slowed as you sink (you go down into it, not along to its far wall), stopped at the bottom
   function pitSlow() { return G.pitObj && G.y < 0 && !G.bounce ? (G.pitHoldT ? 0 : PIT_SLOW) : 1; }
   function arriveIn(dist, v) { return ACC > 0 ? (-v + Math.sqrt(v * v + 2 * ACC * Math.max(0, dist))) / ACC : dist / v; }
@@ -467,7 +479,12 @@
       if (S2_L.has(theme)) {                                   // stage 2: under water
         const used = spawnSwim(G.genX, theme, fam, coin, special, v, d, d2, R);
         if (G.genX > G.nextHeal) { addItem(G.genX + used / 2, 50 + R() * 70, 'heal'); G.nextHeal = G.genX + 2200 + R() * 1200; }
-        G.genX += Math.max(used, 60) + v * Math.max(gapT, 0.9) * (0.85 + 0.3 * R());     // (swimming up or down takes longer than a jump)
+        const gap = v * Math.max(gapT, 0.9) * (0.85 + 0.3 * R());     // (swimming up or down takes longer than a jump)
+        // (v51) twice the things to eat under water: a run of six coins in the open water between two patterns (in a
+        // line or a low arc, at any height one swims at)
+        { const n = 6, gx0 = G.genX + Math.max(used, 60) + gap / 2 - 37.5, gy = 45 + R() * 80, arc = R() < 0.5 ? 0 : 8 + R() * 10;
+          for (let i = 0; i < n; i++) addItem(gx0 + i * 15, gy - arc * Math.sin(Math.PI * i / (n - 1)), coin); }
+        G.genX += Math.max(used, 60) + gap;
         continue;
       }
       // weights for the next pattern
@@ -486,6 +503,7 @@
       G.genStation = theme;
       // each new kind of hazard is first shown on its own, early on
       if (G.intro.length && G.genX > G.intro[0][0] && pat !== 'gate' && (G.intro[0][1] !== 'door' || fam.door)) pat = G.intro.shift()[1];
+      if (window.__forcePat && pat !== 'gate') pat = window.__forcePat[Math.floor(R() * window.__forcePat.length)];   // (tests: only these)
       if (window.__patlog) window.__patlog[pat] = (window.__patlog[pat] || 0) + 1;
       const x = G.genX;
       const air = (2 * JUMP) / GRAV;                       // a single jump's time in the air
@@ -628,6 +646,7 @@
     if (G.mem) endMemory();
     if (G.pk) endPK();
     if (G.sl) endSlot();
+    if (G.yb) endYB();
     if (G.cut) cutDone();
     const s = stationAt(G.x), here = COURSE[s.i][5];
     let j = s.i, lap = s.lap;
@@ -664,6 +683,7 @@
     if (G.mem) endMemory();
     if (G.pk) endPK();
     if (G.sl) endSlot();
+    if (G.yb) endYB();
     if (G.cut) cutDone();
     const s = stationAt(G.x), lap = STARTS[j] + 1 > s.lx ? s.lap : s.lap + 1;
     G.x = lap * LAP + STARTS[j] + 1;
@@ -693,6 +713,7 @@
     if (G.mem) { memDown(nx, ny); e.preventDefault(); return; }
     if (G.pk) { pkDown(e.pointerId, nx, ny); e.preventDefault(); return; }
     if (G.sl) { slTap(nx, ny); e.preventDefault(); return; }
+    if (G.yb) { ybDown(nx, ny); e.preventDefault(); return; }
     const side = (nx < NW / 2) !== SET.swap ? 'jump' : 'slide';    // the left half jumps (the right, swapped)
     held.set(e.pointerId, side);
     if (side === 'jump') doJump();
@@ -709,6 +730,7 @@
       if (BB_KEY[e.code]) { bbKeys.add(BB_KEY[e.code]); e.preventDefault(); return; }
       if (['Space', 'Enter', 'KeyJ', 'KeyF'].includes(e.code)) { bbSwing(); e.preventDefault(); return; }
     }
+    if (G.yb && G.mode === 'play' && ybKey(e.code)) { e.preventDefault(); return; }    // (v52) the shell game: arrows, space, 1-3
     const dg = /^(Digit|Numpad)([0-9])$/.exec(e.code);                // the germ and memory games: the number keys
     if (dg && G.wm && G.mode === 'play') { if (WM_KEY[dg[2]] !== undefined) wmKey(WM_KEY[dg[2]]); e.preventDefault(); return; }
     if (dg && G.mem && G.mode === 'play') { memKey(+dg[2] - 1); e.preventDefault(); return; }
@@ -1148,7 +1170,7 @@
   const OB_PLANS = {};                                     // laid out once per song, when first needed
   const orbPlan = (song) => OB_PLANS[song.id] || (OB_PLANS[song.id] = planOrbit(song));
   let OB = orbPlan(songFor('orb'));                        // the path of the stage on now (or of the next one)
-  const busy = () => !!(G.rh || G.orb || G.bb || G.wm || G.mem || G.pk || G.sl || G.cut);
+  const busy = () => !!(G.rh || G.orb || G.bb || G.wm || G.mem || G.pk || G.sl || G.yb || G.cut);
   function otime() {
     const o = G.orb;
     if (o.wait !== null) return -OB_LEAD;                    // the song still on its way
@@ -2956,6 +2978,265 @@
     ctx.globalAlpha = 1;
   }
 
+  // ---------------------------------------------------------------- the shell game (in the combined sewer) (v52)
+  // '야바위': the user's mouse deals at a velvet-skirted table under a string of lights: three domed manhole lids
+  // (yabawi.py), the golden poop under one. It lifts that lid to show you, then shuffles: two lids swapping (one passing
+  // in front, the other behind) and, from the third round, all three going round at once; faster every round. Tap the
+  // lid it is under (or the arrows and space, or 1-3). Right: the pot (500, doubled each round) and a choice: one more
+  // round for double, or take it. Wrong: the pot is gone and it ends. Five rounds at most (8,000). No cheating: it is
+  // where the moves you saw put it.
+  const YB_N = 5, YB_INTRO = 2.8, YB_LIFT = 34, YB_BASE = 500, YB_WAIT = 9, YB_ASKWAIT = 8, YB_END = 2.8, YB_REVEAL = 1.7;
+  const YB_MOVES = [[5, 0.36], [7, 0.27], [9, 0.2], [11, 0.15], [13, 0.115]];     // each round: how many moves, how long each (s)
+  const YB_SP = 64, YB_FOOT = 124, YB_TOP = 102;            // the lids' spacing; where their feet stand; the table's top edge
+  const YB_BTN = { y: 163, w: 118, h: 25, dx: 64 };          // the double-or-take buttons (on the skirt)
+  const ybX = (slot) => NWf / 2 + (slot - 1) * YB_SP;
+  const ybPot = (k) => YB_BASE * Math.pow(2, k);              // the pot after the round k (0 ..) is won
+  function startYB() {
+    holdBoost();
+    G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
+    G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
+    G.yb = { st: 'intro', stT: G.t, inT: G.t, k: 0, res: [], gain: 0, pot: 0, slot: [0, 1, 2], gold: Math.floor(Math.random() * 3),
+      lift: [0, 0, 0], liftTo: [0, 0, 0], mv: null, moved: 0, cur: 1, ask: 0, pick: -1, ok: null, coins: [], say: null, lean: 0, flash: -9, pressT: -9 };
+    G.slideHeld = false; held.clear(); pressed.jump = false;
+  }
+  function endYB() {
+    bankGame(G.yb); G.yb = null; G.games = (G.games || 0) + 1; resumeBoost();
+    G.genX = Math.max(G.genX, G.x + NW * 0.8);
+    G.banner = G.t;
+  }
+  const ybSay = (p, ko, en) => { p.say = { s: TR(ko, en), t: G.t }; };
+  function ybRound(p) {                                      // a round: show where it is, then shuffle
+    p.st = 'show'; p.stT = G.t; p.pick = -1; p.ok = null; p.moved = 0; p.mv = null; p.cur = 1;
+    p.liftTo = [0, 1, 2].map((i) => (i === p.gold ? YB_LIFT : 0));
+    ybSay(p, p.k ? '이번엔 더 빨라~' : '잘 봐~', p.k ? 'Faster now~' : 'Watch closely~');
+    SND.play('ybLift');
+  }
+  // the next move of the shuffle (decided as it starts, from where things are): two lids swapping (more often with the
+  // golden one), or from the third round now and then all three going round
+  function ybNextMove(p) {
+    const [n, dur] = YB_MOVES[p.k];
+    if (p.moved >= n) { p.mv = null; p.st = 'pick'; p.stT = G.t; ybSay(p, '어디게?', 'Where is it?'); return; }
+    const at = [0, 1, 2].map((s) => p.slot.indexOf(s)), gs = p.slot[p.gold];
+    let paths, d = dur;
+    if (p.k >= 2 && Math.random() < 0.3) {
+      const dir = Math.random() < 0.5 ? 1 : -1;               // each one slot on; the end one goes across, behind
+      paths = [0, 1, 2].map((s) => { const to = (s + dir + 3) % 3, far = Math.abs(to - s) === 2; return { lid: at[s], from: s, to, dy: far ? -11 : 5, ds: far ? -0.1 : 0.05 }; });
+      d *= 1.2;
+    } else {
+      let pair = [[0, 1], [1, 2], [0, 2]][Math.floor(Math.random() * 3)];
+      if (!pair.includes(gs) && Math.random() < 0.65) pair = [[0, 1], [1, 2], [0, 2]].filter((q) => q.includes(gs))[Math.floor(Math.random() * 2)];
+      const far = Math.abs(pair[0] - pair[1]) === 2, front = Math.random() < 0.5, A = 7 + (far ? 3 : 0), B = -6 - (far ? 3 : 0);
+      paths = [{ lid: at[pair[0]], from: pair[0], to: pair[1], dy: front ? A : B, ds: front ? 0.08 : -0.08 },
+        { lid: at[pair[1]], from: pair[1], to: pair[0], dy: front ? B : A, ds: front ? -0.08 : 0.08 }];
+      if (far) d *= 1.2;
+    }
+    p.mv = { t0: G.t, dur: d, paths }; p.moved++;
+    p.lean = paths[0].to > paths[0].from ? 1 : -1;
+    SND.play('ybSlide');
+  }
+  // where lid i is drawn: its foot's middle (lifted), its size, where its shadow lies (on the felt)
+  function ybLidPos(p, i) {
+    let x = ybX(p.slot[i]), y = YB_FOOT, s = 1;
+    const m = p.mv, pa = m && m.paths.find((q) => q.lid === i);
+    if (pa) { const u = Math.min(1, (G.t - m.t0) / m.dur), e = u * u * (3 - 2 * u), b = Math.sin(Math.PI * u);
+      x = ybX(pa.from) + (ybX(pa.to) - ybX(pa.from)) * e; y += pa.dy * b; s += pa.ds * b; }
+    return [x, y - p.lift[i], s, y];
+  }
+  function ybPick(slot) {
+    const p = G.yb; if (!p || p.st !== 'pick' || slot < 0 || slot > 2) return;
+    p.pick = slot; p.cur = slot; p.st = 'reveal'; p.stT = G.t; p.pressT = G.t;
+    p.liftTo[p.slot.indexOf(slot)] = YB_LIFT;
+    SND.play('ybLift'); buzz(20);
+  }
+  function ybAsk(go) {
+    const p = G.yb; if (!p || p.st !== 'ask') return;
+    p.ask = go ? 0 : 1; p.pressT = G.t;
+    if (go) { p.k++; ybRound(p); SND.play('ui'); }
+    else { p.gain = p.pot; p.st = 'done'; p.stT = G.t; SND.play('slSmall'); ybCoins(p, ybX(p.slot[p.gold]), YB_FOOT - 14, 14); }
+  }
+  function ybCoins(p, x, y, n) {
+    for (let i = 0; i < n; i++) p.coins.push({ x, y, vx: (Math.random() - 0.5) * 140, vy: -90 - Math.random() * 110, r: Math.random() * 6.28, t: G.t });
+  }
+  function ybDown(x, y) {
+    const p = G.yb; if (!p) return;
+    if (p.st === 'pick') {                                    // a lid: anywhere in its column over the table
+      for (let s = 0; s < 3; s++) if (Math.abs(x - ybX(s)) < YB_SP / 2 && y > YB_FOOT - 60 && y < YB_FOOT + 22) { ybPick(s); return; }
+    } else if (p.st === 'ask') {
+      for (const [go, bx] of [[true, NWf / 2 - YB_BTN.dx], [false, NWf / 2 + YB_BTN.dx]]) if (Math.abs(x - bx) < YB_BTN.w / 2 + 3 && Math.abs(y - YB_BTN.y) < YB_BTN.h / 2 + 4) { ybAsk(go); return; }
+    }
+  }
+  function ybKey(code) {
+    const p = G.yb; if (!p) return false;
+    const L = ['ArrowLeft', 'KeyA'].includes(code), R = ['ArrowRight', 'KeyD'].includes(code), OK = ['Space', 'Enter', 'KeyJ', 'KeyF'].includes(code);
+    const dg = /^(Digit|Numpad)([1-3])$/.exec(code);
+    if (p.st === 'pick') { if (dg) ybPick(+dg[2] - 1); else if (L) p.cur = Math.max(0, p.cur - 1); else if (R) p.cur = Math.min(2, p.cur + 1); else if (OK) ybPick(p.cur); else return false; return true; }
+    if (p.st === 'ask') { if (dg && +dg[2] <= 2) ybAsk(dg[2] === '1'); else if (L) p.ask = 0; else if (R) p.ask = 1; else if (OK) ybAsk(p.ask === 0); else return false; return true; }
+    return L || R || OK || !!dg;
+  }
+  function stepYB(dt) {
+    const p = G.yb; if (!p) return;
+    const u = G.t - p.stT;
+    for (let i = 0; i < 3; i++) p.lift[i] += (p.liftTo[i] - p.lift[i]) * Math.min(1, dt * 16);
+    for (const c of p.coins) { c.vy += 420 * dt; c.x += c.vx * dt; c.y += c.vy * dt; c.r += dt * 9; }
+    p.coins = p.coins.filter((c) => c.y < NH + 10);
+    if (p.st === 'intro') { if (u >= YB_INTRO) ybRound(p); return; }
+    if (p.st === 'show') {
+      if (u >= 0.95 && p.liftTo[p.gold] > 0) { p.liftTo[p.gold] = 0; SND.play('ybDown'); }
+      if (u >= 1.35) { p.st = 'shuffle'; p.stT = G.t; ybSay(p, '섞는다~!', 'Shuffling~!'); ybNextMove(p); }
+      return;
+    }
+    if (p.st === 'shuffle') {
+      if (p.mv && G.t >= p.mv.t0 + p.mv.dur) { for (const pa of p.mv.paths) p.slot[pa.lid] = pa.to; p.mv = null; }
+      if (!p.mv) ybNextMove(p);
+      return;
+    }
+    if (p.st === 'pick') {
+      if (AUTO && !window.__noAuto && u > 0.45) { const g = p.slot[p.gold]; ybPick(window.__ybMiss ? (g + 1) % 3 : g); return; }
+      if (u > YB_WAIT) ybPick(Math.floor(Math.random() * 3));         // (left alone: a guess)
+      return;
+    }
+    if (p.st === 'reveal') {
+      if (p.ok === null && u >= 0.38) {
+        p.ok = p.slot[p.gold] === p.pick; p.flash = G.t;
+        if (p.ok) { p.pot = ybPot(p.k); p.res.push('win'); SND.play('ybWin'); buzz([30, 30, 60]); ybCoins(p, ybX(p.pick), YB_FOOT - 14, 10 + p.k * 4); ybSay(p, '헉! 맞혔네...', 'What?! You got it...'); }
+        else { p.res.push('lose'); SND.play('ybLose'); buzz(60); ybSay(p, '히히, 꽝~', 'Hee hee, nope~'); }
+      }
+      if (p.ok === false && u >= 0.8 && p.liftTo[p.gold] === 0) p.liftTo[p.gold] = YB_LIFT;      // where it was
+      if (u >= YB_REVEAL) {
+        if (p.ok && p.k < YB_N - 1) { p.st = 'ask'; p.stT = G.t; p.ask = 0; ybSay(p, '한 판 더?', 'Double or nothing?'); }
+        else { p.gain = p.ok ? p.pot : 0; if (!p.ok) p.pot = 0; p.st = 'done'; p.stT = G.t; if (p.ok) { SND.play('slJackpot'); ybCoins(p, NWf / 2, YB_FOOT - 30, 40); } }
+      }
+      return;
+    }
+    if (p.st === 'ask') {
+      if (AUTO && !window.__noAuto && u > 0.6) { ybAsk(p.k + 1 < (window.__ybStopAt || 99)); return; }
+      if (u > YB_ASKWAIT) ybAsk(false);                         // (left alone: it takes the pot)
+      return;
+    }
+    if (p.st === 'done' && u >= YB_END) endYB();
+  }
+  function drawYB() {
+    const p = G.yb; if (!p) return;
+    world();
+    let al = Math.min(1, (G.t - p.inT) / 0.35);
+    if (p.st === 'done') al *= Math.max(0, Math.min(1, (YB_END - (G.t - p.stT)) / 0.35));
+    const zx = NWf / 2, A = (a) => { ctx.globalAlpha = al * a; };
+    // the sewer behind, darkened; a warm light over the table
+    A(0.82); ctx.fillStyle = '#0a0508'; ctx.fillRect(0, 0, NWf, NH);
+    { const g = ctx.createRadialGradient(zx, 110, 8, zx, 110, 200); g.addColorStop(0, 'rgba(255,196,120,0.34)'); g.addColorStop(0.45, 'rgba(255,150,90,0.12)'); g.addColorStop(1, 'rgba(255,150,90,0)');
+      A(1); ctx.fillStyle = g; ctx.fillRect(0, 0, NWf, NH); }
+    // a string of lights across, sagging in two loops; the bulbs lit in turn (all of them flashing on a win)
+    { const yAt = (x) => 41 + 9 * Math.abs(Math.sin(Math.PI * x / (NWf / 2)));
+      A(0.9); ctx.beginPath(); for (let x = -4; x <= NWf + 4; x += 4) ctx.lineTo(x, yAt(x)); ctx.lineWidth = 0.9; ctx.strokeStyle = '#2a1a14'; ctx.stroke();
+      const cols = ['255,214,106', '255,122,138', '122,216,255', '168,255,138'], win = p.ok && (p.st === 'reveal' || p.st === 'ask');
+      for (let i = 0, x = 9; x < NWf; x += 21, i++) {
+        const y = yAt(x) + 3.2, on = win ? Math.floor(G.t * 9) % 2 === 0 : ((i - Math.floor(G.t * 4)) % 3 + 3) % 3 !== 0, c = cols[i % 4];
+        if (on) { const gg = ctx.createRadialGradient(x, y, 0, x, y, 9); gg.addColorStop(0, `rgba(${c},0.55)`); gg.addColorStop(1, `rgba(${c},0)`); A(1); ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(x, y, 9, 0, 6.2832); ctx.fill(); }
+        A(1); ctx.fillStyle = '#3a2a24'; ctx.fillRect(x - 0.9, y - 3.6, 1.8, 1.6);
+        ctx.beginPath(); ctx.ellipse(x, y, 1.9, 2.5, 0, 0, 6.2832); ctx.fillStyle = on ? `rgb(${c})` : `rgba(${c},0.35)`; ctx.fill();
+        if (on) { ctx.beginPath(); ctx.arc(x - 0.6, y - 0.8, 0.6, 0, 6.2832); ctx.fillStyle = '#ffffff'; ctx.fill(); }
+      }
+    }
+    // the dealer (the user's mouse) behind the table: leaning with the moves while shuffling; shaking its head when you
+    // win, hopping when you lose
+    { const fr = p.st === 'shuffle' && p.mv ? (p.lean > 0 ? 'pk_dR1' : 'pk_dL1') : 'pk_k0', s = M.sprites[fr], sc = 1.2;
+      let dx = 0, dy = 0;
+      if (p.st === 'shuffle') dy = -Math.abs(Math.sin(G.t * 22)) * 1.4;
+      if (p.ok === true && (p.st === 'reveal' || p.st === 'ask')) dx = Math.sin(G.t * 30) * 1.6 * Math.max(0, 1 - (G.t - p.flash) / 1.2);
+      if (p.ok === false && p.st !== 'intro') dy = -Math.abs(Math.sin(G.t * 11)) * 4;
+      A(1); spr(fr, zx - s.c[0] * sc + dx, YB_TOP + 12 - s.bottom * sc + dy, 1, s.w * sc, s.h * sc); A(1); }
+    // the table, its felt lit in the middle
+    spr('yb_table', zx - 145, YB_TOP, 1, 290, 78); A(1);
+    { const g = ctx.createRadialGradient(zx, YB_FOOT - 2, 4, zx, YB_FOOT - 2, 120); g.addColorStop(0, 'rgba(255,230,170,0.16)'); g.addColorStop(1, 'rgba(255,230,170,0)'); ctx.fillStyle = g; ctx.fillRect(zx - 145, YB_TOP + 4, 290, 26); }
+    // the lids: their shadows on the felt, the golden poop under its lid when that is up, the lids (the far ones first)
+    const pos = [0, 1, 2].map((i) => ybLidPos(p, i));
+    for (let i = 0; i < 3; i++) { const [x, , s, fy] = pos[i], k = Math.max(0.35, 1 - p.lift[i] / 60); A(0.42 * k); ctx.beginPath(); ctx.ellipse(x + 1.5, fy + 1.2, 24 * s * k, 6.2 * s * k, 0, 0, 6.2832); ctx.fillStyle = '#000000'; ctx.fill(); }
+    if (p.lift[p.gold] > 1.5) {
+      const [x, , , fy] = pos[p.gold], sh = p.ok === true ? 1 : 0;
+      if (sh || p.st === 'show') { const g = ctx.createRadialGradient(x, fy - 10, 2, x, fy - 10, 30); g.addColorStop(0, 'rgba(255,220,110,0.65)'); g.addColorStop(1, 'rgba(255,220,110,0)'); A(1); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, fy - 10, 30, 0, 6.2832); ctx.fill(); }
+      A(1); spr('sl_s0', x - 14, fy - 25, 1, 28, 28); A(1);
+    }
+    const order = [0, 1, 2].sort((a, b) => (pos[a][3] - pos[b][3]) || (pos[a][2] - pos[b][2]));
+    // (a lid is lifted by swinging it open on its right edge, like a hand tipping it: it does not cover the dealer)
+    for (const i of order) { const [x, , s, fy] = pos[i], L = M.sprites.yb_lid, f = Math.min(1, p.lift[i] / YB_LIFT), hx = x + 23 * s, hy = fy - f * 6;
+      ctx.save(); ctx.translate(hx, hy); ctx.rotate(f * 1.15); A(1); spr('yb_lid', -23 * s - L.foot[0] * s, -L.foot[1] * s, 1, L.w * s, L.h * s); ctx.restore(); }
+    A(1);
+    // picking: each lid's foot ringed, the one the keys are on brighter; the finger's hint
+    if (p.st === 'pick') {
+      for (let s = 0; s < 3; s++) { const x = ybX(s), on = s === p.cur; A((on ? 0.75 : 0.4) + 0.25 * Math.sin(G.t * 7));
+        ctx.beginPath(); ctx.ellipse(x, YB_FOOT + 1, 27, 8, 0, 0, 6.2832); ctx.lineWidth = on ? 1.6 : 1.1; ctx.strokeStyle = '#ffe68a'; ctx.stroke(); }
+      A(1); label(TR('황금똥이 든 뚜껑을 탭!', 'Tap the lid with the golden poop!'), zx, 152, 9.5, 'center', al * (0.8 + 0.2 * Math.sin(G.t * 6)), '#ffffff');
+    }
+    // what was picked came to: the word over the skirt, sparkles round the poop
+    if (p.st === 'reveal' && p.ok !== null) {
+      const v = G.t - p.flash, sc = 1 + 0.35 * Math.max(0, 1 - v / 0.25);
+      if (p.ok) {
+        if (v < 0.4) { A((1 - v / 0.4) * 0.35); ctx.fillStyle = '#fff4c0'; ctx.fillRect(0, 0, NWf, NH); }
+        const [x, , , fy] = pos[p.gold];
+        for (let k = 0; k < 6; k++) { const a = k * 1.047 + G.t * 2, r = 20 + 4 * Math.sin(G.t * 9 + k), sx = x + Math.cos(a) * r, sy = fy - 12 + Math.sin(a) * r * 0.6, z = 1.6 + 0.9 * Math.sin(G.t * 12 + k * 2);
+          A(1); ctx.beginPath(); ctx.moveTo(sx, sy - z * 2); ctx.lineTo(sx + z * 0.5, sy - z * 0.5); ctx.lineTo(sx + z * 2, sy); ctx.lineTo(sx + z * 0.5, sy + z * 0.5); ctx.lineTo(sx, sy + z * 2); ctx.lineTo(sx - z * 0.5, sy + z * 0.5); ctx.lineTo(sx - z * 2, sy); ctx.lineTo(sx - z * 0.5, sy - z * 0.5); ctx.closePath(); ctx.fillStyle = '#fff6c0'; ctx.fill(); }
+        label(TR('맞혔다!', 'Got it!'), zx, 150, 17 * sc, 'center', al, '#ffe14a');
+        label(TR(`판돈 ${PT(p.pot)}`, `Pot ${PT(p.pot)}`), zx, 167, 9, 'center', al, '#ffffff');
+      } else {
+        label(TR('꽝!', 'Nope!'), zx, 150, 17 * sc, 'center', al, '#ff9aa8');
+        label(p.k ? TR(`판돈 ${PT(p.pot || ybPot(p.k - 1))} 다 날렸다...`, `The pot (${PT(p.pot || ybPot(p.k - 1))}) is gone...`) : TR('여기 있었지롱~', 'It was here~'), zx, 167, 9, 'center', al, '#ffffff');
+      }
+    }
+    // double or take: two buttons on the skirt, the pot over them
+    if (p.st === 'ask') {
+      label(TR(`판돈 ${PT(p.pot)}`, `Pot ${PT(p.pot)}`), zx, 144, 11, 'center', al, '#ffe14a');
+      const pr = G.t - p.pressT < 0.15;
+      [[true, zx - YB_BTN.dx, TR('한 판 더! ×2', 'Again! x2'), TR(`성공하면 ${PT(ybPot(p.k + 1))}`, `win ${PT(ybPot(p.k + 1))}`), ['#fff2a8', '#ffc83a', '#c07a10']],
+        [false, zx + YB_BTN.dx, TR('그만! 챙기기', 'Take it'), `+${PT(p.pot)}`, ['#cfeaff', '#5aa8f0', '#1f5aa8']]].forEach(([go, bx, t1, t2, c], j) => {
+        const sel = p.ask === j, y = YB_BTN.y + (pr && sel ? 1 : 0), w = YB_BTN.w, h = YB_BTN.h;
+        A(1); rrect(bx - w / 2 - 1.4, y - h / 2 - 1.4, w + 2.8, h + 2.8, 8); ctx.fillStyle = '#1a0a14'; ctx.fill();
+        const g = ctx.createLinearGradient(0, y - h / 2, 0, y + h / 2); g.addColorStop(0, c[0]); g.addColorStop(0.5, c[1]); g.addColorStop(1, c[2]);
+        rrect(bx - w / 2, y - h / 2, w, h, 7); ctx.fillStyle = g; ctx.fill();
+        A(0.45); rrect(bx - w / 2 + 3, y - h / 2 + 1.6, w - 6, h * 0.3, 4); ctx.fillStyle = '#ffffff'; ctx.fill();
+        if (sel) { A(0.5 + 0.4 * Math.sin(G.t * 7)); rrect(bx - w / 2 - 3, y - h / 2 - 3, w + 6, h + 6, 9); ctx.lineWidth = 1.4; ctx.strokeStyle = '#ffffff'; ctx.stroke(); }
+        A(1); label(t1, bx, y - 3.6, 9.5, 'center', al, '#ffffff');
+        ctx.font = '800 6.4px system-ui, -apple-system, "Noto Sans KR", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = go ? '#6a3200' : '#ffffff'; ctx.fillText(t2, bx, y + 6.8);         // (plain: a dark outline would blot it)
+      });
+    }
+    A(1);
+    // the coins, the dealer's words (a bubble at its head)
+    for (const c of p.coins) { ctx.save(); ctx.translate(c.x, c.y); ctx.scale(Math.cos(c.r), 1); spr('sl_coin', -4.5, -4.5, 1, 9, 9); ctx.restore(); A(1); }
+    if (p.say && p.st !== 'intro' && p.st !== 'done') {
+      const v = G.t - p.say.t, a = Math.min(1, v / 0.12), bx = zx + 30, by = 52;
+      ctx.font = '900 7.5px system-ui, -apple-system, "Noto Sans KR", sans-serif';
+      const w = Math.max(40, ctx.measureText(p.say.s).width + 12), sc = 0.85 + 0.15 * Math.min(1, v / 0.12);
+      ctx.save(); ctx.translate(bx, by); ctx.scale(sc, sc); A(a);
+      rrect(-1.2, -9.2, w + 2.4, 18.4, 8); ctx.fillStyle = '#1a0a14'; ctx.fill();
+      ctx.beginPath(); ctx.moveTo(4, 6); ctx.lineTo(-5, 15); ctx.lineTo(13, 6.5); ctx.closePath(); ctx.fill();
+      rrect(0, -8, w, 16, 7); ctx.fillStyle = '#fffaf2'; ctx.fill();
+      ctx.beginPath(); ctx.moveTo(5.2, 6); ctx.lineTo(-2.6, 12.8); ctx.lineTo(11.6, 6); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#3a1020'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(p.say.s, w / 2, 0.4);   // (dark on the white: no outline)
+      ctx.restore(); A(1);
+    }
+    // the rounds: five little poops at the top left (gold: won; the one now pulsing)
+    for (let i = 0; i < YB_N; i++) { const won = p.res[i] === 'win', now = i === p.k && p.st !== 'done' && p.st !== 'intro';
+      A(won ? 1 : now ? 0.6 + 0.4 * Math.sin(G.t * 6) : 0.28); spr('sl_s0', 14 + i * 8.5, 27.5, 1, 8, 8); }
+    A(1);
+    if (p.st === 'intro') {
+      const v = G.t - p.stT, a = Math.min(1, v / 0.3) * Math.max(0, Math.min(1, (YB_INTRO - v) / 0.3));
+      const bw = Math.min(268, NWf - 16), t0 = TR('야바위! 황금똥을 찾아라', 'Shell game! Find the golden poop');
+      A(a * 0.86); rrect(zx - bw / 2, 66, bw, 62, 8); ctx.fillStyle = '#10141e'; ctx.fill(); A(1);
+      ctx.font = '900 15px system-ui, -apple-system, "Noto Sans KR", sans-serif';
+      label(t0, zx, 81, Math.min(15, 15 * (bw - 14) / ctx.measureText(t0).width), 'center', al * a, '#ffe0a8');
+      label(TR('쥐가 뚜껑을 섞어요. 황금똥이 든 뚜껑을 탭!', 'The mouse shuffles the lids - tap the one hiding the golden poop'), zx, 100, 7.5, 'center', al * a, '#ffffff');
+      label(TR('맞히면 판돈 2배, 틀리면 다 잃어요 (최대 8,000점)', 'Right: double the pot. Wrong: lose it all (up to 8,000)'), zx, 113, 7.5, 'center', al * a, '#ffe68a');
+    }
+    if (p.st === 'done') {
+      const v = G.t - p.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (YB_END - v) / 0.35));
+      const sweep = p.res.length === YB_N && p.res.every((r) => r === 'win');
+      A(a * 0.86); rrect(zx - 112, 66, 224, 56, 8); ctx.fillStyle = '#10141e'; ctx.fill(); A(1);
+      label(sweep ? TR('싹쓸이!', 'Clean sweep!') : p.gain ? TR('챙겼다!', 'Banked it!') : TR('다 털렸다...', 'Lost it all...'), zx, 82, 15, 'center', a, p.gain ? '#ffe68a' : '#ffd0dc');
+      label(`+${PT(p.gain)}`, zx, 104, 10, 'center', a, '#ffe68a');
+    }
+    ctx.globalAlpha = 1;
+  }
+
   // ---------------------------------------------------------------- stage 2: under water
   // Holding (either button, anywhere on the screen, the up key) swims up; let go and you sink slowly; you can rest on
   // the bottom; the surface stops you. Things are in the water at every height: columns from the bottom and paper hung
@@ -3082,7 +3363,7 @@
     if (G.mode !== 'play') return;
     if (G.bb && G.bb.fx) G.bb.fx.age += dt;                  // the baseball hit's burst runs on its own clock ...
     if (G.bb && G.bb.hold > 0) { G.bb.hold -= dt; return; }  // ... through the hit-stop, when all else stands still
-    if (AUTO && !busy() && !(G.boost > 0)) pilot();
+    if (AUTO && !busy() && !(G.boost > 0) && !window.__noPilot) pilot();      // (__noPilot: tests, run into everything)
     G.t += dt;
     if (!busy()) G.vt += dt;                                // the speed does not climb during the rhythm and orbit stages
     G.v = Math.min(VMAX, V0 + ACC * G.vt);
@@ -3101,6 +3382,7 @@
     if (G.mem) stepMemory();
     if (G.pk) stepPK(dt);
     if (G.sl) stepSlot(dt);
+    if (G.yb) stepYB(dt);
     if (G.cut) stepCut(dt);
     else if (!busy() && G.station >= 0 && COURSE[G.station][5] === STAGE2 - 1) cutCheck();
     G.nudge = Math.max(0, G.nudge - dt * 30);
@@ -3197,7 +3479,7 @@
       }
       if (!themeFiles(th).every((f) => bmp[f])) { G.missing = (G.missing || 0) + 1; (G.missList = G.missList || []).push(th); }   // (tests: a look not ready on arrival)
       if (arrived) { if (!busy()) G.banner = G.t; setLabel(s.st, s.lap); if (s.st[0] === 'ra' && !busy()) startRhythm(); if (s.st[0] === 'vertebral' && !busy()) startOrbit(); if (s.st[0] === 'jejunum' && !busy()) startBaseball();
-        if (s.st[0] === 'spleen' && !busy()) startWhack(); if (s.st[0] === 'hippocampus' && !busy()) startMemory(); if (s.st[0] === 'manhole' && !busy()) startPK(); }
+        if (s.st[0] === 'spleen' && !busy()) startWhack(); if (s.st[0] === 'hippocampus' && !busy()) startMemory(); if (s.st[0] === 'manhole' && !busy()) startPK(); if (s.st[0] === 'combined' && !busy()) startYB(); }
       manageThemes(); G.memT = G.t;
     }
     // (v44) the toilet jackpot: in the toilet bowl, once the flush has settled (arriving there is in the cut scene)
@@ -3231,7 +3513,7 @@
   }
   // fire behind the body while boosting: embers and smoke thrown back (in screen units, their own random)
   function addSpark(burst) {
-    const R = G.fxR, n = 'ch_' + G.char, w = SW(n), h = SH(n) * (G.slide ? 0.62 : 1);
+    const R = G.fxR, n = 'ch_' + G.char, w = SW(n), h = G.slide ? slideH(SH(n)) : SH(n);
     const smoke = !burst && R() < 0.22;
     G.fire.push({ x: PX - w * 0.38 + R() * 4, y: GY + 1 - G.y - h * (0.25 + 0.5 * R()), vx: -(70 + R() * (burst ? 160 : 110)), vy: (R() - 0.5) * (burst ? 90 : 36) - 10,
       age: 0, life: smoke ? 0.55 + R() * 0.2 : 0.22 + R() * 0.2, r: smoke ? 2.2 + R() * 1.5 : 0.7 + R() * 1.1, smoke });
@@ -3239,7 +3521,7 @@
   function stepFire(dt) {
     if (G.boost > 0) {
       G.fireAcc = (G.fireAcc || 0) + dt * 130; while (G.fireAcc >= 1) { addSpark(false); G.fireAcc -= 1; }
-      const h = SH('ch_' + G.char) * (G.slide ? 0.62 : 1);
+      const h = G.slide ? slideH(SH('ch_' + G.char)) : SH('ch_' + G.char);
       G.trail = (G.trail || []).filter((q) => G.t - q.t < 0.5); G.trail.push({ t: G.t, y: GY + 1 - G.y - h * 0.5 });
     } else if (G.trail && G.trail.length) G.trail = [];
     for (const p of G.fire) { p.age += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy -= (p.smoke ? 22 : 8) * dt; }
@@ -3557,6 +3839,7 @@
     world();
     for (const o of G.obs) {
       const sx = o.x - cam; if (sx >= NWf || sx + o.w <= 0) continue;
+      curO = o;
       if (o.kind === 'hang') rspr(o.name, sx, o.y);
       else if (o.kind === 'door') drawDoor(o, sx);
       else if (o.kind === 'spike' && o.e > 0) rspr(o.name, sx, o.y);
@@ -3566,7 +3849,7 @@
         rspr(o.nd, sx + (o.w - w / (0.92 + 0.08 * k)) / 2, DROP_Y0, 1, w / (0.92 + 0.08 * k), h * k);
       }
     }
-    device();
+    curO = null; device();
     const pits = G.obs.filter((o) => o.kind === 'pit' && o.x - cam < NWf + 6 && o.x + o.w - cam > -6);
     if (fading) drawLayer(pv, 'ceil', 1, 1);
     drawLayer(th, 'ceil', 1, fading ? a : 1);
@@ -3584,6 +3867,7 @@
     for (const o of G.obs) if (o.kind === 'low' || o.kind === 'tall' || o.kind === 'huge') { const sx = o.x - cam; if (sx < NWf && sx + o.w > 0) { ctx.beginPath(); ctx.ellipse(sx + o.w / 2, GY + 0.6, o.w * 0.46, 1.9, 0, 0, 6.29); ctx.fill(); } }
     for (const o of G.obs) {
       const sx = o.x - cam; if (sx >= NWf + 30 || sx + o.w <= -30) continue;
+      curO = o;
       if (o.kind === 'hang' || o.kind === 'door' || o.kind === 'pit') continue;
       if (o.kind === 'spike') { if (o.st === 'warn' || (o.st === 'up' && G.t - o.popT < 0.25)) drawQuake(o, sx); continue; }
       if (o.kind === 'drop') { drawDrop(o, sx); continue; }
@@ -3592,8 +3876,14 @@
         ctx.save(); ctx.translate(sx + w / 2, o.y + h / 2); ctx.rotate(-o.spin); rspr(o.name, -w / 2, -h / 2); ctx.restore();
         continue;
       }
+      if (TRIM[o.kind] && !window.__fitOff) {                    // (v51) a tower: smaller, from the floor (__fitOff: tests, as before)
+        const f = (o.h - TRIM[o.kind]) / o.h, w2 = o.w * f, h2 = o.h * f;
+        rspr(o.name, sx + (o.w - w2) / 2, o.y + o.h - h2, 1, w2, h2);
+        continue;
+      }
       rspr(o.name, sx, o.y);
     }
+    curO = null;
     for (const it of G.items) {
       const sx = it.x - cam; if (sx < -20 || sx > NWf + 20) continue;
       const n = 'it_' + it.kind;
@@ -3631,10 +3921,10 @@
     const inPit = G.y < 0 && G.pitObj;
     if (inPit) { const p = G.pitObj; ctx.save(); ctx.beginPath(); ctx.rect(-10, -10, NWf + 20, GY + 10); ctx.rect(p.x - cam + 1, GY, p.w - 2, NH); ctx.clip(); }
     for (const p of G.puffs) { const u = (G.t - p.t) / 0.45; ctx.fillStyle = `rgba(255,235,240,${0.5 * (1 - u)})`; ctx.beginPath(); ctx.arc(p.x - cam, p.y - u * 4, p.r + u * 2, 0, 6.29); ctx.fill(); }
-    drawFire(sx, GY + 1 - G.y, w, G.slide ? h * 0.62 : h);
+    drawFire(sx, GY + 1 - G.y, w, G.slide ? slideH(h) : h);
     const blink = G.invul > 0 && !(G.boost > 0) && Math.floor(G.t * 14) % 2 === 0;
     if (!blink) {
-      if (G.slide) { const sh = h * 0.62, sw = w * 1.12; spr(n, sx - sw / 2, GY + 1 - sh, 1, sw, sh); }
+      if (G.slide) { const sh = slideH(h), sw = w * 1.12; spr(n, sx - sw / 2, GY + 1 - sh, 1, sw, sh); }
       else if (inWater()) {                               // swimming: tilted up as it rises, down as it sinks, a slow sway
         const ang = -Math.max(-0.32, Math.min(0.32, G.vy / 330)), cy = GY + 1 - G.y - h / 2 + Math.sin(G.t * 3) * 0.6;
         ctx.save(); ctx.translate(sx, cy); ctx.rotate(ang); spr(n, -w / 2, -h / 2); ctx.restore();
@@ -3646,7 +3936,7 @@
       ctx.fillStyle = 'rgba(235,252,252,0.55)'; ctx.fill(); ctx.lineWidth = 0.4; ctx.strokeStyle = '#2a5a62'; ctx.stroke(); ctx.globalAlpha = 1;
     }
     if (inPit) ctx.restore();
-    drawField(sx, GY + 1 - G.y, w, G.slide ? h * 0.62 : h);
+    drawField(sx, GY + 1 - G.y, w, G.slide ? slideH(h) : h);
   }
   // a hole: the floor turns down at its edges (a lip of the floor's own colour), dark below
   function drawPit(o, x0) {
@@ -3755,7 +4045,7 @@
   // stage a pink disc with a note, the orbit stage a violet disc with a little orbit, baseball a ball, the germ game
   // (v40) a germ, the memory game a neuron. More games: add them here.
   const BAR_W = 160, SCORE_Y = 21.4;                       // (v50: the score sits over the bar)
-  const MINI_MARKS = [['spleen', 'wm'], ['ra', 'rh'], ['vertebral', 'orb'], ['hippocampus', 'mem'], ['jejunum', 'bb'], ['toiletBowl', 'sl'], ['manhole', 'pk']].map(([id, kind]) => { const i = COURSE.findIndex((st) => st[0] === id); return { kind, i, lx: STARTS[i] }; });
+  const MINI_MARKS = [['spleen', 'wm'], ['ra', 'rh'], ['vertebral', 'orb'], ['hippocampus', 'mem'], ['jejunum', 'bb'], ['toiletBowl', 'sl'], ['manhole', 'pk'], ['combined', 'yb']].map(([id, kind]) => { const i = COURSE.findIndex((st) => st[0] === id); return { kind, i, lx: STARTS[i] }; });
   function miniMark(kind, x, y, alpha) {
     ctx.globalAlpha = alpha * GA;
     ctx.beginPath(); ctx.arc(x, y, 4.6, 0, 6.29); ctx.fillStyle = '#1a0a14'; ctx.fill();
@@ -3803,6 +4093,13 @@
       ctx.fillStyle = '#1a0a14'; ctx.fillRect(x - 2.85, y - 1.75, 5.7, 3.5);
       ctx.fillStyle = '#fffaf0'; for (let k = -1; k <= 1; k++) ctx.fillRect(x + k * 1.85 - 0.75, y - 1.3, 1.5, 2.6);
       ctx.fillStyle = '#e8343c'; for (let k = -1; k <= 1; k++) ctx.fillRect(x + k * 1.85 - 0.45, y - 0.3, 0.9, 0.6);
+      ctx.globalAlpha = GA; return;
+    }
+    if (kind === 'yb') {                                    // (v52) the shell game: a red disc, a silver lid with a gold ring
+      ctx.beginPath(); ctx.arc(x, y, 3.9, 0, 6.29); ctx.fillStyle = '#c42a44'; ctx.fill();
+      ctx.beginPath(); ctx.ellipse(x, y + 1.6, 3.0, 0.9, 0, 0, 6.29); ctx.fillStyle = '#5a6a84'; ctx.fill();
+      ctx.beginPath(); ctx.ellipse(x, y + 1.5, 2.6, 2.9, 0, Math.PI, 0); ctx.fillStyle = '#c8d6ea'; ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y - 1.9, 0.75, 0, 6.29); ctx.fillStyle = '#ffc83a'; ctx.fill();
       ctx.globalAlpha = GA; return;
     }
     if (kind === 'mem') {                                   // a teal disc with a little neuron: a round body, forking branches
@@ -3856,6 +4153,7 @@
     }
     ctx.fillStyle = 'rgba(26,10,20,0.6)'; for (let k = 1; k < 8; k++) ctx.fillRect(x0 + k * w / 8 - 0.35, y0 + h - 2.2, 0.7, 2.2);
     spr('hud_heart', x0 - 10.5, y0 - 3.2);
+    label(`${Math.ceil(100 * G.hp / HP_MAX)}%`, x0 + w - 2.5, y0 + h / 2 + 0.3, 6.2, 'right', 1, '#ffffff');     // (v51) how much, in %
     {
       const gx = x0, gy = y0 + h + 4.5, gw = 62, gh = 4.6;
       rrect(gx - 1, gy - 1, gw + 2, gh + 2, 2.6); ctx.fillStyle = '#1a0a14'; ctx.fill();
@@ -3975,6 +4273,7 @@
       drawMemory();
       drawPK();
       drawSlot();
+      drawYB();
       if (G.cut || G.cutTail) drawCut();
       drawHud();
     }
@@ -4002,7 +4301,7 @@
   }
   function gameOver() {
     G.mode = 'over'; show('overBox', true);
-    if (busy()) { for (const g of [G.rh, G.orb, G.bb, G.wm, G.mem, G.pk, G.sl]) bankGame(g); G.rh = null; G.orb = null; G.bb = null; G.wm = null; G.mem = null; G.pk = null; G.sl = null; G.cut = null; SND.stopSong(0.3); SND.stopLoop(0.3); SND.spin(null); }
+    if (busy()) { for (const g of [G.rh, G.orb, G.bb, G.wm, G.mem, G.pk, G.sl, G.yb]) bankGame(g); G.rh = null; G.orb = null; G.bb = null; G.wm = null; G.mem = null; G.pk = null; G.sl = null; G.yb = null; G.cut = null; SND.stopSong(0.3); SND.stopLoop(0.3); SND.spin(null); }
     SND.ambience(false); SND.play('over');
     // (v49) the end card: the score big, where it came from, how long and how far, the best (kept in this browser)
     const P = scoreParts(), f = (n) => n.toLocaleString('en-US');
@@ -4148,7 +4447,7 @@
     window.__settle = async () => { while (Object.keys(pending).length) await Promise.all(Object.values(pending)).catch(() => {}); render(); return Object.keys(bmp).length; };
     window.__state = () => ({ mode: G.mode, t: +G.t.toFixed(2), x: Math.round(G.x), v: +G.v.toFixed(1), hp: +G.hp.toFixed(1), score: G.score, eaten: G.eaten, hits: G.hits,
       station: COURSE[Math.max(0, G.station)][0], seg: G.station, theme: G.theme, lid: +lidAmount().toFixed(2), lastHit: G.lastHit, rot, lap: stationAt(G.x).lap, y: +G.y.toFixed(1), slide: G.slide, obs: G.obs.length, items: G.items.length,
-      NW, RS: +RS.toFixed(3), GW, GH, rhSong: G.rh ? G.rh.song.id : null, orbSong: G.orb ? OB.song.id : null, rotation: { ...ROT }, o2n: G.o2n, boost: +G.boost.toFixed(2), boostHeld: +G.boostHeld.toFixed(2), boosts: G.boosts, decoded: Object.keys(bmp).length, atp: G.atp || 0, orbits: G.orbits || 0, orb: G.orb ? G.orb.st : null, bb: G.bb ? G.bb.st : null, wm: G.wm ? G.wm.st : null, mem: G.mem ? G.mem.st : null, pk: G.pk ? G.pk.st : null, sl: G.sl ? G.sl.st : null, games: G.games || 0, huge: G.obs.filter((o) => o.kind === 'huge').length });
+      NW, RS: +RS.toFixed(3), GW, GH, rhSong: G.rh ? G.rh.song.id : null, orbSong: G.orb ? OB.song.id : null, rotation: { ...ROT }, o2n: G.o2n, boost: +G.boost.toFixed(2), boostHeld: +G.boostHeld.toFixed(2), boosts: G.boosts, decoded: Object.keys(bmp).length, atp: G.atp || 0, orbits: G.orbits || 0, orb: G.orb ? G.orb.st : null, bb: G.bb ? G.bb.st : null, wm: G.wm ? G.wm.st : null, mem: G.mem ? G.mem.st : null, pk: G.pk ? G.pk.st : null, sl: G.sl ? G.sl.st : null, yb: G.yb ? G.yb.st : null, games: G.games || 0, huge: G.obs.filter((o) => o.kind === 'huge').length });
     window.__G = G;
     window.__parts = () => scoreParts();
     window.__die = () => { G.hp = 0; };
@@ -4173,6 +4472,7 @@
       moles: w.moles.map((m) => { const p = wmPlace(m), s = M.sprites[wmName(m)]; return { h: m.h, kind: m.kind, good: m.good, st: m.st, q: +p.q.toFixed(2), x: +p.x.toFixed(1), y: +(p.y - s.foot[1] * p.k * 0.55).toFixed(1) }; }) }; };
     window.__pk = () => { const p = G.pk; if (!p) return null; return { st: p.st, k: p.k, res: p.res.slice(), gain: p.gain, shot: p.shot ? { ...p.shot } : null, aim: p.aim.slice(), power: p.power, kind: p.kind, needle: pkNeedle(p), pad: p.pad && { ...p.pad } }; };
     window.__pkForce = (gx, gh, power) => { const p = G.pk; if (!p || p.st !== 'aim') return; p.aim = [gx, gh]; pkShoot(); p.power = power; p.kind = pkZone(power); };
+    window.__yb = () => { const p = G.yb; if (!p) return null; return { st: p.st, k: p.k, res: p.res.slice(), gain: p.gain, pot: p.pot, gold: p.gold, slot: p.slot.slice(), goldSlot: p.slot[p.gold], pick: p.pick, ok: p.ok, moved: p.moved, mv: !!p.mv, lift: p.lift.map((v) => +v.toFixed(1)), cur: p.cur, ask: p.ask, x: [0, 1, 2].map(ybX), foot: YB_FOOT, btn: { ...YB_BTN, cx: NWf / 2 } }; };
     window.__sl = () => { const s = G.sl; if (!s) return null; return { st: s.st, k: s.k, res: s.res.slice(), gain: s.gain, want: s.want && s.want.slice(), reach: !!s.reach, reels: s.reels.map((r) => ({ pos: +r.pos.toFixed(2), spin: r.spin, stop: !!r.stop })), mx: slMX(), btns: SLF.btns.map(([x, y]) => [slMX() + x, slMY() + y]) }; };
     window.__pkKick = (gx, gh) => pkKick(gx, gh, 0.5, 'good');
     window.__memg = () => { const m = G.mem; if (!m) return null; return { st: m.st, seq: m.seq.slice(), k: m.k, round: m.round, res: m.res.slice(), gain: m.gain, best: m.best || 0, at: [0, 1, 2, 3, 4].map(memAt) }; };

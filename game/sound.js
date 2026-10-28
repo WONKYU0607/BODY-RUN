@@ -200,6 +200,16 @@ window.BodySound = (() => {
       [84, 88, 91].forEach((n) => tone(c, o, t + 0.38, 'triangle', NOTE(n), null, 0.7, 0.1, 0.01));
       coins(c, o, t + 0.1, 16, 0.9);
     },
+    // (v52) the shell game: a lid sliding across the felt (a short scrape, a tick of iron), lifted (an iron clink),
+    // set down (a soft clank), a win (the slot's), a loss (a sad 'wah wah wah')
+    ybSlide: (c, o, t) => { burst(c, o, t, 'bandpass', 2600, 1300, 1.3, 0.085, 0.2, 0.004); tone(c, o, t + 0.06, 'triangle', 1900, null, 0.02, 0.05, 0.001); },
+    ybLift: (c, o, t) => { tone(c, o, t, 'triangle', 1240, 1180, 0.16, 0.09, 0.001); tone(c, o, t, 'sine', 520, 380, 0.07, 0.2, 0.002, 0.06); burst(c, o, t, 'highpass', 3200, 3200, 0.8, 0.03, 0.12, 0.0008); },
+    ybDown: (c, o, t) => { tone(c, o, t, 'sine', 210, 120, 0.09, 0.32, 0.001, 0.07); burst(c, o, t, 'bandpass', 1500, 900, 1.6, 0.05, 0.22, 0.0008); tone(c, o, t + 0.005, 'triangle', 980, null, 0.08, 0.05, 0.001); },
+    ybWin: (c, o, t) => SFX.slWin(c, o, t),
+    ybLose: (c, o, t) => {
+      [67, 66, 65].forEach((n, i) => tone(c, o, t + i * 0.22, 'triangle', NOTE(n), NOTE(n) * 0.985, 0.19, 0.17, 0.01));
+      tone(c, o, t + 0.66, 'triangle', NOTE(64), NOTE(61), 0.62, 0.17, 0.01, 0.6);
+    },
     slJackpot: (c, o, t) => {
       for (let r = 0; r < 3; r++) [72, 76, 79, 84, 88, 91].forEach((n, i) => tone(c, o, t + r * 0.32 + i * 0.045, 'square', NOTE(n + r * 2), null, 0.09, 0.08, 0.003));
       [[0.98, [72, 76, 79, 84]], [1.3, [74, 77, 81, 86]], [1.62, [76, 79, 84, 88]]].forEach(([d, ch]) => ch.forEach((n) => tone(c, o, t + d, 'triangle', NOTE(n), null, d > 1.5 ? 1.4 : 0.3, 0.12, 0.008)));

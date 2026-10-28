@@ -213,6 +213,7 @@ window.BodySound = (() => {
     arHit: (c, o, t) => { burst(c, o, t, 'bandpass', 1600, 500, 1.2, 0.14, 0.4, 0.001); tone(c, o, t, 'sine', 620, 240, 0.08, 0.22, 0.001, 0.07); tone(c, o, t + 0.03, 'triangle', NOTE(88), null, 0.1, 0.08, 0.002); },
     arGold: (c, o, t) => { SFX.arHit(c, o, t); [84, 88, 91, 96, 100].forEach((n, i) => tone(c, o, t + 0.05 + i * 0.05, 'triangle', NOTE(n), null, 0.2, 0.11, 0.003)); coins(c, o, t + 0.1, 8, 0.6); },
     arLaunch: (c, o, t) => { tone(c, o, t, 'sine', 160, 70, 0.1, 0.3, 0.002, 0.09); burst(c, o, t, 'bandpass', 700, 2400, 1.0, 0.16, 0.14, 0.005); },   // (v54) a fruit flung out of the pipe: a thump, a whoosh
+    arMiss: (c, o, t) => { tone(c, o, t, 'triangle', 520, 260, 0.22, 0.1, 0.005, 0.2); tone(c, o, t + 0.12, 'triangle', 390, 190, 0.22, 0.08, 0.005, 0.2); },   // (v55) a bird got away: two little falling notes
     arSplash: (c, o, t) => { const w = water(c, o, 1500); burst(c, w, t, 'lowpass', 1200, 380, 0.8, 0.25, 0.16, 0.005); bubble(c, w, t + 0.05, 500, 0.06); },
     // (v52) the shell game: a lid sliding across the felt (a short scrape, a tick of iron), lifted (an iron clink),
     // set down (a soft clank), a win (the slot's), a loss (a sad 'wah wah wah')

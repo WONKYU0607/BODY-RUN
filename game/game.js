@@ -170,7 +170,7 @@
     if (G.sl || near('toiletBowl')) files.add('sl.webp');                                   // (v44) the toilet jackpot's
     if (G.yb || near('combined')) { files.add('yb.webp'); files.add('pk.webp'); files.add('sl.webp'); }     // (v52) the shell game's (its dealer, its poop)
     if (G.tw || near('clarifier1')) files.add('tw.webp');                                    // (v53) the poop tower's
-    if (G.ar || near('outfall')) { files.add('ar.webp'); files.add('ar_field.webp'); files.add(`bat_${G.char}.webp`); }   // (v53) the fruit archery's (the runner from behind)
+    if (G.ar || near('outfall')) { files.add('ar.webp'); files.add('ar_field.webp'); files.add('ar_bird.webp'); files.add(`bat_${G.char}.webp`); }   // (v53) the archery's (v55: the bird)
     const dc = ((S2_X - s.lx) % LAP + LAP) % LAP;            // the flush cut scene's pictures, near the end of the body
     if (G.cut || G.cutTail || dc < Math.max(2500, G.v * 8)) files.add('cut_flush.webp');
     if (STAGES.bb && !CAPTURE) { if (nearBB) { SND.fetchSong(STAGES.bb).catch(() => {}); if (SND.ctx) SND.prepare(STAGES.bb).catch(() => {}); } else SND.release(STAGES.bb); }
@@ -740,9 +740,9 @@
     }
     if (G.yb && G.mode === 'play' && ybKey(e.code)) { e.preventDefault(); return; }    // (v52) the shell game: arrows, space, 1-3
     if (G.tw && G.mode === 'play' && ['Space', 'Enter', 'ArrowDown', 'KeyJ', 'KeyF', 'KeyS'].includes(e.code)) { twDrop(); e.preventDefault(); return; }    // (v53) the tower: drop
-    if (G.ar && G.mode === 'play') {                        // (v54) the fruit shoot: up and down turn the bow, space shoots
-      if (['ArrowUp', 'KeyW'].includes(e.code)) { G.ar.keys.U = true; e.preventDefault(); return; }
-      if (['ArrowDown', 'KeyS'].includes(e.code)) { G.ar.keys.D = true; e.preventDefault(); return; }
+    if (G.ar && G.mode === 'play') {                        // (v54) the archery: the arrows turn the bow (v55: left or up raises it, right or down lowers it), space shoots
+      if (['ArrowUp', 'KeyW', 'ArrowLeft', 'KeyA'].includes(e.code)) { G.ar.keys.U = true; e.preventDefault(); return; }
+      if (['ArrowDown', 'KeyS', 'ArrowRight', 'KeyD'].includes(e.code)) { G.ar.keys.D = true; e.preventDefault(); return; }
       if (['Space', 'Enter', 'KeyJ', 'KeyF'].includes(e.code)) { arShoot(); e.preventDefault(); return; }
     }
     const dg = /^(Digit|Numpad)([0-9])$/.exec(e.code);                // the germ and memory games: the number keys
@@ -758,7 +758,7 @@
     if (e.code === 'ArrowDown' || e.code === 'KeyS') { keySlide = true; setSlide(); e.preventDefault(); }
     if (e.code === 'Escape' || e.code === 'KeyP') { if (G.mode === 'play') pause(); else if (G.mode === 'pause') resume(); }
   });
-  addEventListener('keyup', (e) => { if (G.ar) { if (['ArrowUp', 'KeyW'].includes(e.code)) G.ar.keys.U = false; if (['ArrowDown', 'KeyS'].includes(e.code)) G.ar.keys.D = false; } if (BB_KEY[e.code]) bbKeys.delete(BB_KEY[e.code]); if (PK_KEYS[e.code]) pkKeys.delete(PK_KEYS[e.code]); if (e.code === 'ArrowDown' || e.code === 'KeyS') { keySlide = false; setSlide(); } if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') keyJump = false; });
+  addEventListener('keyup', (e) => { if (G.ar) { if (['ArrowUp', 'KeyW', 'ArrowLeft', 'KeyA'].includes(e.code)) G.ar.keys.U = false; if (['ArrowDown', 'KeyS', 'ArrowRight', 'KeyD'].includes(e.code)) G.ar.keys.D = false; } if (BB_KEY[e.code]) bbKeys.delete(BB_KEY[e.code]); if (PK_KEYS[e.code]) pkKeys.delete(PK_KEYS[e.code]); if (e.code === 'ArrowDown' || e.code === 'KeyS') { keySlide = false; setSlide(); } if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') keyJump = false; });
 
   // ---------------------------------------------------------------- the mini-games' songs (stages.js): five each, in turn
   // Each go of a mini-game takes the next of its songs; the turn is kept (the next run goes on from it). The songs are
@@ -3258,17 +3258,21 @@
   // past the edge (it lands, tips over the edge and slides off into the tank), or past it altogether. Three bricks lost
   // and it is over; the tower's weight off the pier's middle past its edge: it topples, the end too. 30 seconds; the
   // swing gets wider and faster as it grows. (v54) Smaller bricks, and the view draws back as the tower grows (down to
-  // half size, then it climbs with it): you see it tall. 100 a brick, a perfect +50, +100, +150 in a row
+  // half size, then it climbs with it): you see it tall. 100 a brick, a perfect +50, +100, +150 in a row.
+  // (v55) No time: it goes on as high as you can build it, the crane swinging faster and wider the higher it is. One
+  // brick lost (off the edge or past it) and it is over; so it is when the tower falls: from any brick up, their weight
+  // past the edge of the one under them (or the pier) and over they go. Left hanging 6 s, the brick drops by itself
+  // (a ring round it counts down the last 2)
   // (pictures: minigames3.py, tw.webp). World units: x across (the screen's middle is the pier's), h up from the
   // pier's top; the screen: k (the view's size), cam (how far up it has climbed)
-  const TW_TIME = 30, TW_INTRO = 2.6, TW_END = 2.8, TW_BW = 30, TW_BH = 10, TW_PERF = 1.6, TW_LIVES = 3, TW_PIER = 21;
+  const TW_INTRO = 2.6, TW_END = 2.8, TW_BW = 30, TW_BH = 10, TW_PERF = 1.6, TW_PIER = 21, TW_AUTO = 6;
   const TW_JIB = 47, TW_HANG = 70, TW_FLOOR = 170, TW_ROOM = 84, TW_G = 700, TW_KMIN = 0.5;   // the jib; the hanging brick's top (screen); the pier's top (screen); the room above it
   function startTW() {
     holdBoost();
     G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
     G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
     G.tw = { st: 'intro', stT: G.t, inT: G.t, t0: 0, gain: 0, blocks: [], cur: null, fall: [], streak: 0, best: 0, misses: 0, perf: 0, k: 1, kS: 1, cam: 0, camS: 0,
-      ph: Math.random() * 6.28, pops: [], topple: null, why: '', pressT: -9 };
+      ph: Math.random() * 6.28, pops: [], topple: null, why: '', pressT: -9 };      // (ph: the swing's phase, run on by its speed)
     G.slideHeld = false; held.clear(); pressed.jump = false;
   }
   function endTW() {
@@ -3277,19 +3281,21 @@
     G.banner = G.t;
   }
   const twTopX = (p) => (p.blocks.length ? p.blocks[p.blocks.length - 1].x : NWf / 2);
-  const twSwing = (p) => { const n = p.blocks.length, w = 1.5 + Math.min(2.1, n * 0.12), A = Math.min(58, 30 + n * 2); return NWf / 2 + A * Math.sin(p.ph + (G.t - p.t0) * w); };     // (world x)
+  const twAmp = (p) => Math.min(NWf / 2 - 24, 40 + 2 * p.blocks.length);    // (v55) the swing, as wide as it looks (screen), wider and
+  const twFreq = (p) => 1.6 + 0.07 * p.blocks.length;                         // quicker (radians a second) the higher the tower, no end to it
+  const twSwing = (p) => NWf / 2 + twAmp(p) * Math.sin(p.ph) / p.kS;          // (world x)
   const twSX = (p, x) => NWf / 2 + (x - NWf / 2) * p.kS;                  // world -> screen
   const twSY = (p, h) => TW_FLOOR - (h - p.camS) * p.kS;
   const twHang = (p) => p.camS + (TW_FLOOR - TW_HANG - TW_BH * p.kS) / p.kS;   // the hanging brick's bottom (world h)
   function twNew(p) { p.cur = { v: Math.floor(Math.random() * 3), t: G.t }; }
   function twDrop() {
     const p = G.tw; if (!p || p.st !== 'play' || !p.cur) return;
-    p.fall.push({ x: twSwing(p), h: twHang(p), vy: 0, v: p.cur.v, mode: 'fall' }); p.cur = null; p.pressT = G.t;
+    p.fall.push({ x: window.__twSnap ? twTopX(p) : twSwing(p), h: twHang(p), vy: 0, v: p.cur.v, mode: 'fall' }); p.cur = null; p.pressT = G.t;
     SND.play('twDrop');
   }
-  function twLose(p) {
+  function twLose(p) {                                       // (v55) one lost: the end
     p.streak = 0; p.misses++; SND.play('twMiss'); buzz(60);
-    if (p.misses >= TW_LIVES && p.st === 'play') { p.st = 'over'; p.stT = G.t; p.why = 'miss'; }
+    if (p.st === 'play') { p.st = 'over'; p.stT = G.t; p.why = 'drop'; }
   }
   // a brick reaching the top: perfect, on, tipping off the edge, or past it
   function twLand(p, f) {
@@ -3309,8 +3315,14 @@
     } else { f.mode = 'off'; f.vx = 0; f.r = 0; f.vr = 0; twLose(p); return; }
     f.mode = 'done';
     p.blocks.push({ x: f.x, v: f.v, t: G.t });
-    const com = p.blocks.reduce((a, b) => a + b.x, 0) / p.blocks.length - NWf / 2;     // its weight against the pier: past its edge, over it goes
-    if (Math.abs(com) > TW_PIER) { p.topple = { dir: com > 0 ? 1 : -1, t: G.t }; p.st = 'over'; p.stT = G.t; p.why = 'topple'; SND.play('twTopple'); buzz([60, 40, 120]); }
+    // (v55) will it stand: from each brick up (the lowest first), their weight's middle against the edge of what is under
+    // them (the brick below, or the pier); past it, they go over about that edge
+    const bl = p.blocks;
+    for (let i = 0; i < bl.length; i++) {
+      let sx = 0; for (let j = i; j < bl.length; j++) sx += bl[j].x;
+      const c = sx / (bl.length - i), base = i ? bl[i - 1].x : NWf / 2, half = i ? TW_BW / 2 : TW_PIER;
+      if (Math.abs(c - base) > half) { const dir = c > base ? 1 : -1; p.topple = { dir, t: G.t, lv: i, px: base + dir * half }; p.st = 'over'; p.stT = G.t; p.why = 'topple'; SND.play('twTopple'); buzz([60, 40, 120]); break; }
+    }
   }
   function stepTW(dt) {
     const p = G.tw; if (!p) return;
@@ -3319,6 +3331,7 @@
     p.k = Math.max(TW_KMIN, Math.min(1, TW_ROOM / (H + 12)));
     p.cam = Math.max(0, H + 12 - TW_ROOM / p.k);
     p.kS += (p.k - p.kS) * Math.min(1, dt * 4); p.camS += (p.cam - p.camS) * Math.min(1, dt * 5);
+    if (p.st === 'play') p.ph += twFreq(p) * dt;
     for (const f of p.fall) {
       if (f.mode === 'fall') { f.vy += TW_G * dt; f.h -= f.vy * dt; if (f.h <= p.blocks.length * TW_BH) twLand(p, f); continue; }
       if (f.mode === 'tip') {                                   // turning over the edge, faster and faster; then off it
@@ -3334,14 +3347,15 @@
     if (p.st === 'play') {
       const busy_ = p.fall.some((f) => f.mode === 'fall' || f.mode === 'tip');
       if (!p.cur && !busy_ && G.t - p.pressT > 0.35) twNew(p);
-      if (AUTO && !window.__noAuto && p.cur && G.t - p.cur.t > 0.3) {     // the test pilot (__twMiss: off the edge; __twOff: this far off)
+      if (AUTO && !window.__noAuto && p.cur && G.t - p.cur.t > 0.3) {     // the test pilot (__twMiss: off the edge; __twOff: this far off), at the frame nearest
         const dx = twSwing(p) - twTopX(p), half = p.blocks.length ? TW_BW / 2 : TW_PIER;
-        if (window.__twMiss ? Math.abs(dx) > half + TW_BW / 2 + 2 : window.__twOff !== undefined ? Math.abs(dx - window.__twOff) < 1.0 : Math.abs(dx) < 1.0) twDrop();
+        const tol = Math.max(1.0, Math.abs(twAmp(p) * twFreq(p) * Math.cos(p.ph) / p.kS) * dt * 0.55);
+        if (window.__twMiss ? Math.abs(dx) > half + TW_BW / 2 + 2 : window.__twOff !== undefined ? Math.abs(dx - window.__twOff) < tol : Math.abs(dx) < tol) twDrop();
       }
-      if (u >= TW_TIME && !busy_) { p.st = 'over'; p.stT = G.t; p.why = 'time'; }
+      if (p.cur && G.t - p.cur.t >= TW_AUTO) twDrop();         // (v55) left hanging: it goes by itself
       return;
     }
-    if (p.st === 'over') { if (u >= (p.why === 'topple' ? 1.8 : 1.0)) { p.st = 'done'; p.stT = G.t; if (p.blocks.length >= 10) SND.play('slWin'); } return; }
+    if (p.st === 'over') { if (u >= (p.why === 'topple' ? 1.8 : 1.4)) { p.st = 'done'; p.stT = G.t; if (p.blocks.length >= 10) SND.play('slWin'); } return; }
     if (p.st === 'done' && u >= TW_END) endTW();
   }
   // one brick, in world units (its middle at x, its bottom at -h: drawn inside the view's transform), turned r about
@@ -3376,12 +3390,17 @@
     ctx.save(); ctx.translate(zx, twSY(p, 0)); ctx.scale(k, k); ctx.translate(-zx, 0);
     { const s = M.sprites.tw_base, sc = (2 * TW_PIER + 2) / s.w; A(1); spr('tw_base', zx - s.w * sc / 2, -s.top * sc, 1, s.w * sc, s.h * sc); A(1); }
     const n = p.blocks.length, com = n ? p.blocks.reduce((a, b) => a + b.x, 0) / n - zx : 0;
-    let lean = com / 900 * Math.min(1, n / 6) + Math.sin(G.t * 2.6) * 0.0012 * Math.min(n, 25), px = zx;
-    if (p.topple) { const v = G.t - p.topple.t; px = zx + p.topple.dir * TW_PIER; lean = p.topple.dir * Math.min(1.6, 0.4 * v + 1.6 * v * v); }
-    ctx.save(); ctx.translate(px, 0); ctx.rotate(lean);
-    p.blocks.forEach((b, i) => { const gl = i === n - 1 && G.t - b.t < 0.4 && p.pops.length && p.pops[p.pops.length - 1].gold ? 1 - (G.t - b.t) / 0.4 : 0;
-      A(p.topple ? Math.max(0, 1 - (G.t - p.topple.t) / 1.6) : 1); twBrick(b.v, b.x - px, -i * TW_BH, 0, gl); });
+    const lean = p.topple ? 0 : com / 900 * Math.min(1, n / 6) + Math.sin(G.t * 2.6) * 0.0012 * Math.min(n, 25), tp = p.topple, lv = tp ? tp.lv : n;
+    ctx.save(); ctx.translate(zx, 0); ctx.rotate(lean);
+    p.blocks.forEach((b, i) => { if (i >= lv) return; const gl = i === n - 1 && G.t - b.t < 0.4 && p.pops.length && p.pops[p.pops.length - 1].gold ? 1 - (G.t - b.t) / 0.4 : 0;
+      A(1); twBrick(b.v, b.x - zx, -i * TW_BH, 0, gl); });
     ctx.restore(); A(1);
+    if (tp) {                                                  // (v55) the bricks from the one that gave way up, going over its edge
+      const v = G.t - tp.t, r = tp.dir * Math.min(1.6, 0.4 * v + 1.6 * v * v);
+      ctx.save(); ctx.translate(tp.px, -lv * TW_BH); ctx.rotate(r);
+      A(Math.max(0, 1 - v / 1.6)); for (let i = lv; i < n; i++) twBrick(p.blocks[i].v, p.blocks[i].x - tp.px, -(i - lv) * TW_BH);
+      ctx.restore(); A(1);
+    }
     for (const f of p.fall) {
       if (f.mode === 'tip') twBrick(f.v, f.x, -f.h, f.s * f.r, 0, [f.ex, -f.eh]);
       else twBrick(f.v, f.x, -f.h, f.r || 0);
@@ -3400,6 +3419,9 @@
         ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 0.9; ctx.beginPath(); ctx.moveTo(tx - 1, y + 1); ctx.lineTo(tx - 1, hy + 1); ctx.moveTo(tx + 1, y + 1); ctx.lineTo(tx + 1, hy + 1); ctx.stroke();
         ctx.save(); ctx.translate(tx, TW_HANG + TW_BH * k); ctx.scale(k, k); twBrick(p.cur.v, 0, 0); ctx.restore(); A(1);
         spr('tw_hook', tx - hk.hang[0] * hs, hy, 1, hk.w * hs, hk.h * hs); A(1);
+        const wait = G.t - p.cur.t;                             // (v55) the last 2 s before it drops by itself: a ring running out
+        if (wait > TW_AUTO - 2) { const f = Math.max(0, (TW_AUTO - wait) / 2), cy = TW_HANG + TW_BH * k / 2;
+          A(0.85); ctx.beginPath(); ctx.arc(tx, cy, TW_BW * k / 2 + 5, -Math.PI / 2, -Math.PI / 2 + f * 6.2832); ctx.lineWidth = 1.6; ctx.strokeStyle = '#ffe68a'; ctx.stroke(); A(1); }
         A(0.22); ctx.setLineDash([2, 3]); ctx.strokeStyle = '#ffffff'; ctx.beginPath(); ctx.moveTo(tx, TW_HANG + TW_BH * k + 2); ctx.lineTo(tx, twSY(p, n * TW_BH)); ctx.stroke(); ctx.setLineDash([]); A(1);
       } }
     // what each landing came to; the height, the score, the lives, the time
@@ -3409,19 +3431,15 @@
     if (p.st === 'play' || p.st === 'over') {
       label(TR(`${n}층`, `${n} high`), 16, 63, 11, 'left', al, '#ffe0a8');
       label(`${PT(p.gain)}`, 16, 75, 7.5, 'left', al, '#ffe68a');
-      for (let i = 0; i < TW_LIVES; i++) { A(i < TW_LIVES - p.misses ? 1 : 0.25); spr('tw_block0', 16 + i * 13, 81, 1, 11, 4.75); }
-      A(1);
-      const left = Math.max(0, TW_TIME - (G.t - p.t0));
-      if (p.st === 'play') label(`${Math.ceil(left)}${TR('초', 's')}`, NWf - 49, 63, 9, 'right', al, left < 5 ? '#ff9aa8' : '#ffffff');
       if (p.st === 'play' && n === 0 && !p.fall.length) label(TR('탭해서 떨어뜨리기!', 'Tap to drop!'), zx, 112, 9.5, 'center', al * (0.75 + 0.25 * Math.sin(G.t * 6)), '#ffffff');
-      if (p.st === 'over') label(p.why === 'topple' ? TR('무너졌다!', 'It fell!') : p.why === 'miss' ? TR('세 개 떨어뜨렸어요', 'Three lost') : TR('시간 끝!', "Time's up!"), zx, 100, 15, 'center', al, p.why === 'time' ? '#ffe68a' : '#ff9aa8');
+      if (p.st === 'over') label(p.why === 'topple' ? TR('무너졌다!', 'It fell!') : TR('떨어졌다!', 'Dropped!'), zx, 100, 15, 'center', al, '#ff9aa8');
     }
     if (p.st === 'intro') {
       const v = G.t - p.stT, a = Math.min(1, v / 0.3) * Math.max(0, Math.min(1, (TW_INTRO - v) / 0.3)), bw = Math.min(262, NWf - 16);
       A(a * 0.86); rrect(zx - bw / 2, 70, bw, 58, 8); ctx.fillStyle = '#10141e'; ctx.fill(); A(1);
       label(TR('똥 탑 쌓기!', 'Poop tower!'), zx, 85, 15, 'center', al * a, '#ffe0a8');
       label(TR('흔들리는 똥을 탭해서 떨어뜨려 높이 쌓아요', 'Tap to drop each swinging brick - stack them high'), zx, 103, 7.5, 'center', al * a, '#ffffff');
-      label(TR('딱 맞으면 퍼펙트! 가장자리 너머면 미끄러져 떨어져요', 'Square on: Perfect! Hanging over the edge, it slides off'), zx, 116, 7.5, 'center', al * a, '#ffe68a');
+      label(TR('하나라도 떨어지거나 무너지면 끝! 갈수록 빨라져요', 'One dropped, or the tower falls: the end! It gets quicker'), zx, 116, 7.5, 'center', al * a, '#ffe68a');
     }
     if (p.st === 'done') {
       const v = G.t - p.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (TW_END - v) / 0.35));
@@ -3433,26 +3451,28 @@
     ctx.globalAlpha = 1;
   }
 
-  // ---------------------------------------------------------------- the fruit shoot (at the outfall) (v53, v54)
-  // '과일 사격': out of the pipe at last, under the sky. (v54) Like clay shooting: fruit is flung out of the outfall pipe
-  // (on the right) in high arcs across the sky; your runner stands at the bottom left, face on, with a bow. The left of
-  // the screen is a stick for the bow's angle (drag up and down; or the up and down keys), the right is the shoot
-  // button (or space); a short dotted line shows where the arrow goes (it drops a little). Arrows go through all they
-  // meet (two with one arrow: double, three: triple). 30 seconds. An apple or an orange 100, a banana or a peach 120,
-  // grapes 150, a watermelon 200, a golden apple 500 (rare, quick). (pictures: minigames3.py, ar.webp + ar_field.webp,
-  // the field drawn mirrored so the pipe is on the right; the runner: bat_<char>.webp's 45, face on, turned right)
-  const AR_TIME = 30, AR_INTRO = 2.8, AR_END = 2.8, AR_V = 430, AR_GA = 150, AR_COOL = 0.3, AR_RIVER = 124;
+  // ---------------------------------------------------------------- the bird shoot (at the outfall) (v53, v54, v55)
+  // '새 사격': out of the pipe at last, under the sky. (v55) One bird at a time flies across the sky from the right to
+  // the left, ten of them, each quicker than the last (the user's bird: ar_bird.webp, bird_user.py). Your runner stands
+  // at the bottom left, face on, with a bow. The left of the screen is a stick for the bow's angle: push it left and
+  // the bow turns up, right and it turns down (or the arrow keys); the right is the shoot button (or space); a short
+  // dotted line shows where the arrow goes (it drops a little). A bird hit: 100 x its stage, and from the second in a
+  // row on, 100 more for each in the row before it; one missed (off the left): nothing, and the row is broken.
+  // (pictures: minigames3.py's ar.webp (the bow, the arrow, the clouds) + ar_field.webp, drawn mirrored so the pipe is
+  // on the right; the runner: bat_<char>.webp's 45, face on, turned right)
+  const AR_STAGES = 10, AR_INTRO = 2.8, AR_END = 3.0, AR_V = 430, AR_GA = 150, AR_COOL = 0.3, AR_RIVER = 124;
   const AR_A0 = 0.08, AR_A1 = 1.35, AR_AV = 1.7, AR_CX = 94, AR_PAD = { r: 19, m: 30, y: 146 };
-  const AR_KINDS = [['apple', 100, 22], ['orange', 100, 20], ['banana', 120, 16], ['peach', 120, 14], ['grapes', 150, 12], ['melon', 200, 8], ['gold', 500, 4]];
-  const AR_JUICE = { apple: '#ff3a4a', orange: '#ff9a1a', banana: '#ffe24a', peach: '#ffa07a', grapes: '#9a4ad8', melon: '#ff4a6a', gold: '#ffd84a' };
+  const AR_BV0 = 80, AR_BV1 = 290, AR_GAP = 0.7;             // the first bird's and the tenth's speed; between birds
+  const AR_FLAP = [9, 8, 7, 6, 7, 8];                         // the sheet's frames, wings down to up and back
+  const arBirdV = (s) => AR_BV0 + (AR_BV1 - AR_BV0) * (s - 1) / (AR_STAGES - 1);
   const arBow = () => [AR_CX + 14, 147];                      // the bow's grip, at the runner's right side
-  const arPipe = () => [Math.min(NWf + 10, NWf / 2 + 172), 112];
   function startAR() {
     holdBoost();
     G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
     G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
-    G.ar = { st: 'intro', stT: G.t, inT: G.t, t0: 0, gain: 0, aim: 0.6, fireT: -9, pressT: -9, arrows: [], fruit: [], halves: [], juice: [], pops: [], next: 0, hits: 0, shots: 0, gold: 0,
-      clouds: [[0.15, 30, 0], [0.62, 18, 1], [0.95, 40, 0]], keys: { U: false, D: false }, pad: null, puffs: [] };
+    G.ar = { st: 'intro', stT: G.t, inT: G.t, t0: 0, gain: 0, aim: 0.6, fireT: -9, pressT: -9, arrows: [], bird: null, feathers: [], rings: [], pops: [],
+      stage: 0, next: 0, res: [], hits: 0, shots: 0, streak: 0, best: 0,
+      clouds: [[0.15, 30, 0], [0.62, 18, 1], [0.95, 40, 0]], keys: { U: false, D: false }, pad: null };
     G.slideHeld = false; held.clear(); pressed.jump = false;
   }
   function endAR() {
@@ -3460,81 +3480,83 @@
     G.genX = Math.max(G.genX, G.x + NW * 0.8);
     G.banner = G.t;
   }
+  // a bird: in from past the right edge at a height, a little up or down by the left edge; it bobs as it flaps
   function arSpawn(p) {
-    let r = Math.random() * AR_KINDS.reduce((a, k) => a + k[2], 0), k = AR_KINDS[0];
-    for (const q of AR_KINDS) { if ((r -= q[2]) <= 0) { k = q; break; } }
-    const kind = k[0], fast = kind === 'gold' ? 1.3 : kind === 'melon' ? 0.85 : 1, s = M.sprites['ar_' + kind], [px, py] = arPipe();
-    p.fruit.push({ kind, pts: k[1], x: px, y: py + (Math.random() - 0.5) * 8, vx: -(95 + Math.random() * 75) * fast, vy: -(80 + Math.random() * 55) * fast, g: 62 * fast * fast,
-      r: Math.random() * 6, vr: (Math.random() - 0.5) * 6, rad: s.rad, size: s.w });
-    p.puffs.push({ x: px - 6, y: py, t: G.t });
-    SND.play('arLaunch');
+    p.stage++;
+    const s = p.stage, y0 = 56 + Math.random() * 44, y1 = Math.max(52, Math.min(104, y0 + (Math.random() - 0.5) * 36));
+    p.bird = { s, t0: G.t, x0: NWf + 24, y0, y1, vx: -arBirdV(s), fr: 2.3 + 1.4 * (s - 1) / (AR_STAGES - 1), st: 'fly', x: NWf + 24, y: y0 };
   }
+  // where the bird is at the time t (it keeps to its line: the test pilot leads it by this)
+  function arBirdAt(b, t) {
+    const x = b.x0 + b.vx * (t - b.t0), pr = (b.x0 - x) / (b.x0 + 30), ph = (t - b.t0) * b.fr;
+    return [x, b.y0 + (b.y1 - b.y0) * pr - 1.8 * Math.sin(ph * 6.2832)];
+  }
+  const arBirdR = () => { const s = M.sprites.ar_bird0; return (s ? s.rb : 8.6) + 1.2; };     // its body (round), hit by an arrow's tip
   function arShoot() {
     const p = G.ar; if (!p || p.st !== 'play' || G.t - p.fireT < AR_COOL) return;
     const [bx, by] = arBow(), dx = Math.cos(p.aim), dy = -Math.sin(p.aim);
-    p.arrows.push({ x: bx + dx * 5, y: by + dy * 5, vx: dx * AR_V, vy: dy * AR_V, hit: 0, t: G.t });
+    p.arrows.push({ x: bx + dx * 5, y: by + dy * 5, vx: dx * AR_V, vy: dy * AR_V, t: G.t });
     p.fireT = G.t; p.pressT = G.t; p.shots++;
     SND.play('arBow');
   }
-  function arHit(p, a, f) {
-    a.hit++; f.dead = true; p.hits++;
-    const pts = f.pts * a.hit; p.gain += pts; if (f.kind === 'gold') p.gold++;
-    p.pops.push({ x: f.x, y: f.y, s: `${a.hit > 1 ? TR(`${a.hit}연속! `, `x${a.hit}! `) : ''}+${pts}`, t: G.t, big: a.hit > 1 || f.kind === 'gold' });
-    const ang = Math.atan2(a.vy, a.vx) + Math.PI / 2;           // it splits across the arrow's way
-    for (const sd of [-1, 1]) p.halves.push({ kind: f.kind, x: f.x, y: f.y, vx: f.vx * 0.3 + Math.cos(ang) * sd * 55, vy: f.vy * 0.3 + Math.sin(ang) * sd * 55 - 30, r: f.r, vr: sd * 6, sd, size: f.size, t: G.t });
-    for (let i = 0; i < 14; i++) { const t = Math.random() * 6.28, v = 30 + Math.random() * 90; p.juice.push({ x: f.x, y: f.y, vx: Math.cos(t) * v, vy: Math.sin(t) * v - 25, r: 0.8 + Math.random() * 1.6, c: AR_JUICE[f.kind], t: G.t }); }
-    SND.play(f.kind === 'gold' ? 'arGold' : 'arHit'); buzz(f.kind === 'gold' ? [30, 30, 50] : 18);
+  function arHit(p, a, b) {
+    a.dead = true; b.st = 'hit'; b.hitT = G.t; b.vx2 = b.vx * 0.25 + a.vx * 0.12; b.vy2 = -45 + a.vy * 0.1; b.r = 0; b.vr = (Math.random() < 0.5 ? -1 : 1) * 7;
+    p.hits++; p.streak++; p.best = Math.max(p.best, p.streak); p.res.push(1);
+    const base = 100 * b.s, bonus = p.streak > 1 ? 100 * (p.streak - 1) : 0, pts = base + bonus; p.gain += pts;
+    p.pops.push({ x: b.x, y: b.y, s: p.streak > 1 ? TR(`${p.streak}연속! +${pts}`, `${p.streak} in a row! +${pts}`) : `+${pts}`, t: G.t, big: p.streak > 1 });
+    const cols = ['#8cc8ff', '#ffffff', '#5aa4f0', '#ffffff'];
+    for (let i = 0; i < 9; i++) { const t = Math.random() * 6.28, v = 25 + Math.random() * 55; p.feathers.push({ x: b.x, y: b.y, vx: Math.cos(t) * v, vy: Math.sin(t) * v - 20, r: Math.random() * 6.28, vr: (Math.random() - 0.5) * 8, c: cols[i % 4], t: G.t }); }
+    SND.play(p.streak >= 3 ? 'arGold' : 'arHit'); buzz(p.streak >= 3 ? [30, 30, 50] : 18);
   }
-  // the controls: the left half a stick for the angle, the right half the shoot button
-  function arDown(id, x, y) { const p = G.ar; if (!p || p.st !== 'play') return; if (x < NWf / 2) p.pad = { id, y0: y, ky: 0 }; else arShoot(); }
-  function arMove(id, x, y) { const p = G.ar; if (!p || !p.pad || p.pad.id !== id) return; p.pad.ky = Math.max(-1, Math.min(1, (y - p.pad.y0) / AR_PAD.r)); }
+  // the controls: the left half a stick for the angle (left: up, right: down), the right half the shoot button
+  function arDown(id, x, y) { const p = G.ar; if (!p || p.st !== 'play') return; if (x < NWf / 2) p.pad = { id, x0: x, kx: 0 }; else arShoot(); }
+  function arMove(id, x, y) { const p = G.ar; if (!p || !p.pad || p.pad.id !== id) return; p.pad.kx = Math.max(-1, Math.min(1, (x - p.pad.x0) / AR_PAD.r)); }
   function arUp(id) { const p = G.ar; if (p && p.pad && p.pad.id === id) p.pad = null; }
-  // where an arrow at angle a and a fruit come closest (t up to 1.1 s): [the least distance, when]
-  function arTry(f, a) {
+  // an arrow let go at the angle a, `wait` seconds from now: [how near it comes to the bird, when (after letting go)]
+  function arTry(b, a, wait = 0) {
     const [bx, by] = arBow(), vx = Math.cos(a) * AR_V, vy = -Math.sin(a) * AR_V; let best = [1e9, 0];
-    for (let t = 0.02; t < 1.1; t += 0.02) {
-      const ax = bx + vx * t, ay = by + vy * t + 0.5 * AR_GA * t * t, fx = f.x + f.vx * t, fy = f.y + f.vy * t + 0.5 * f.g * t * t;
-      if (fy > AR_RIVER) break; const d = Math.hypot(ax - fx, ay - fy); if (d < best[0]) best = [d, t];
+    for (let t = 0.02; t < 1.2; t += 0.015) {
+      const ax = bx + vx * t, ay = by + vy * t + 0.5 * AR_GA * t * t, [fx, fy] = arBirdAt(b, G.t + wait + t);
+      if (ay > AR_RIVER + 30 || ax > NWf + 30) break; const d = Math.hypot(ax - fx, ay - fy); if (d < best[0]) best = [d, t];
     }
     return best;
   }
   function stepAR(dt) {
     const p = G.ar; if (!p) return;
     for (const c of p.clouds) { c[0] += dt * (0.004 + 0.003 * c[2]); if (c[0] > 1.15) c[0] = -0.15; }
-    for (const f of p.fruit) { f.vy += f.g * dt; f.x += f.vx * dt; f.y += f.vy * dt; f.r += f.vr * dt; if (f.y > AR_RIVER && f.vy > 0 && !f.splash) { f.splash = G.t; f.dead = true; p.juice.push({ x: f.x, y: AR_RIVER + 2, ring: true, t: G.t }); SND.play('arSplash'); } }
+    const b = p.bird;
+    if (b && b.st === 'fly') { [b.x, b.y] = arBirdAt(b, G.t); if (b.x < -30) { b.st = 'gone'; p.streak = 0; p.res.push(0); p.pops.push({ x: NWf / 2, y: 104, s: TR('놓쳤다', 'Missed'), t: G.t, miss: true }); SND.play('arMiss'); p.bird = null; p.next = G.t + AR_GAP; } }
+    if (b && b.st === 'hit') {                                  // hit: it tumbles down into the river
+      b.vy2 += 320 * dt; b.x += b.vx2 * dt; b.y += b.vy2 * dt; b.r += b.vr * dt;
+      if (b.y > AR_RIVER + 4) { p.rings.push({ x: b.x, y: AR_RIVER + 2, t: G.t }); SND.play('arSplash'); p.bird = null; p.next = G.t + AR_GAP * 0.6; }
+    }
     for (const a of p.arrows) {
-      const steps = 3; for (let k = 0; k < steps; k++) {        // (in small steps: quick arrows, small fruit)
+      const steps = 3; for (let k = 0; k < steps; k++) {        // (in small steps: quick arrows)
         a.vy += AR_GA * dt / steps; a.x += a.vx * dt / steps; a.y += a.vy * dt / steps;
-        for (const f of p.fruit) if (!f.dead && Math.hypot(f.x - a.x, f.y - a.y) < f.rad + 1.5) arHit(p, a, f);
+        const q = p.bird; if (q && q.st === 'fly' && !a.dead && Math.hypot(q.x - a.x, q.y - a.y) < arBirdR()) arHit(p, a, q);
       }
     }
-    for (const h of p.halves) { h.vy += 160 * dt; h.x += h.vx * dt; h.y += h.vy * dt; h.r += h.vr * dt; }
-    for (const j of p.juice) if (!j.ring) { j.vy += 150 * dt; j.x += j.vx * dt; j.y += j.vy * dt; }
-    p.fruit = p.fruit.filter((f) => !f.dead && f.x > -40 && f.x < NWf + 40 && f.y < NH + 20);
-    p.arrows = p.arrows.filter((a) => a.y > -40 && a.y < NH + 10 && a.x > -30 && a.x < NWf + 30);
-    p.halves = p.halves.filter((h) => G.t - h.t < 1.4); p.juice = p.juice.filter((j) => G.t - j.t < (j.ring ? 0.7 : 0.8)); p.pops = p.pops.filter((q) => G.t - q.t < 0.9);
-    p.puffs = p.puffs.filter((q) => G.t - q.t < 0.5);
+    for (const f of p.feathers) { f.vx *= Math.exp(-2.2 * dt); f.vy = f.vy * Math.exp(-2.2 * dt) + 60 * dt; f.x += (f.vx + Math.sin((G.t - f.t) * 7 + f.r) * 10) * dt; f.y += f.vy * dt; f.r += f.vr * dt; }
+    p.arrows = p.arrows.filter((a) => !a.dead && a.y > -40 && a.y < NH + 10 && a.x > -30 && a.x < NWf + 30);
+    p.feathers = p.feathers.filter((f) => G.t - f.t < 1.4); p.rings = p.rings.filter((r) => G.t - r.t < 0.7); p.pops = p.pops.filter((q) => G.t - q.t < 0.9);
     const u = G.t - p.stT;
-    if (p.st === 'intro') { if (u >= AR_INTRO) { p.st = 'play'; p.stT = G.t; p.t0 = G.t; p.next = G.t + 0.6; } return; }
+    if (p.st === 'intro') { if (u >= AR_INTRO) { p.st = 'play'; p.stT = G.t; p.t0 = G.t; p.next = G.t + 0.5; } return; }
     if (p.st === 'play') {
-      const el = G.t - p.t0;
-      if (el < AR_TIME - 1.5 && G.t >= p.next) {                  // one, or (later) two flung close together
-        arSpawn(p); if (el > 7 && Math.random() < 0.3) p.next2 = G.t + 0.18;
-        p.next = G.t + Math.max(0.6, 1.05 - el * 0.016) * (0.8 + 0.4 * Math.random());
+      if (!p.bird && G.t >= p.next) {
+        if (p.stage < AR_STAGES) arSpawn(p);
+        else { p.st = 'done'; p.stT = G.t; if (p.gain >= 3000) SND.play('slWin'); return; }
       }
-      if (p.next2 && G.t >= p.next2) { p.next2 = 0; arSpawn(p); }
-      const v = (p.keys.U ? 1 : 0) - (p.keys.D ? 1 : 0) - (p.pad ? p.pad.ky : 0);
+      const v = (p.keys.U ? 1 : 0) - (p.keys.D ? 1 : 0) - (p.pad ? p.pad.kx : 0);
       p.aim = Math.max(AR_A0, Math.min(AR_A1, p.aim + v * AR_AV * dt));
-      if (AUTO && !window.__noAuto) {                            // the test pilot: the angle that meets the fruit soonest, turned to at the stick's speed
-        if (!p.want || G.t - p.wantT > 0.25) {
-          p.want = null; p.wantT = G.t; let best = null;
-          for (const f of p.fruit) { if (f.x > NWf - 6) continue;
-            for (let a = AR_A0; a <= AR_A1; a += 0.012) { const [d, t] = arTry(f, a); if (d < f.rad * 0.7 && (!best || t + Math.abs(a - p.aim) / AR_AV < best.c)) best = { a, c: t + Math.abs(a - p.aim) / AR_AV }; } }
+      const q = p.bird;
+      if (AUTO && !window.__noAuto && q && q.st === 'fly') {    // the test pilot: the angle that meets the bird soonest, turning to it at the stick's speed (leading it by the turn)
+        if (p.want === null || p.want === undefined || G.t - p.wantT > 0.2) {
+          p.want = null; p.wantT = G.t; let best = null; const R = arBirdR() * 0.6;
+          for (let a = AR_A0; a <= AR_A1; a += 0.01) { const w = Math.max(Math.abs(a - p.aim) / AR_AV, AR_COOL - (G.t - p.fireT), 0), [d, t] = arTry(q, a, w); if (d < R && (!best || w + t < best.c)) best = { a, c: w + t }; }
           if (best) p.want = best.a;
         }
-        if (p.want !== null && p.want !== undefined) { const d = p.want - p.aim; p.aim += Math.sign(d) * Math.min(Math.abs(d), AR_AV * dt); if (Math.abs(d) < 0.01) { arShoot(); p.want = null; } }
+        if (p.want !== null && p.want !== undefined) { const d = p.want - p.aim; p.aim += Math.sign(d) * Math.min(Math.abs(d), AR_AV * dt); if (Math.abs(d) < 0.01 && G.t - p.fireT >= AR_COOL) { arShoot(); p.want = null; } }
       }
-      if (el >= AR_TIME) { p.st = 'done'; p.stT = G.t; if (p.gain >= 3000) SND.play('slWin'); }
       return;
     }
     if (p.st === 'done' && u >= AR_END) endAR();
@@ -3543,11 +3565,13 @@
     const live = p.st === 'play', R = AR_PAD.r, sx = AR_PAD.m, by = AR_PAD.y, bxr = NWf - AR_PAD.m;
     ctx.globalAlpha = al * (live ? 1 : 0.45);
     ctx.beginPath(); ctx.arc(sx, by, R, 0, 6.2832); ctx.fillStyle = 'rgba(26,10,20,0.5)'; ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.stroke();
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';                    // up and down marks
-    for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(sx, by + s * (R - 3)); ctx.lineTo(sx - 3.2, by + s * (R - 7.5)); ctx.lineTo(sx + 3.2, by + s * (R - 7.5)); ctx.closePath(); ctx.fill(); }
-    const ky = p.pad ? p.pad.ky : 0;
-    ctx.beginPath(); ctx.arc(sx, by + ky * R * 0.55, 8.5, 0, 6.2832); ctx.fillStyle = p.pad ? 'rgba(255,236,170,0.95)' : 'rgba(255,255,255,0.85)'; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = '#1a0a14'; ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';                    // left and right marks
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(sx + s * (R - 3), by); ctx.lineTo(sx + s * (R - 7.5), by - 3.2); ctx.lineTo(sx + s * (R - 7.5), by + 3.2); ctx.closePath(); ctx.fill(); }
+    const kx = p.pad ? p.pad.kx : 0;
+    ctx.beginPath(); ctx.arc(sx + kx * R * 0.55, by, 8.5, 0, 6.2832); ctx.fillStyle = p.pad ? 'rgba(255,236,170,0.95)' : 'rgba(255,255,255,0.85)'; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = '#1a0a14'; ctx.stroke();
     label(TR('각도', 'Angle'), sx, by + R + 6.5, 6.5, 'center', al * (live ? 1 : 0.45), '#ffffff');
+    label(TR('위', 'up'), sx - R - 2, by - R + 2, 5.5, 'center', al * (live ? 0.9 : 0.4), '#ffffff');
+    label(TR('아래', 'down'), sx + R + 3, by - R + 2, 5.5, 'center', al * (live ? 0.9 : 0.4), '#ffffff');
     const pr = G.t - p.pressT < 0.15, ready = G.t - p.fireT >= AR_COOL;
     ctx.globalAlpha = al * (live ? 1 : 0.45);
     ctx.beginPath(); ctx.arc(bxr, by + (pr ? 1 : 0), R, 0, 6.2832);
@@ -3566,21 +3590,17 @@
     // the place, mirrored (the pipe on the right): the sky, the hills, the river, the pipe, the bank
     { const s = M.sprites.ar_field; ctx.save(); ctx.translate(zx, 0); ctx.scale(-1, 1); A(1); spr('ar_field', -s.w / 2, 0, 1, s.w, s.h); ctx.restore(); A(1); }
     for (const [cx, cy, k] of p.clouds) { const s = M.sprites['ar_cloud' + k]; A(0.95); spr('ar_cloud' + k, cx * (NWf + 80) - 40 - s.w / 2, cy, 1, s.w, s.h); }
-    // the water out of the pipe: a few white streaks running down it; a puff at its mouth when a fruit flies out
+    // the water out of the pipe: a few white streaks running down it
     { const fx = zx + 172; A(0.5); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.9; ctx.beginPath();
       for (let i = 0; i < 6; i++) { const x = fx - 12 + i * 5, ph = ((G.t * 1.6 + i * 0.37) % 1), y0 = 121 + ph * 22; ctx.moveTo(x - ph * (i - 2.5) * 1.2, y0); ctx.lineTo(x - (ph + 0.12) * (i - 2.5) * 1.2, y0 + 5); } ctx.stroke();
-      for (const q of p.puffs) { const v = (G.t - q.t) / 0.5; A(0.7 * (1 - v)); ctx.beginPath(); ctx.arc(q.x - v * 8, q.y - v * 4, 4 + v * 8, 0, 6.2832); ctx.fillStyle = '#ffffff'; ctx.fill(); }
       A(1); }
-    // the fruit in the air (turning)
-    for (const f of p.fruit) { const s = M.sprites['ar_' + f.kind]; ctx.save(); ctx.translate(f.x, f.y); ctx.rotate(f.r); A(1); spr('ar_' + f.kind, -s.w / 2, -s.h / 2, 1, s.w, s.h); ctx.restore();
-      if (f.kind === 'gold') { A(0.5 + 0.3 * Math.sin(G.t * 14)); const g = ctx.createRadialGradient(f.x, f.y, 2, f.x, f.y, 16); g.addColorStop(0, 'rgba(255,230,120,0.6)'); g.addColorStop(1, 'rgba(255,230,120,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(f.x, f.y, 16, 0, 6.2832); ctx.fill(); } }
-    A(1);
-    // the halves of the ones hit, the juice, the rings on the water
-    for (const h of p.halves) { const s = M.sprites['ar_' + h.kind], v = (G.t - h.t) / 1.4;
-      ctx.save(); ctx.translate(h.x, h.y); ctx.rotate(h.r); ctx.beginPath(); ctx.rect(h.sd < 0 ? -s.w : 0, -s.h, s.w, s.h * 2); ctx.clip(); A(1 - v * v); spr('ar_' + h.kind, -s.w / 2, -s.h / 2, 1, s.w, s.h); ctx.restore(); }
-    for (const j of p.juice) { const v = (G.t - j.t) / (j.ring ? 0.7 : 0.8);
-      if (j.ring) { A(0.6 * (1 - v)); ctx.beginPath(); ctx.ellipse(j.x, j.y, 3 + v * 12, 1 + v * 3, 0, 0, 6.2832); ctx.lineWidth = 1; ctx.strokeStyle = '#ffffff'; ctx.stroke(); continue; }
-      A(1 - v); ctx.beginPath(); ctx.arc(j.x, j.y, j.r * (1 - v * 0.5), 0, 6.2832); ctx.fillStyle = j.c; ctx.fill(); }
+    // the bird: flapping across (lined up by its body), or hit and tumbling down
+    { const b = p.bird;
+      if (b) { const nm = b.st === 'hit' ? 'ar_bird1' : 'ar_bird' + AR_FLAP[Math.floor((G.t - b.t0) * b.fr * AR_FLAP.length) % AR_FLAP.length], s = M.sprites[nm];
+        if (s) { ctx.save(); ctx.translate(b.x, b.y); if (b.st === 'hit') ctx.rotate(b.r); A(1); spr(nm, -s.c[0], -s.c[1], 1, s.w, s.h); ctx.restore(); } } }
+    // the feathers, the rings on the water
+    for (const f of p.feathers) { const v = (G.t - f.t) / 1.4; A(1 - v * v); ctx.save(); ctx.translate(f.x, f.y); ctx.rotate(f.r); ctx.beginPath(); ctx.ellipse(0, 0, 2.8, 1.1, 0, 0, 6.2832); ctx.fillStyle = f.c; ctx.fill(); ctx.lineWidth = 0.35; ctx.strokeStyle = '#1a2a4a'; ctx.stroke(); ctx.restore(); }
+    for (const r of p.rings) { const v = (G.t - r.t) / 0.7; A(0.6 * (1 - v)); ctx.beginPath(); ctx.ellipse(r.x, r.y, 3 + v * 12, 1 + v * 3, 0, 0, 6.2832); ctx.lineWidth = 1; ctx.strokeStyle = '#ffffff'; ctx.stroke(); }
     A(1);
     // the arrows (pointing the way they fly)
     for (const a of p.arrows) { const s = M.sprites.ar_arrow, sc = 0.75; ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(Math.atan2(a.vy, a.vx) + Math.PI / 2); A(1); spr('ar_arrow', -s.w * sc / 2, 0, 1, s.w * sc, s.h * sc); ctx.restore(); }
@@ -3599,26 +3619,30 @@
       if (pull > 0.95 && p.st === 'play') { const s2 = M.sprites.ar_arrow, sc2 = 0.75; A(1); spr('ar_arrow', -s2.w * sc2 / 2, nock - s2.h * sc2 + 1, 1, s2.w * sc2, s2.h * sc2); }
       ctx.restore(); A(1); }
     if (p.st !== 'intro') drawARControls(p, al);
-    // the points, the time, the count
-    for (const q of p.pops) { const v = G.t - q.t; label(q.s, q.x, q.y - 8 - v * 20, q.big ? 10 : 8, 'center', al * Math.min(1, (0.9 - v) / 0.3), q.big ? '#ffe14a' : '#ffffff'); }
+    // the points; the stage, the score, the ten (hit, missed, to come)
+    for (const q of p.pops) { const v = G.t - q.t; label(q.s, q.x, q.y - 8 - v * 20, q.big ? 10 : q.miss ? 10 : 8, 'center', al * Math.min(1, (0.9 - v) / 0.3), q.miss ? '#ffb0b8' : q.big ? '#ffe14a' : '#ffffff'); }
     if (p.st === 'play') {
-      const left = Math.max(0, AR_TIME - (G.t - p.t0));
-      label(`${Math.ceil(left)}${TR('초', 's')}`, NWf - 49, 58, 9, 'right', al, left < 5 ? '#ff9aa8' : '#ffffff');
-      label(TR(`과일 ${p.hits}개`, `${p.hits} fruit`), 16, 46, 10, 'left', al, '#ffe0a8');
+      label(TR(`${Math.max(1, p.stage)}단계 / ${AR_STAGES}`, `Stage ${Math.max(1, p.stage)} / ${AR_STAGES}`), 16, 46, 10, 'left', al, '#ffe0a8');
       label(`${PT(p.gain)}`, 16, 58, 7.5, 'left', al, '#ffe68a');
+      for (let i = 0; i < AR_STAGES; i++) { const x = 19 + i * 6.4, y = 66, r = p.res[i];
+        A(1); ctx.beginPath(); ctx.arc(x, y, 2.3, 0, 6.2832);
+        if (r === 1) { ctx.fillStyle = '#ffd84a'; ctx.fill(); } else if (r === 0) { ctx.fillStyle = 'rgba(40,20,30,0.75)'; ctx.fill(); }
+        ctx.lineWidth = 0.7; ctx.strokeStyle = i === p.res.length && p.bird ? `rgba(255,255,255,${0.6 + 0.4 * Math.sin(G.t * 8)})` : 'rgba(255,255,255,0.8)'; ctx.stroke(); }
+      A(1);
+      if (p.streak > 1) label(TR(`${p.streak}연속`, `${p.streak} in a row`), 16, 76, 7, 'left', al, '#ffe14a');
     }
     if (p.st === 'intro') {
       const v = G.t - p.stT, a = Math.min(1, v / 0.3) * Math.max(0, Math.min(1, (AR_INTRO - v) / 0.3)), bw = Math.min(262, NWf - 16);
       A(a * 0.86); rrect(zx - bw / 2, 66, bw, 60, 8); ctx.fillStyle = '#10141e'; ctx.fill(); A(1);
-      label(TR('과일 사격! 30초', 'Fruit shoot! 30 s'), zx, 81, 15, 'center', al * a, '#ffe0a8');
-      label(TR('왼쪽으로 활 각도를 맞추고, 오른쪽 버튼으로 발사!', 'Left: the bow\'s angle. Right button: shoot!'), zx, 99, 7.5, 'center', al * a, '#ffffff');
-      label(TR('한 발에 여러 개면 2배·3배! 황금사과 500점', 'Several with one arrow: x2, x3! Golden apple: 500'), zx, 112, 7.5, 'center', al * a, '#ffe68a');
+      label(TR('새 사격! 10단계', 'Bird shoot! 10 stages'), zx, 81, 15, 'center', al * a, '#ffe0a8');
+      label(TR('왼쪽을 좌우로 밀어 활 각도, 오른쪽 버튼으로 발사!', 'Push the left side sideways to aim, right button: shoot!'), zx, 99, 7.5, 'center', al * a, '#ffffff');
+      label(TR('단계마다 빨라져요. 연속으로 맞히면 보너스!', 'Quicker every stage. Hit them in a row for a bonus!'), zx, 112, 7.5, 'center', al * a, '#ffe68a');
     }
     if (p.st === 'done') {
       const v = G.t - p.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (AR_END - v) / 0.35));
       A(a * 0.86); rrect(zx - 112, 66, 224, 62, 8); ctx.fillStyle = '#10141e'; ctx.fill(); A(1);
-      label(TR(`과일 ${p.hits}개 명중!`, `${p.hits} fruit hit!`), zx, 81, 14, 'center', a, '#ffe68a');
-      label(TR(`화살 ${p.shots}발${p.gold ? ` · 황금사과 ${p.gold}개` : ''}`, `${p.shots} arrows${p.gold ? ` · ${p.gold} golden` : ''}`), zx, 98, 7.5, 'center', a, '#ffffff');
+      label(TR(`${p.hits}마리 명중!`, `${p.hits} of ${AR_STAGES} hit!`), zx, 81, 14, 'center', a, '#ffe68a');
+      label(TR(`최고 연속 ${p.best} · 화살 ${p.shots}발`, `Best run ${p.best} · ${p.shots} arrows`), zx, 98, 7.5, 'center', a, '#ffffff');
       label(`+${PT(p.gain)}`, zx, 113, 10, 'center', a, '#ffe68a');
     }
     ctx.globalAlpha = 1;
@@ -4489,9 +4513,12 @@
       ctx.fillStyle = '#7a4218'; for (const [dx, dy] of [[-0.6, 1.6], [0.5, 0.1], [-0.2, -1.4]]) { rrect(x + dx - 2.2, y + dy - 0.65, 4.4, 1.3, 0.6); ctx.fill(); }
       ctx.globalAlpha = GA; return;
     }
-    if (kind === 'ar') {                                    // (v53) the archery: a sky-blue disc, a red apple, an arrow through
-      ctx.beginPath(); ctx.arc(x, y, 3.9, 0, 6.29); ctx.fillStyle = '#4aa8e8'; ctx.fill();
-      ctx.beginPath(); ctx.arc(x - 0.3, y + 0.5, 2.1, 0, 6.29); ctx.fillStyle = '#e8343c'; ctx.fill();
+    if (kind === 'ar') {                                    // (v53) the archery: a sky-blue disc (v55: a round blue bird, white-bellied, an orange beak), an arrow through
+      ctx.beginPath(); ctx.arc(x, y, 3.9, 0, 6.29); ctx.fillStyle = '#9ad4ff'; ctx.fill();
+      ctx.beginPath(); ctx.arc(x - 0.3, y + 0.5, 2.1, 0, 6.29); ctx.fillStyle = '#3a7ee0'; ctx.fill();
+      ctx.beginPath(); ctx.arc(x - 0.6, y + 1.1, 1.2, 0, 6.29); ctx.fillStyle = '#ffffff'; ctx.fill();
+      ctx.fillStyle = '#ffa020'; ctx.beginPath(); ctx.moveTo(x - 2.3, y + 0.3); ctx.lineTo(x - 3.4, y + 0.8); ctx.lineTo(x - 2.3, y + 1.2); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.arc(x - 1.3, y - 0.2, 0.4, 0, 6.29); ctx.fillStyle = '#10141e'; ctx.fill();
       ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.55; ctx.beginPath(); ctx.moveTo(x - 2.8, y + 2.8); ctx.lineTo(x + 2.6, y - 2.6); ctx.stroke();
       ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.moveTo(x + 3.0, y - 3.0); ctx.lineTo(x + 1.6, y - 2.6); ctx.lineTo(x + 2.6, y - 1.6); ctx.closePath(); ctx.fill();
       ctx.globalAlpha = GA; return;
@@ -4876,7 +4903,7 @@
     window.__pk = () => { const p = G.pk; if (!p) return null; return { st: p.st, k: p.k, res: p.res.slice(), gain: p.gain, shot: p.shot ? { ...p.shot } : null, aim: p.aim.slice(), power: p.power, kind: p.kind, needle: pkNeedle(p), pad: p.pad && { ...p.pad } }; };
     window.__pkForce = (gx, gh, power) => { const p = G.pk; if (!p || p.st !== 'aim') return; p.aim = [gx, gh]; pkShoot(); p.power = power; p.kind = pkZone(power); };
     window.__tw = () => { const p = G.tw; if (!p) return null; return { st: p.st, n: p.blocks.length, xs: p.blocks.map((b) => +b.x.toFixed(1)), misses: p.misses, perf: p.perf, best: p.best, gain: p.gain, why: p.why, swing: p.cur ? +twSwing(p).toFixed(1) : null, top: +twTopX(p).toFixed(1), falling: p.fall.length, modes: p.fall.map((f) => f.mode), cam: +p.camS.toFixed(1), k: +p.kS.toFixed(3) }; };
-    window.__ar = () => { const p = G.ar; if (!p) return null; return { st: p.st, hits: p.hits, shots: p.shots, gold: p.gold, gain: p.gain, aim: +p.aim.toFixed(3), fruit: p.fruit.map((f) => ({ kind: f.kind, x: +f.x.toFixed(1), y: +f.y.toFixed(1) })), arrows: p.arrows.length, bow: arBow(), pad: { ...AR_PAD, bx: NWf - AR_PAD.m }, ready: G.t - p.fireT >= AR_COOL }; };
+    window.__ar = () => { const p = G.ar; if (!p) return null; const b = p.bird; return { st: p.st, stage: p.stage, res: [...p.res], hits: p.hits, shots: p.shots, streak: p.streak, best: p.best, gain: p.gain, aim: +p.aim.toFixed(3), bird: b ? { st: b.st, s: b.s, x: +b.x.toFixed(1), y: +b.y.toFixed(1), vx: b.vx } : null, arrows: p.arrows.length, bow: arBow(), pad: { ...AR_PAD, bx: NWf - AR_PAD.m }, ready: G.t - p.fireT >= AR_COOL }; };
     window.__yb = () => { const p = G.yb; if (!p) return null; return { st: p.st, k: p.k, res: p.res.slice(), gain: p.gain, pot: p.pot, gold: p.gold, slot: p.slot.slice(), goldSlot: p.slot[p.gold], pick: p.pick, ok: p.ok, moved: p.moved, mv: !!p.mv, lift: p.lift.map((v) => +v.toFixed(1)), cur: p.cur, ask: p.ask, x: [0, 1, 2].map(ybX), foot: YB_FOOT, btn: { ...YB_BTN, cx: NWf / 2 } }; };
     window.__sl = () => { const s = G.sl; if (!s) return null; return { st: s.st, k: s.k, res: s.res.slice(), gain: s.gain, want: s.want && s.want.slice(), reach: !!s.reach, reels: s.reels.map((r) => ({ pos: +r.pos.toFixed(2), spin: r.spin, stop: !!r.stop })), mx: slMX(), btns: SLF.btns.map(([x, y]) => [slMX() + x, slMY() + y]) }; };
     window.__pkKick = (gx, gh) => pkKick(gx, gh, 0.5, 'good');

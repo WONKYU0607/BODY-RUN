@@ -33,6 +33,10 @@
   .card { pointer-events: auto; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: calc(var(--u) * 1.5); width: calc(var(--u) * 62); height: calc(var(--u) * 48); background: #2a1626; border: calc(var(--u) * 1) solid #1a0a14; border-radius: calc(var(--u) * 3); color: #fff; font: inherit; font-size: calc(var(--u) * 5); font-weight: 800; padding: calc(var(--u) * 2); }
   .card canvas { width: auto; height: calc(var(--u) * 30); }
   .card.last { border-color: #ffd696; }
+  #overScore { font-size: calc(var(--u) * 20); color: #ffe68a; line-height: 1; }
+  #overBest { font-size: calc(var(--u) * 7); color: #ffd0dc; }
+  #overBest.new { color: #ffe14a; font-size: calc(var(--u) * 9); }
+  #overBox { gap: calc(var(--u) * 4); }
   #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 800; }
 </style>
 </head>
@@ -55,11 +59,15 @@
       <h1 class="txt" data-en="Settings">설정</h1>
       <div class="setRow"><span class="setLab txt" data-en="Buttons">버튼 위치</span><button id="bSwap" class="pb alt"></button></div>
       <div class="setRow"><span class="setLab txt" data-en="Sound">사운드 끄기</span><button id="bSfx" class="pb tg"></button><button id="bMus" class="pb tg"></button></div>
+      <div class="setRow"><span class="setLab txt" data-en="Debug">디버그 모드</span><button id="bGod" class="pb tg"></button></div>
       <div class="row"><button id="bSetBack" class="pb" data-en="Close">닫기</button></div>
     </div>
     <div id="overBox" class="panel" hidden>
       <h1 class="txt" data-en="Out of health">체력이 다 떨어졌어요</h1>
+      <div id="overScore" class="txt"></div>
+      <p id="overParts"></p>
       <p id="overMsg"></p>
+      <p id="overBest" class="txt"></p>
       <div class="row"><button id="bAgain" class="pb" data-en="Again">다시</button><button id="bChar2" class="pb alt" data-en="Change character">캐릭터 바꾸기</button></div>
     </div>
   </div>
@@ -521,7 +529,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   const qs = new URLSearchParams(location.search);
   const CAPTURE = qs.has('capture');            // test hook: no animation loop, the test steps the game
   const AUTO = qs.has('auto');                  // test hook: the game plays itself
-  const NO_DEATH = !qs.has('death');            // debugging: health 0 does not end the run (?death turns it on)
+  const NO_DEATH_TEST = (CAPTURE || AUTO) && !qs.has('death');   // tests: health 0 does not end the run (?death turns it on)
   const PRELOAD = qs.has('preload');            // test hook: decode every picture up front
   const PROF = qs.has('prof') ? {} : null;      // test hook: time each part of drawing (window.__prof)
   // (v47) Korean or English: the device's language (?lang=ko|en for tests); every word on screen through TR(ko, en)
@@ -605,6 +613,12 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   const CHAR_NAMES = LANG === 'ko' ? { tardigrade: '물곰', lacto: '유산균', paramecium: '짚신벌레', amoeba: '아메바', daphnia: '물벼룩', pillbug: '공벌레', ladybug: '무당벌레', jelly: '아기 해파리', sub: '초소형 잠수정', phage: '박테리오파지' }
     : { tardigrade: 'Water Bear', lacto: 'Lactobacillus', paramecium: 'Paramecium', amoeba: 'Amoeba', daphnia: 'Water Flea', pillbug: 'Pill Bug', ladybug: 'Ladybug', jelly: 'Baby Jellyfish', sub: 'Mini Sub', phage: 'Phage' };
   const PTS = { vitC: 10, o2: 10, iron: 30, omega: 30, fiber: 30, atp: 50, multi: 100, heal: 0, drop: 10, soap: 30 };
+  // (v49) the score, as in Cookie Run: what you eat (PTS) + the distance run (1 point a metre, a metre being 10 units)
+  // + the mini-games (each its own points). The parts are kept for the end card
+  const M_UNITS = 10, OB_PTS = { perfect: 50, early: 25, late: 25 };
+  // (v49) a mini-game's points go into the score when it ends (until then they are its own, shown on its card)
+  const bankGame = (g) => { if (g && g.gain) { G.score = Math.max(0, G.score + g.gain); g.gain = 0; } };
+  const scoreParts = () => ({ dist: G.distM, items: G.itemPts, games: G.score - G.distM - G.itemPts });
   const mod = (a, n) => ((a % n) + n) % n;
   const PILOT_HUGE = 0.58;
   // the booster: every 100 things eaten (anything but a heal), 5 seconds at three times the speed, untouchable (a second's grace after)
@@ -742,7 +756,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   const G = {};
   function newRun(charName) {
     Object.assign(G, {
-      mode: 'play', t: 0, x: 0, v: V0, slow: 1, hp: HP_MAX, score: 0, eaten: 0, hits: 0,
+      mode: 'play', t: 0, x: 0, v: V0, slow: 1, hp: HP_MAX, score: 0, eaten: 0, hits: 0, dist: 0, distM: 0, itemPts: 0,
       y: 0, vy: 0, jumps: 0, onGround: true, slide: false, slideHeld: false, fastFall: false,
       invul: 0, nudge: 0, char: charName, obs: [], items: [], pops: [], puffs: [],
       genX: 520, genStation: undefined, lastGate: -1e9, R: rng(12345), nextHeal: 1800, station: -1, theme: COURSE[0][3], prevTheme: null, fade: 1, banner: 0, lapShown: 0,
@@ -981,10 +995,10 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
         // a triple jump starts ~0.6 s before the tower: above ~480/s that is off the screen, so no towers then
         ['huge', v < 480 ? 0.03 + 0.05 * d : 0], ['sky', v < 480 ? 0.03 : 0],
         // moving ones and quick combinations
-        ['bob', 0.04 + 0.08 * d], ['swim', 0.04 + 0.08 * d], ['slidejump', 0.03 + 0.08 * d], ['jumpslide', 0.03 + 0.08 * d], ['lowtall', 0.02 + 0.06 * d],
+        ['bob', 0.06 + 0.12 * d], ['swim', 0.06 + 0.12 * d], ['slidejump', 0.03 + 0.08 * d], ['jumpslide', 0.03 + 0.08 * d], ['lowtall', 0.02 + 0.06 * d],   // (v48: bob, swim 1.5x)
         // v19: holes, doors, drops, spikes, shots: a few from the start, more and harder as it speeds up
-        ['pit', 0.05 + 0.10 * d + 0.06 * d2], ['door', fam.door ? 0.04 + 0.08 * d + 0.05 * d2 : 0], ['drop', 0.05 + 0.08 * d + 0.05 * d2],
-        ['spike', 0.05 + 0.09 * d + 0.05 * d2], ['shot', 0.08 + 0.15 * d + 0.08 * d2]];        // (v38: shots twice as often)
+        ['pit', 0.05 + 0.10 * d + 0.06 * d2], ['door', fam.door ? 0.06 + 0.12 * d + 0.07 * d2 : 0], ['drop', 0.05 + 0.08 * d + 0.05 * d2],
+        ['spike', 0.05 + 0.09 * d + 0.05 * d2], ['shot', 0.12 + 0.22 * d + 0.12 * d2]];        // (v38: shots twice as often; v48: shots, doors 1.5x more)
       let r = R() * W.reduce((a, b) => a + b[1], 0), pat = 'rest';
       for (const [p, w] of W) { if ((r -= w) <= 0) { pat = p; break; } }
       // the way into each new look is guarded: a gate of three in quick succession
@@ -1143,9 +1157,15 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     pressed.jump = false;
     SND.play('ui');
   }
+  // (v48) debugging too: skip to the next stage's start (stage 1: the toilet; stage 2: round to the body's start)
+  function skipStage() {
+    if (G.mode !== 'play') return;
+    const stg = stageOf(stationAt(G.x).lx), j = stg === 1 ? COURSE.findIndex((st) => st[5] === STAGE2) : 0;
+    goToPlace(j);
+  }
   // the settings: the jump and slide buttons' sides swapped (kept in this browser); the sound switches are in sound.js
-  const SET = { swap: false };
-  try { SET.swap = localStorage.getItem('bodyrun.swap') === '1'; } catch (e) { /* storage off */ }
+  const SET = { swap: false, god: false };
+  try { SET.swap = localStorage.getItem('bodyrun.swap') === '1'; SET.god = localStorage.getItem('bodyrun.god') === '1'; } catch (e) { /* storage off */ }
   // debugging too: a mini-game's mark on the progress bar, tapped, takes you to the start of its place (ahead in this
   // lap, or in the next) and it begins; a mini-game on ends first
   function barMarkAt(nx, ny) {
@@ -1184,6 +1204,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     if (nx > NW - 26 && ny < 26) { pause(); return; }
     if (nx > NW - 26 && ny >= 26 && ny < 44) { openSettings(); e.preventDefault(); return; }
     if (DEBUG_SKIP && nx > NW - 26 && ny >= 44 && ny < 66) { skipPlace(); e.preventDefault(); return; }
+    if (DEBUG_SKIP && nx > NW - 44 && nx <= NW - 26 && ny >= 44 && ny < 66) { skipStage(); e.preventDefault(); return; }     // (v48)
     if (DEBUG_SKIP) { const m = barMarkAt(nx, ny); if (m) { goToPlace(m.i); e.preventDefault(); return; } }
     if (G.rh) { rhDown(e.pointerId, nx, ny); e.preventDefault(); return; }
     if (G.orb) { orbTap(); e.preventDefault(); return; }
@@ -1325,7 +1346,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   }
   function endRhythm() {
     const played = G.rh.song;
-    G.rh = null; resumeBoost();
+    bankGame(G.rh); G.rh = null; resumeBoost();
     SND.stopSong(0.5); SND.spin(null); SND.ambience(true);
     if (songFor('rh').file !== played.file) SND.release(played);   // (its decoded sound is big; the next is ready)
     G.genX = Math.max(G.genX, G.x + NW * 0.8);              // a moment to get going again
@@ -1344,7 +1365,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
       r.combo++; r.maxCombo = Math.max(r.maxCombo, r.combo);
       const base = n.kind === 'p' || n.kind === 'r' ? (res === 'perfect' ? 100 : 40) : n.kind === 's' ? (res === 'perfect' ? 50 : 20) : (res === 'perfect' ? 30 : 10);
       const pts = Math.round(base * (1 + Math.min(r.combo, 40) / 25));
-      G.score += pts; r.gain += pts;
+      r.gain += pts;                                        // (banked when the game ends)
       G.hp = Math.min(HP_MAX, G.hp + (res === 'perfect' ? 1.5 : 0.5));
     }
     r.pops.push({ x, y, s: res === 'perfect' ? 'Perfect' : res === 'good' ? 'Good' : 'Miss', res, t: G.t });
@@ -1436,7 +1457,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
         if (t > n.te) {
           SND.spin(null);
           rhJudge(n, n.turns >= n.need ? 'perfect' : n.turns >= n.need * 0.5 ? 'good' : 'miss', NWf / 2, 98);
-          if (n.turns > n.need) { const extra = Math.floor(n.turns - n.need) * 20; G.score += extra; r.gain += extra; }
+          if (n.turns > n.need) { const extra = Math.floor(n.turns - n.need) * 20; r.gain += extra; }
         }
       }
     }
@@ -1681,7 +1702,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   }
   function endOrbit() {
     const played = OB.song;
-    G.orb = null; G.orbits = (G.orbits || 0) + 1; resumeBoost();
+    bankGame(G.orb); G.orb = null; G.orbits = (G.orbits || 0) + 1; resumeBoost();
     SND.stopSong(0.5); SND.ambience(true);
     if (songFor('orb').file !== played.file) SND.release(played);
     G.genX = Math.max(G.genX, G.x + NW * 0.8);
@@ -1707,6 +1728,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   function orbLand(res) {
     const o = G.orb;
     o.k++; o.res[res]++; o.landT = G.t;
+    { const pts = OB_PTS[res] || 0; o.gain = (o.gain || 0) + pts; }       // (v49: it scores like the rest)
     o.pops.push({ k: o.k, res, t: G.t });
     SND.play('orbHit');
     if (o.k >= OB.N) { o.st = 'done'; o.stT = G.t; SND.play('orbClear'); }
@@ -1812,7 +1834,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
       label(TR('통과!', 'Clear!'), NWf / 2, 70, 14, 'center', a, '#ffe0a8');
       const r = o.res, all = r.perfect + r.early + r.late + r.miss;
       label(TR(`완벽 ${r.perfect}  ·  빠름 ${r.early}  ·  느림 ${r.late}  ·  놓침 ${r.miss}`, `Perfect ${r.perfect}  ·  Early ${r.early}  ·  Late ${r.late}  ·  Miss ${r.miss}`), NWf / 2, 92, 8.5, 'center', a, '#ffffff');
-      label(`${TR('정확도', 'Accuracy')} ${Math.round(100 * r.perfect / Math.max(1, all))}%`, NWf / 2, 110, 8.5, 'center', a, '#ffe68a');
+      label(`${TR('정확도', 'Accuracy')} ${Math.round(100 * r.perfect / Math.max(1, all))}%  ·  +${PT(o.gain || 0)}`, NWf / 2, 110, 8.5, 'center', a, '#ffe68a');
     }
   }
   function drawSwirl(x, y, d) {                             // a swirl: the swing turns round here
@@ -1949,7 +1971,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   }
   function endBaseball() {
     if (G.bb && G.bb.music) { SND.stopLoop(0.8); SND.ambience(true); }
-    G.bb = null; G.games = (G.games || 0) + 1; resumeBoost();
+    bankGame(G.bb); G.bb = null; G.games = (G.games || 0) + 1; resumeBoost();
     G.genX = Math.max(G.genX, G.x + NW * 0.8);
     G.banner = G.t;
   }
@@ -1967,6 +1989,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   const CUT_PUSH = [0.3, 0.95], CUT_SWAP = 0.9, CUT_DIVE = [0.95, 1.0], CUT_HIT = 0.08, CUT_END = 2.0;
   // the big chunk that comes into the toilet with the runner, stuck on its back (x, up: in the runner's size; turn)
   const CUT_STUCK = [['cut_chunk', -0.75, 0.5, 0.12]];
+  const CUT_LUMP = 3;                                // (v48) the lump 3 times as big: the runner stuck in front of it, its bottom at the feet
   const cutOn = () => G.cut || (G.station >= 0 && COURSE[G.station][5] === STAGE2 - 1);      // in the anus, or in the cut
   const cutFaceX = () => (G.cut ? G.cut.faceX : Math.floor(G.x / LAP) * LAP + S2_X - CUT_FACE);
   function cutCheck() {
@@ -2039,9 +2062,13 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     spr('cut_wall', x, GY + 2 - SH('cut_wall'));
   }
   // the runner with its lumps on, in one piece (into the toilet)
+  const lumpAt = (cx, fy) => [cx + 16.7 * CUT_LUMP, fy - 17.7 * CUT_LUMP];   // its picture's middle: the runner in its lower left, its bottom (the lump drawn, not the picture's margin) at the feet
   function drawMass(cx, fy, rot) {
-    const n = 'ch_' + G.char, w = SW(n), h = SH(n), my = fy - h * 0.55;
-    ctx.save(); ctx.translate(cx, my); ctx.rotate(rot); ctx.translate(-cx, -my);
+    // (v48) the big lump behind, the runner in front of its lower left, a piece of it stuck on the runner's back; the
+    // whole tumbling round the big lump's middle
+    const n = 'ch_' + G.char, w = SW(n), h = SH(n), [lx, ly] = lumpAt(cx, fy);
+    ctx.save(); ctx.translate(lx, ly); ctx.rotate(rot); ctx.translate(-lx, -ly);
+    sprRot('cut_chunk', lx, ly, 0.06, 1, CUT_LUMP);
     spr(n, cx - w / 2, fy - h);
     for (const [ln, dx, up, r] of CUT_STUCK) sprRot(ln, cx + dx * w, fy - up * h, r);
     ctx.restore();
@@ -2104,15 +2131,20 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     }
   }
   // under the water at the start of stage 2 (world: after the runner): the lumps drift up and away off it
+  function drawCutDriftPiece() {                            // (the piece on the runner's back: in front of it)
+    const t0 = G.cut ? G.cut.landed : G.cutTail ? G.cutTail.landed : 0;
+    if (!t0 || !cutReady()) return;
+    const v = G.t - t0, n = 'ch_' + G.char, w = SW(n), h = SH(n), D = 1.1;
+    if (v < 0 || v >= D) return;
+    for (const [ln, dx, up, r] of CUT_STUCK) { const k = v / D; sprRot(ln, PX - G.nudge + dx * w - 22 * k, GY + 1 - G.y - up * h - 26 * k, r - 0.5 * k, 1 - k * k); }
+  }
   function drawCutDrift() {
     const t0 = G.cut ? G.cut.landed : G.cutTail ? G.cutTail.landed : 0;
     if (!t0 || !cutReady()) return;
     const v = G.t - t0, n = 'ch_' + G.char, w = SW(n), h = SH(n), D = 1.1;
     if (v < 0 || v >= D) return;
-    for (const [ln, dx, up, r] of CUT_STUCK) {            // the chunk lets go and floats up and back
-      const k = v / D;
-      sprRot(ln, PX - G.nudge + dx * w - 22 * k, GY + 1 - G.y - up * h - 26 * k, r - 0.5 * k, 1 - k * k);
-    }
+    { const k = v / D, [lx, ly] = lumpAt(PX - G.nudge, GY + 1 - G.y);       // the big lump lets go and floats up and back
+      sprRot('cut_chunk', lx - 40 * k, ly - 34 * k, 0.06 - 0.3 * k, 1 - k * k, CUT_LUMP); }
   }
   const bbZone = () => [NWf / 2, BB_ZY];
   function bbPitch() {                                                         // the next pitch: its kind, where it crosses
@@ -2176,7 +2208,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
       b.ball = fly;
     }
     b.msg = { s: { hr: TR('홈런!', 'Home run!'), foul: TR('파울', 'Foul'), whiff: TR('헛스윙', 'Swing and miss'), strike: TR('스트라이크', 'Strike') }[res], t: G.t, res };
-    if (res === 'hr') { G.score += BB_PTS.hr; b.gain += BB_PTS.hr; b.hr = true; SND.play('bbHR'); buzz([40, 30, 70]); }
+    if (res === 'hr') { b.gain += BB_PTS.hr; b.hr = true; SND.play('bbHR'); buzz([40, 30, 70]); }
     else if (res === 'foul') { SND.play('bbHit'); buzz(35); }
     else SND.play('bbMitt');
   }
@@ -2486,7 +2518,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   }
   function endWhack() {
     if (G.wm && G.wm.music) { SND.stopSong(0.8); SND.ambience(true); }
-    G.wm = null; G.games = (G.games || 0) + 1; resumeBoost();
+    bankGame(G.wm); G.wm = null; G.games = (G.games || 0) + 1; resumeBoost();
     G.genX = Math.max(G.genX, G.x + NW * 0.8);
     G.banner = G.t;
   }
@@ -2567,11 +2599,11 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     const w = G.wm;
     m.qH = wmOut(m); m.st = 'hit'; m.tH = G.t;
     if (m.good) {
-      const lose = Math.min(WM_OOPS, G.score); G.score -= lose; w.gain -= lose; w.oops++;     // (the score never goes below 0)
+      const lose = Math.min(WM_OOPS, G.score + w.gain); w.gain -= lose; w.oops++;     // (the score never goes below 0)
       SND.play('wmOops'); buzz([30, 40, 30]);
       w.pops.push({ x, y: y - 6, s: lose ? '-' + lose : TR('앗!', 'Oops!'), t: G.t, bad: true });
     } else {
-      G.score += WM_PTS; w.gain += WM_PTS; w.caught++;
+      w.gain += WM_PTS; w.caught++;
       SND.play('wmHit'); buzz(BUZZ_TAP);
       w.pops.push({ x, y: y - 6, s: '+' + WM_PTS, t: G.t });
     }
@@ -2701,7 +2733,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   }
   function endMemory() {
     if (G.mem && G.mem.music) SND.stopLoop(0.8);
-    G.mem = null; G.games = (G.games || 0) + 1; resumeBoost();
+    bankGame(G.mem); G.mem = null; G.games = (G.games || 0) + 1; resumeBoost();
     if (!CAPTURE && SND.live()) SND.ambience(true);
     G.genX = Math.max(G.genX, G.x + NW * 0.8);
     G.banner = G.t;
@@ -2749,7 +2781,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     memLight(n, 'tap', MG_TAP); buzz(BUZZ_TAP);
     if (m.k > 0) m.pulses.push({ a: m.seq[m.k - 1], b: n, t: G.t - 0.12, dur: 0.16 });
     if (++m.k >= m.seq.length) {
-      const pts = m.seq.length * 100; G.score += pts; m.gain += pts; m.res.push('ok');
+      const pts = m.seq.length * 100; m.gain += pts; m.res.push('ok');
       m.st = 'ok'; m.stT = G.t; m.okPts = pts; m.best = Math.max(m.best || 0, m.seq.length);
       SND.play('memOk');
     }
@@ -2878,7 +2910,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     G.slideHeld = false; held.clear(); pressed.jump = false; pkKeys.clear();
   }
   function endPK() {
-    G.pk = null; G.games = (G.games || 0) + 1; resumeBoost();
+    bankGame(G.pk); G.pk = null; G.games = (G.games || 0) + 1; resumeBoost();
     G.genX = Math.max(G.genX, G.x + NW * 0.8);
     G.banner = G.t;
   }
@@ -2923,7 +2955,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     const p = G.pk, s = p.shot;
     s.done = true; p.res.push(s.res); p.st = 'after'; p.stT = G.t;
     const at = [pkGX(s.gx), pkGY(s.gh)];
-    if (s.res === 'goal') { G.score += PK_PTS; p.gain += PK_PTS; SND.play('pkGoal'); buzz([40, 30, 70]); p.fx.push({ kind: 'goal', at, t: G.t }); }
+    if (s.res === 'goal') { p.gain += PK_PTS; SND.play('pkGoal'); buzz([40, 30, 70]); p.fx.push({ kind: 'goal', at, t: G.t }); }
     else if (s.res === 'save') { SND.play('pkSave'); buzz(30); }
     else if (s.res === 'post') { SND.play('pkPost'); buzz(25); p.fx.push({ kind: 'post', at, t: G.t }); }
     else SND.play('pkMiss');
@@ -3206,7 +3238,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     G.slideHeld = false; held.clear(); pressed.jump = false;
   }
   function endSlot() {
-    G.sl = null; G.games = (G.games || 0) + 1; resumeBoost();
+    bankGame(G.sl); G.sl = null; G.games = (G.games || 0) + 1; resumeBoost();
     G.genX = Math.max(G.genX, G.x + NW * 0.8);
     G.banner = G.t;
   }
@@ -3258,7 +3290,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     let pts = 0, kind = 'none';
     if (w[0] === w[1] && w[1] === w[2]) { pts = SL_PAY[w[0]]; kind = w[0] === 0 ? 'jackpot' : 'three'; s.best3 = true; }
     else if (w[0] === w[1] || w[1] === w[2] || w[0] === w[2]) { pts = SL_PAIR; kind = 'two'; }
-    G.score += pts; s.gain += pts; s.res.push(kind);
+    s.gain += pts; s.res.push(kind);
     s.st = 'after'; s.stT = G.t; s.flash = G.t; s.reach = false;
     s.msg = { kind, pts, sym: w[0] === w[1] || w[0] === w[2] ? w[0] : w[1], t: G.t, near: w[0] === w[1] && w[2] !== w[0] };
     if (kind === 'jackpot') { SND.play('slJackpot'); buzz([60, 40, 60, 40, 120]); for (let i = 0; i < 140; i++) s.coins.push({ x: Math.random() * NWf, y: -10 - Math.random() * 180, vx: (Math.random() * 2 - 1) * 20, vy: 40 + Math.random() * 60, r: Math.random() * 6.28, vr: (Math.random() * 2 - 1) * 10 }); }
@@ -3468,8 +3500,8 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   const hbTop = (o) => o.y + M.sprites[o.name].hb[1];
   // one pattern under water at x; returns how far it reaches
   function spawnSwim(x, theme, fam, coin, special, v, d, d2, R) {
-    const W = [['rest', 0.1], ['gate', 0.3 + 0.08 * d], ['gate2', 0.04 + 0.1 * d], ['float', 0.16], ['bob', 0.07 + 0.06 * d], ['swim', 0.06 + 0.06 * d],
-      ['tall', 0.07], ['drop', 0.04 + 0.05 * d + 0.03 * d2], ['spike', 0.04 + 0.05 * d + 0.03 * d2], ['shot', 0.09 + 0.13 * d + 0.07 * d2]];      // (v38: shots twice as often)
+    const W = [['rest', 0.1], ['gate', 0.3 + 0.08 * d], ['gate2', 0.04 + 0.1 * d], ['float', 0.16], ['bob', 0.1 + 0.09 * d], ['swim', 0.09 + 0.09 * d],
+      ['tall', 0.07], ['drop', 0.04 + 0.05 * d + 0.03 * d2], ['spike', 0.04 + 0.05 * d + 0.03 * d2], ['shot', 0.135 + 0.2 * d + 0.1 * d2]];      // (v38: shots twice as often; v48: shots, bob, swim 1.5x)
     let r = R() * W.reduce((a, b) => a + b[1], 0), pat = 'rest';
     for (const [p, w] of W) { if ((r -= w) <= 0) { pat = p; break; } }
     if (window.__patlog) window.__patlog['s2:' + pat] = (window.__patlog['s2:' + pat] || 0) + 1;
@@ -3579,7 +3611,8 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
       G.boost -= dt; G.slow = 1;
       if (G.boost <= 0) { G.boost = 0; G.invul = Math.max(G.invul, BOOST_GRACE); }
     }
-    G.x += curSpeed() * dt;
+    { const v = curSpeed(); G.x += v * dt; G.dist += v * dt; }
+    { const m = Math.floor(G.dist / M_UNITS); if (m > G.distM) { G.score += m - G.distM; G.distM = m; } }   // (v49) a point a metre
     stepFire(dt);
     if (G.rh) stepRhythm(dt);
     if (G.orb) stepOrbit(dt);
@@ -3663,7 +3696,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
         it.taken = true; it.t = G.t;
         if (it.kind === 'heal') G.hp = Math.min(HP_MAX, G.hp + HEAL);
         if (it.kind !== 'heal' && !(G.boost > 0) && !busy() && ++G.o2n >= boostNeed()) startBoost();     // everything but the heal counts
-        G.score += PTS[it.kind]; G.eaten++; if (it.kind === 'atp') G.atp = (G.atp || 0) + 1;
+        G.score += PTS[it.kind]; G.itemPts += PTS[it.kind]; G.eaten++; if (it.kind === 'atp') G.atp = (G.atp || 0) + 1;
         SND.play(it.kind === 'heal' ? 'heal' : it.kind === 'atp' ? 'atp' : PTS[it.kind] >= 30 ? 'special' : 'coin');
         if (PTS[it.kind] >= 30 || it.kind === 'heal') G.pops.push({ x: it.x, y: it.y - 8, s: it.kind === 'heal' ? '+' + HEAL : '+' + PTS[it.kind], t: G.t });
       }
@@ -3696,7 +3729,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
       if (G.blinkAt < 0) G.blinkAt = G.t + 0.6;
       else if (G.t > G.blinkAt + BLINK) G.blinkAt = G.t + (G.blinkR() < 0.25 ? 0.12 : 0.9 + G.blinkR() * 1.5);
     } else G.blinkAt = -1;
-    if (G.hp <= 0 && !NO_DEATH) gameOver();
+    if (G.hp <= 0 && !NO_DEATH_TEST && !SET.god) gameOver();       // (v49: the settings' debug switch keeps you alive)
     if (!busy()) spawnAhead();
   }
   function playerBox() {
@@ -4101,10 +4134,11 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
       spr(n, sx - SW(n) / 2, it.y - SH(n) / 2 + by);
     }
     // the player: a shadow, dust, the character (bobbing as it runs, squashed when sliding); not while on the orbit stage
+    if ((G.cut && G.cut.landed) || G.cutTail) drawCutDrift();     // (v48: the big lump behind the runner as it lets go)
     if (G.cut && G.cut.swap) { if (!G.cut.landed) drawDive(); else drawPlayer(cam); }
     else if (!G.orb || (G.orb.st === 'done' && G.t - G.orb.stT > OB_DONE - 0.35)) drawPlayer(cam);
     drawCutBack(cam);
-    if ((G.cut && G.cut.landed) || G.cutTail) drawCutDrift();
+    if ((G.cut && G.cut.landed) || G.cutTail) drawCutDriftPiece();
     drawShotWarnings(cam);
     for (const p of G.pops) { const u = (G.t - p.t) / 0.8; label(p.s, p.x - cam, Math.max(40, p.y - u * 14), 8, 'center', 1 - u * u); }
   }
@@ -4363,6 +4397,8 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     const tw = ctx.measureText(s).width;
     spr('it_vitC', right - tw - 19.5, 4.5);
     label(s, right, 11.6, 10, 'right');
+    label(`${G.distM.toLocaleString('en-US')}m`, right, 21.5, 6.5, 'right', 1, '#d8e8ff');          // (v49) how far
+    if (SET.god) label(TR('디버그: 안 죽음', 'Debug: no death'), 16, 30, 6, 'left', 0.85, '#8af0ff');
     // pause
     rrect(NW - 20, 4.5, 14, 14, 3); ctx.fillStyle = '#1a0a14'; ctx.fill();
     rrect(NW - 19, 5.5, 12, 12, 2.3); ctx.fillStyle = '#f4e8ee'; ctx.fill();
@@ -4398,6 +4434,13 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
       ctx.fillStyle = '#1a0a14';
       for (const ox of [0, 3.6]) { ctx.beginPath(); ctx.moveTo(NW - 17.2 + ox, 52.3); ctx.lineTo(NW - 13.4 + ox, 55.5); ctx.lineTo(NW - 17.2 + ox, 58.7); ctx.closePath(); ctx.fill(); }
       ctx.fillRect(NW - 9.6, 52.3, 1.4, 6.4);
+      // (v48) and left of it the stage skip: the same, with the next stage's number
+      rrect(NW - 38, 48.5, 14, 14, 3); ctx.fillStyle = '#1a0a14'; ctx.fill();
+      rrect(NW - 37, 49.5, 12, 12, 2.3); ctx.fillStyle = '#ffe0a8'; ctx.fill();
+      ctx.fillStyle = '#1a0a14';
+      for (const ox of [0, 3.2]) { ctx.beginPath(); ctx.moveTo(NW - 35.6 + ox, 52.6); ctx.lineTo(NW - 32.4 + ox, 55.5); ctx.lineTo(NW - 35.6 + ox, 58.4); ctx.closePath(); ctx.fill(); }
+      ctx.fillRect(NW - 28.6, 52.3, 1.3, 6.4);
+      label(stg === 1 ? '2' : '1', NW - 31, 64.8, 5.5, 'center', 1, '#ffe0a8');
     }
     // buttons (not on the rhythm or orbit stage)
     if (busy()) return;
@@ -4470,6 +4513,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   function resume() { show('pauseBox', false); show('setBox', false); G.mode = 'play'; last = performance.now(); SND.unlock(); SND.play('ui'); }
   function setLabels() {                                   // the settings' buttons show how things are now
     document.getElementById('bSwap').textContent = SET.swap ? TR('왼쪽 슬라이드 · 오른쪽 점프', 'Left slide · Right jump') : TR('왼쪽 점프 · 오른쪽 슬라이드', 'Left jump · Right slide');
+    { const b = document.getElementById('bGod'); b.textContent = SET.god ? TR('안 죽음 켜짐', 'No death on') : TR('안 죽음 꺼짐', 'No death off'); b.classList.toggle('off', !SET.god); }
     for (const [id, k, name] of [['bSfx', 'sfx', TR('효과음', 'Sound effects')], ['bMus', 'music', TR('배경음악', 'Music')]]) {
       const b = document.getElementById(id), off = SND.muted(k);
       b.textContent = name + (off ? TR(' 꺼짐', ' off') : TR(' 켜짐', ' on')); b.classList.toggle('off', off);
@@ -4477,9 +4521,17 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   }
   function gameOver() {
     G.mode = 'over'; show('overBox', true);
-    if (busy()) { G.rh = null; G.orb = null; G.bb = null; G.cut = null; SND.stopSong(0.3); SND.stopLoop(0.3); SND.spin(null); }
+    if (busy()) { for (const g of [G.rh, G.orb, G.bb, G.wm, G.mem, G.pk, G.sl]) bankGame(g); G.rh = null; G.orb = null; G.bb = null; G.wm = null; G.mem = null; G.pk = null; G.sl = null; G.cut = null; SND.stopSong(0.3); SND.stopLoop(0.3); SND.spin(null); }
     SND.ambience(false); SND.play('over');
-    document.getElementById('overMsg').textContent = TR(`점수 ${G.score.toLocaleString('en-US')} · ${Math.floor(G.t / 60)}분 ${Math.floor(G.t % 60)}초 · ${COURSE[G.station][1]}까지`, `Score ${G.score.toLocaleString('en-US')} · ${Math.floor(G.t / 60)}:${String(Math.floor(G.t % 60)).padStart(2, '0')} · reached ${COURSE[G.station][2]}`);
+    // (v49) the end card: the score big, where it came from, how long and how far, the best (kept in this browser)
+    const P = scoreParts(), f = (n) => n.toLocaleString('en-US');
+    let best = 0; try { best = +(localStorage.getItem('bodyrun.best') || 0); } catch (e) { /* storage off */ }
+    const isBest = G.score > best; if (isBest) { best = G.score; try { localStorage.setItem('bodyrun.best', String(best)); } catch (e) { /* storage off */ } }
+    document.getElementById('overScore').textContent = f(G.score);
+    document.getElementById('overParts').textContent = TR(`거리 ${f(P.dist)} · 아이템 ${f(P.items)} · 미니게임 ${f(P.games)}`, `Distance ${f(P.dist)} · Items ${f(P.items)} · Mini-games ${f(P.games)}`);
+    document.getElementById('overMsg').textContent = TR(`${Math.floor(G.t / 60)}분 ${Math.floor(G.t % 60)}초 · ${f(G.distM)}m · ${COURSE[G.station][1]}까지`, `${Math.floor(G.t / 60)}:${String(Math.floor(G.t % 60)).padStart(2, '0')} · ${f(G.distM)}m · reached ${COURSE[G.station][2]}`);
+    document.getElementById('overBest').textContent = isBest ? TR('최고 기록!', 'New best!') : TR(`최고 기록 ${f(best)}`, `Best ${f(best)}`);
+    document.getElementById('overBest').classList.toggle('new', isBest);
   }
   function startGame(c) {
     try { localStorage.setItem('bodyrun.char', c); } catch (e) { /* storage off */ }
@@ -4509,6 +4561,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   document.getElementById('bSetBack').onclick = resume;
   document.getElementById('bSwap').onclick = () => { SET.swap = !SET.swap; try { localStorage.setItem('bodyrun.swap', SET.swap ? '1' : '0'); } catch (e) { /* storage off */ } setLabels(); render(); };
   document.getElementById('bSfx').onclick = () => { SND.setMute('sfx', !SND.muted('sfx')); setLabels(); };
+  document.getElementById('bGod').onclick = () => { SET.god = !SET.god; try { localStorage.setItem('bodyrun.god', SET.god ? '1' : '0'); } catch (e) { /* storage off */ } setLabels(); render(); };
   document.getElementById('bMus').onclick = () => { SND.setMute('music', !SND.muted('music')); setLabels(); };
   document.getElementById('bAgain').onclick = () => startGame(G.char);
   document.getElementById('bChar2').onclick = () => { G.mode = 'select'; SND.ambience(false); show('overBox', false); show('hudText', false); show('select', true); };
@@ -4528,6 +4581,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     });
     TITLE.run.sort((a, b) => a.y - b.y);                    // (the far ones first)
     TITLE.t0 = performance.now() / 1000;
+    try { TITLE.best = +(localStorage.getItem('bodyrun.best') || 0); } catch (e) { TITLE.best = 0; }
   }
   function titleTap() {
     if (ttime() < 0.35) return;                             // (a tap that was meant for something before)
@@ -4568,7 +4622,8 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     }
     { const a = 0.78 + 0.22 * Math.sin(t * 3.4), s2 = 1 + 0.04 * Math.sin(t * 3.4);
       ctx.globalAlpha = 0.45 * a; rrect(NWf / 2 - 52, 93, 104, 17, 8.5); ctx.fillStyle = '#1a0610'; ctx.fill(); ctx.globalAlpha = 1;
-      label(TR('화면을 눌러 시작', 'Tap to start'), NWf / 2, 101.5, 10.5 * s2, 'center', a, '#ffffff'); }
+      label(TR('화면을 눌러 시작', 'Tap to start'), NWf / 2, 101.5, 10.5 * s2, 'center', a, '#ffffff');
+      if (TITLE.best > 0) label(`${TR('최고 기록', 'Best')} ${TITLE.best.toLocaleString('en-US')}`, NWf / 2, 116, 7.5, 'center', 0.95, '#ffe68a'); }
   }
 
   // ---------------------------------------------------------------- loop
@@ -4614,6 +4669,8 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
       station: COURSE[Math.max(0, G.station)][0], seg: G.station, theme: G.theme, lid: +lidAmount().toFixed(2), lastHit: G.lastHit, rot, lap: stationAt(G.x).lap, y: +G.y.toFixed(1), slide: G.slide, obs: G.obs.length, items: G.items.length,
       NW, RS: +RS.toFixed(3), GW, GH, rhSong: G.rh ? G.rh.song.id : null, orbSong: G.orb ? OB.song.id : null, rotation: { ...ROT }, o2n: G.o2n, boost: +G.boost.toFixed(2), boostHeld: +G.boostHeld.toFixed(2), boosts: G.boosts, decoded: Object.keys(bmp).length, atp: G.atp || 0, orbits: G.orbits || 0, orb: G.orb ? G.orb.st : null, bb: G.bb ? G.bb.st : null, wm: G.wm ? G.wm.st : null, mem: G.mem ? G.mem.st : null, pk: G.pk ? G.pk.st : null, sl: G.sl ? G.sl.st : null, games: G.games || 0, huge: G.obs.filter((o) => o.kind === 'huge').length });
     window.__G = G;
+    window.__parts = () => scoreParts();
+    window.__die = () => { G.hp = 0; };
     window.__title = (tt) => { TITLE.tt = tt; renderTitle(); return { mode: G.mode, run: TITLE.run.map((r) => r.c) }; };
     window.__titleTap = () => titleTap();
     window.__mem = () => { let px = 0; const files = {}; for (const [f, b] of Object.entries(bmp)) { const n = b.width * b.height; px += n; files[f] = +(n * 4 / 1e6).toFixed(1); } return { MB: +(px * 4 / 1e6).toFixed(1), files }; };

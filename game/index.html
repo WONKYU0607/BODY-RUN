@@ -33,6 +33,10 @@
   .card { pointer-events: auto; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: calc(var(--u) * 1.5); width: calc(var(--u) * 62); height: calc(var(--u) * 48); background: #2a1626; border: calc(var(--u) * 1) solid #1a0a14; border-radius: calc(var(--u) * 3); color: #fff; font: inherit; font-size: calc(var(--u) * 5); font-weight: 800; padding: calc(var(--u) * 2); }
   .card canvas { width: auto; height: calc(var(--u) * 30); }
   .card.last { border-color: #ffd696; }
+  #overScore { font-size: calc(var(--u) * 20); color: #ffe68a; line-height: 1; }
+  #overBest { font-size: calc(var(--u) * 7); color: #ffd0dc; }
+  #overBest.new { color: #ffe14a; font-size: calc(var(--u) * 9); }
+  #overBox { gap: calc(var(--u) * 4); }
   #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 800; }
 </style>
 </head>
@@ -55,11 +59,15 @@
       <h1 class="txt" data-en="Settings">설정</h1>
       <div class="setRow"><span class="setLab txt" data-en="Buttons">버튼 위치</span><button id="bSwap" class="pb alt"></button></div>
       <div class="setRow"><span class="setLab txt" data-en="Sound">사운드 끄기</span><button id="bSfx" class="pb tg"></button><button id="bMus" class="pb tg"></button></div>
+      <div class="setRow"><span class="setLab txt" data-en="Debug">디버그 모드</span><button id="bGod" class="pb tg"></button></div>
       <div class="row"><button id="bSetBack" class="pb" data-en="Close">닫기</button></div>
     </div>
     <div id="overBox" class="panel" hidden>
       <h1 class="txt" data-en="Out of health">체력이 다 떨어졌어요</h1>
+      <div id="overScore" class="txt"></div>
+      <p id="overParts"></p>
       <p id="overMsg"></p>
+      <p id="overBest" class="txt"></p>
       <div class="row"><button id="bAgain" class="pb" data-en="Again">다시</button><button id="bChar2" class="pb alt" data-en="Change character">캐릭터 바꾸기</button></div>
     </div>
   </div>

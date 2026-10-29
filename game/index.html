@@ -29,6 +29,7 @@
   .pb.rev { background: linear-gradient(#ffd24a, #f09a10); color: #3a1a00; }
   .pb[disabled] { opacity: 0.45; }
   .pb[hidden] { display: none; }
+  .setRow[hidden] { display: none; }
   #overCoins { color: #ffe68a; }
   .setRow { display: flex; align-items: center; gap: calc(var(--u) * 4); }
   .setLab { font-size: calc(var(--u) * 6.5); width: calc(var(--u) * 40); text-align: right; }
@@ -66,6 +67,7 @@
       <h1 class="txt" data-en="Settings">설정</h1>
       <div class="setRow"><span class="setLab txt" data-en="Buttons">버튼 위치</span><button id="bSwap" class="pb alt"></button></div>
       <div class="setRow"><span class="setLab txt" data-en="Sound">사운드 끄기</span><button id="bSfx" class="pb tg"></button><button id="bMus" class="pb tg"></button></div>
+      <div class="setRow" id="acctRow" hidden><span class="setLab txt" data-en="Account">구글 계정</span><button id="bAcct" class="pb alt"></button></div>
       <div class="setRow"><span class="setLab txt" data-en="Debug">디버그 모드</span><button id="bGod" class="pb tg"></button></div>
       <div class="row"><button id="bSetBack" class="pb" data-en="Close">닫기</button></div>
     </div>

@@ -21,8 +21,10 @@ THEMES = ['eso', 'stomach', 'gut', 'colon', 'artery', 'vein', 'atrium', 'ventric
           'toilet',                                                   # stage 2: the toilet, then down the drains (drains.py,
           'trap', 'stack', 'drain', 'septic',                         #  sewer.py, plant.py)
           'chamber', 'sewer', 'manhole', 'trunk', 'combined', 'interceptor', 'pump',
-          'screen', 'grit', 'clarifier1', 'aeration', 'clarifier2', 'uv', 'outfall']
-S2_MODULES = ['drains', 'sewer', 'plant']
+          'screen', 'grit', 'clarifier1', 'aeration', 'clarifier2', 'uv', 'outfall',
+          'river', 'riffle', 'weeds', 'weir', 'pool', 'bridge', 'reeds', 'mudflat',                 # stage 3: the river, the estuary
+          'shallows', 'rocky', 'kelp', 'coral', 'jellies', 'school', 'wreck', 'dropoff', 'deep', 'vent', 'whale']   # and the sea (river.py, sea.py)
+S2_MODULES = ['drains', 'sewer', 'plant', 'river', 'sea']
 TALL_K = 1.10            # tall obstacles drawn this much taller than designed: the jump is 10% higher (v17)
 CHARS = ['tardigrade', 'lacto', 'paramecium', 'amoeba', 'daphnia', 'pillbug', 'ladybug', 'jelly', 'sub', 'phage']
 CHAR_PX = 8.0 / 0.9      # source px per unit: the sheet's characters at 0.8 of their first size, then 0.9 of that (v38)
@@ -39,7 +41,11 @@ BG = {'eso': '#40101c', 'stomach': '#3a0a1c', 'gut': '#3a0c1a', 'colon': '#3a161
       'trap': '#4e7e80', 'stack': '#7a9ca2', 'drain': '#6a847c', 'septic': '#3a4428', 'chamber': '#5c7064', 'sewer': '#4c5c54',
       'manhole': '#5a7672', 'trunk': '#463a30', 'combined': '#665e46', 'interceptor': '#3e4c54', 'pump': '#40565e',
       'screen': '#5a5c4a', 'grit': '#6a6650', 'clarifier1': '#56543e', 'aeration': '#66502e', 'clarifier2': '#5a8a84',
-      'uv': '#3a6a96', 'outfall': '#4e8a6a'}
+      'uv': '#3a6a96', 'outfall': '#4e8a6a',
+      'river': '#5e9e84', 'riffle': '#7cc6b6', 'weeds': '#64a866', 'weir': '#62989e', 'pool': '#2a5a62', 'bridge': '#527e7c',
+      'reeds': '#80866a', 'mudflat': '#8a8268', 'shallows': '#60c8d8', 'rocky': '#5498b4', 'kelp': '#4a9084', 'coral': '#42acdc',
+      'jellies': '#2e78c0', 'school': '#286cac', 'wreck': '#225a76', 'dropoff': '#144074', 'deep': '#08101e', 'vent': '#0c0e14',
+      'whale': '#361620'}
 
 
 def chunks(arr):
@@ -186,6 +192,8 @@ def build_common(manifest):
     hz.update(TT.stage2_sprites())                          # stage 2's coin, special and hazards (it_*, hz_*)
     import sewer as SWR, plant as PLT
     hz.update(SWR.hazards()); hz.update(PLT.hazards())      # (the sewers': sludge, rebar, a nut; the works': floc, grit, a pebble)
+    import sea as SEA
+    hz.update(SEA.hazards())                                # (stage 3: the pearl; a leaf, a rock, a shell, an urchin, a fish)
     allspr = dict(spr); allspr.update(chars); allspr.update(hz)
     rects, total = pack(allspr, 1600)
     atlas = np.zeros((total, 1600, 4), np.float32)

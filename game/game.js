@@ -250,7 +250,7 @@
   // ---------------------------------------------------------------- the run
   const G = {};
   const loadBest = () => { try { return +(localStorage.getItem('bodyrun.best') || 0); } catch (e) { return 0; } };     // (v57) the best so far, for the HUD
-  function newRun(charName) {
+  function newRun(charName, opts = {}) {
     Object.assign(G, {
       mode: 'play', t: 0, x: 0, v: V0, slow: 1, hp: HP_MAX, score: 0, eaten: 0, hits: 0, dist: 0, distM: 0, itemPts: 0,
       y: 0, vy: 0, jumps: 0, onGround: true, slide: false, slideHeld: false, fastFall: false,
@@ -260,6 +260,10 @@
       o2n: 0, boost: 0, boostT0: -9, boostHeld: 0, boosts: 0, fire: [], fxR: rng(9191), best0: loadBest(),
       intro: [[1950, 'spike'], [3650, 'drop'], [5420, 'pit'], [7250, 'shot'], [9130, 'door']],
     });
+    // (v60) the start items; getting up again; the coins paid; the first run's lessons
+    Object.assign(G, { opts, x2: !!opts.x2, magR: opts.mag ? ITEM_MAG_R : 0, hpMax: HP_MAX + (opts.hp ? 20 : 0), revived: false, coinsPaid: 0, recKept: false, timeKept: 0, final: 0, coinsAdd: 0 });
+    G.hp = G.hpMax;
+    G.tut = tutWanted() ? { on: true, tipsOn: true, done: {}, wait: null, tips: {}, t0: 0 } : null;
     pressed.jump = false;
   }
 
@@ -749,6 +753,7 @@
     if (G.mode === 'lobby' && document.getElementById('setBox').hidden) {          // (v59) the lobby: space or enter plays, escape goes back from a card
       if (LOBBY.page !== 'main' && ['Escape', 'Backspace'].includes(e.code)) { LOBBY.page = 'main'; SND.play('ui'); e.preventDefault(); return; }
       if (LOBBY.page === 'main' && ['Space', 'Enter'].includes(e.code)) { SND.unlock(); lobbyAct('start'); e.preventDefault(); return; }
+      if (LOBBY.page === 'prep' && ['Space', 'Enter'].includes(e.code)) { SND.unlock(); const q = prepGo(lobbyPanel()); prepTap(q.x + q.w / 2, q.y + q.h / 2); e.preventDefault(); return; }
     }
     if (G.bb && G.mode === 'play') {                         // baseball: the arrows move the bat's ring, space (or enter) swings
       if (BB_KEY[e.code]) { bbKeys.add(BB_KEY[e.code]); e.preventDefault(); return; }
@@ -898,7 +903,7 @@
       const base = n.kind === 'p' || n.kind === 'r' ? (res === 'perfect' ? 100 : 40) : n.kind === 's' ? (res === 'perfect' ? 50 : 20) : (res === 'perfect' ? 30 : 10);
       const pts = Math.round(base * (1 + Math.min(r.combo, 40) / 25));
       r.gain += pts;                                        // (banked when the game ends)
-      G.hp = Math.min(HP_MAX, G.hp + (res === 'perfect' ? 1.5 : 0.5));
+      G.hp = Math.min(G.hpMax, G.hp + (res === 'perfect' ? 1.5 : 0.5));
     }
     r.pops.push({ x, y, s: res === 'perfect' ? 'Perfect' : res === 'good' ? 'Good' : 'Miss', res, t: G.t });
     SND.play(res);
@@ -1385,6 +1390,12 @@
   function pilot() {
     if (inWater()) { pilotSwim(); return; }
     G.pilotUp = false;
+    const { jump, slide } = pilotWant();
+    if (jump) pressed.jump = true;
+    G.slideHeld = slide && !jump;
+  }
+  // (v60) what the pilot would do now (a jump, a slide), left undone: the first run's lessons stop the world there
+  function pilotWant() {
     const px = G.x;
     let jump = false, slide = false;
     for (const o of G.obs) {
@@ -1431,8 +1442,71 @@
         if (o.kind === 'huge' && !G.onGround && G.jumps === 2 && G.vy < 60 && dx + o.w > -4) jump = true;
       }
     }
-    if (jump) pressed.jump = true;
-    G.slideHeld = slide && !jump;
+    return { jump, slide };
+  }
+
+  // ---------------------------------------------------------------- (v60) the first run's lessons
+  // The first time the run needs a jump, a second jump (in the air), a third, a slide, the world stops just there, the
+  // button to press glows, a word says what to do; pressing it (holding, for the slide) lets it go on, and that is done.
+  // Tips along the way that do not stop it: at the start (the health goes down by itself), the first heal in sight, the
+  // first coins towards the booster. Once (kept: bodyrun.tutDone); not in tests unless ?tut
+  const TUT_STEPS = ['jump', 'jump2', 'jump3', 'slide'];
+  function tutWanted() {
+    if (qs.has('tut')) return true;
+    if (CAPTURE || AUTO) return false;
+    try { return localStorage.getItem('bodyrun.tutDone') !== '1'; } catch (e) { return false; }
+  }
+  function tutEnd(all = true) {                               // the lessons over (the tips go on a while, unless all)
+    if (G.tut) { G.tut.on = false; if (all) G.tut.tipsOn = false; }
+    if (!qs.has('tut')) { try { localStorage.setItem('bodyrun.tutDone', '1'); } catch (e) { /* storage off */ } }
+  }
+  // true: the world stands still this step
+  function tutStep(dt) {
+    const T = G.tut; if (!T || !T.on || busy() || inWater() || G.boost > 0) return false;
+    T.t0 += dt;
+    if (T.wait) {
+      const ok = T.wait === 'slide' ? G.slideHeld : pressed.jump;
+      if (!ok) return true;
+      T.done[T.wait] = true; T.wait = null;
+      if (TUT_STEPS.every((k) => T.done[k]) || (T.done.jump && T.done.jump2 && T.done.slide && G.runT > 60)) tutEnd(false);
+      return false;
+    }
+    const w = pilotWant();
+    const need = w.slide && !w.jump ? 'slide' : w.jump ? (G.onGround ? 'jump' : G.jumps === 1 ? 'jump2' : G.jumps === 2 ? 'jump3' : null) : null;
+    if (need && !T.done[need]) { T.wait = need; T.waitT = performance.now() / 1000; pressed.jump = false; return true; }
+    if (G.runT > 150) tutEnd(false);                         // (enough: the rest it will find)
+    return false;
+  }
+  function drawTut() {
+    const T = G.tut; if (!T || !(T.on || T.tipsOn) || busy() || inWater()) return;
+    const by = NH - BTN_M - BTN_R, bl = BTN_M + BTN_R, br = NW - BTN_M - 2 - BTN_R, now = performance.now() / 1000;
+    const box = (t1, t2, y, a = 1) => {
+      ctx.font = '900 10px system-ui, -apple-system, "Noto Sans KR", sans-serif'; const w1 = ctx.measureText(t1).width;
+      ctx.font = '900 7px system-ui, -apple-system, "Noto Sans KR", sans-serif'; const w2 = t2 ? ctx.measureText(t2).width : 0;
+      const bw = Math.min(NW - 20, Math.max(w1, w2) + 22), bh = t2 ? 30 : 19;
+      ctx.globalAlpha = 0.82 * a; rrect(NW / 2 - bw / 2, y, bw, bh, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = a;
+      ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(255,224,168,0.8)'; ctx.stroke(); ctx.globalAlpha = 1;
+      label(t1, NW / 2, y + 9.5, 10, 'center', a, '#ffe0a8'); if (t2) label(t2, NW / 2, y + 21.5, 7, 'center', a, '#ffffff');
+    };
+    if (T.wait && T.on) {
+      ctx.globalAlpha = 0.35; ctx.fillStyle = '#05030c'; ctx.fillRect(0, 0, NW, NH); ctx.globalAlpha = 1;
+      const isJ = T.wait !== 'slide', bx = isJ ? (SET.swap ? br : bl) : (SET.swap ? bl : br), pulse = (now - T.waitT) % 1;
+      button(bx, by, isJ ? TR('점프', 'Jump') : TR('슬라이드', 'Slide'), false);
+      for (const q of [pulse, (pulse + 0.5) % 1]) { ctx.globalAlpha = 1 - q; ctx.beginPath(); ctx.arc(bx, by, BTN_R + 2 + q * 14, 0, 6.2832); ctx.lineWidth = 2.2; ctx.strokeStyle = '#ffe14a'; ctx.stroke(); }
+      ctx.globalAlpha = 1;
+      const msg = { jump: [TR('점프 버튼을 눌러요!', 'Press Jump!'), TR('장애물을 뛰어넘어요', 'Hop over it')],
+        jump2: [TR('한 번 더 눌러요!', 'Press it again!'), TR('공중에서 누르면 2단 점프', 'In the air: a double jump')],
+        jump3: [TR('한 번 더!', 'Once more!'), TR('세 번째 점프로 더 높이', 'A third jump goes higher')],
+        slide: [TR('슬라이드 버튼을 누르고 있어요!', 'Hold Slide!'), TR('누르는 동안 숙여서 지나가요', 'Duck under while you hold it')] }[T.wait];
+      box(msg[0], msg[1], 50);
+      return;
+    }
+    // the tips that do not stop it (each once, for a few seconds)
+    const tip = (k, on, t1, t2) => { if (on && !T.tips[k]) T.tips[k] = now; const s0 = T.tips[k]; if (!s0) return false; const v = now - s0; if (v > 3.6) return false; box(t1, t2, 50, Math.min(1, v / 0.25, (3.6 - v) / 0.4)); return true; };
+    if (tip('start', true, TR('몸속을 달려요!', 'Run through the body!'), TR('체력은 시간이 지나면 줄어들어요', 'Your health goes down as you run'))) return;
+    if (tip('heal', G.items.some((it) => it.kind === 'heal' && !it.taken && it.x < G.x + NW * 0.8), TR('회복 아이템!', 'A heal!'), TR('먹으면 체력이 차요', 'Take it to fill your health'))) return;
+    tip('o2', G.o2n >= 12, TR('아이템을 모으면 부스터!', 'Collect for the booster!'), TR('게이지가 차면 빠르고 무적', 'A full gauge: fast and unstoppable'));
+    if (['start', 'heal', 'o2'].every((k) => T.tips[k] && now - T.tips[k] > 3.6) || G.runT > 150) T.tipsOn = false;
   }
 
   // ---------------------------------------------------------------- the baseball stage (in the jejunum)
@@ -3802,6 +3876,7 @@
     if (G.mode !== 'play') return;
     if (G.bb && G.bb.fx) G.bb.fx.age += dt;                  // the baseball hit's burst runs on its own clock ...
     if (G.bb && G.bb.hold > 0) { G.bb.hold -= dt; return; }  // ... through the hit-stop, when all else stands still
+    if (G.tut && G.tut.on && tutStep(dt)) return;             // (v60) the first run's lessons: stopped till the button is pressed
     if (AUTO && !busy() && !(G.boost > 0) && !window.__noPilot) pilot();      // (__noPilot: tests, run into everything)
     G.t += dt;
     if (!busy()) G.vt += dt;                                // the speed does not climb during the rhythm and orbit stages
@@ -3887,7 +3962,7 @@
       const pcy = GY + 1 - G.y - SH('ch_' + G.char) * (G.slide ? 0.31 : 0.5);
       for (const it of G.items) {
         if (it.taken) continue;
-        if (!it.mag && G.boost > 0) { const dx = it.x - G.x, dy = it.y - pcy; if (dx * dx + dy * dy < MAG_R * MAG_R && dx > -40) { it.mag = true; it.magT = 0; } }
+        if (!it.mag && (G.boost > 0 || G.magR)) { const R = G.boost > 0 ? MAG_R : G.magR, dx = it.x - G.x, dy = it.y - pcy; if (dx * dx + dy * dy < R * R && dx > -40) { it.mag = true; it.magT = 0; } }     // (v60: or the start item's smaller one)
         if (it.mag) { it.magT += dt; const q = Math.min(1, dt * (7 + 40 * it.magT)); it.x += (G.x - it.x) * q; it.y += (pcy - it.y) * q; }
       }
     }
@@ -3897,7 +3972,7 @@
       const cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
       if (Math.abs(it.x - cx) < (b[2] - b[0]) / 2 + 6 && Math.abs(it.y - cy) < (b[3] - b[1]) / 2 + 6) {
         it.taken = true; it.t = G.t;
-        if (it.kind === 'heal') G.hp = Math.min(HP_MAX, G.hp + HEAL);
+        if (it.kind === 'heal') G.hp = Math.min(G.hpMax, G.hp + HEAL);
         if (it.kind !== 'heal' && !(G.boost > 0) && !busy() && ++G.o2n >= boostNeed()) startBoost();     // everything but the heal counts
         G.score += PTS[it.kind]; G.itemPts += PTS[it.kind]; G.eaten++; if (it.kind === 'atp') G.atp = (G.atp || 0) + 1;
         SND.play(it.kind === 'heal' ? 'heal' : it.kind === 'atp' ? 'atp' : PTS[it.kind] >= 30 ? 'special' : 'coin');
@@ -4116,6 +4191,11 @@
   // the magnetic field while boosting: a clear, nearly invisible bubble round the body that sparkles: a thin bright
   // rim, glossy highlights, little stars twinkling round it and a glint running along the rim
   function drawField(sx, feet, w, h) {
+    if (!(G.boost > 0) && G.magR && !busy()) {                // (v60) the start item's small magnet: a faint dashed ring of its reach, turning
+      const cy = feet - h * 0.5; ctx.save(); ctx.globalAlpha = 0.28 + 0.08 * Math.sin(G.t * 4);
+      ctx.setLineDash([3, 4]); ctx.lineDashOffset = -G.t * 12; ctx.lineWidth = 0.9; ctx.strokeStyle = '#ff8aa0';
+      ctx.beginPath(); ctx.arc(sx, cy, G.magR, 0, 6.29); ctx.stroke(); ctx.restore();
+    }
     if (!(G.boost > 0)) return;
     const k = Math.min(1, (G.t - G.boostT0) / 0.2) * Math.min(1, G.boost / 0.35);
     const cy = feet - h * 0.5, R = Math.max(w, h) * 0.62 + 0.4 * Math.sin(G.t * 6);
@@ -4600,12 +4680,16 @@
     const x0 = 16, y0 = 7, w = 112, h = 8;
     rrect(x0 - 1.2, y0 - 1.2, w + 2.4, h + 2.4, 3.2); ctx.fillStyle = '#1a0a14'; ctx.fill();
     rrect(x0, y0, w, h, 2.4); ctx.fillStyle = '#3a2030'; ctx.fill();
-    const fw = w * G.hp / HP_MAX;
+    const fw = w * Math.min(G.hp, HP_MAX) / HP_MAX;
     const low = G.hp < 25 && Math.floor(G.t * 4) % 2 === 0;
     if (fw > 0.5) {
       const gr = ctx.createLinearGradient(0, y0, 0, y0 + h); gr.addColorStop(0, low ? '#ffd0d8' : '#ffb0c0'); gr.addColorStop(0.5, '#ff5a7a'); gr.addColorStop(1, '#a8123a');
       rrect(x0, y0, fw, h, 2.4); ctx.fillStyle = gr; ctx.fill();
       rrect(x0 + 1.5, y0 + 1.1, Math.max(0, fw - 3), 1.4, 0.7); ctx.fillStyle = 'rgba(255,230,236,0.85)'; ctx.fill();
+    }
+    if (G.hp > HP_MAX) {                                      // (v60) health past 100 ('체력 +20'): gold over the start of the bar
+      const ow = w * Math.min(1, (G.hp - HP_MAX) / HP_MAX), go = ctx.createLinearGradient(0, y0, 0, y0 + h); go.addColorStop(0, '#fff2a0'); go.addColorStop(0.5, '#ffc83a'); go.addColorStop(1, '#c87a10');
+      rrect(x0, y0, ow, h, 2.4); ctx.fillStyle = go; ctx.fill();
     }
     ctx.fillStyle = 'rgba(26,10,20,0.6)'; for (let k = 1; k < 8; k++) ctx.fillRect(x0 + k * w / 8 - 0.35, y0 + h - 2.2, 0.7, 2.2);
     spr('hud_heart', x0 - 10.5, y0 - 3.2);
@@ -4644,7 +4728,11 @@
         else label(bt, NW / 2 + tw / 2 + 4 + dw + 5, y + 0.6, 6, 'left', 1, nb ? '#ffe14a' : '#ffe68a');
       }
     }
-    if (SET.god) label(TR('디버그: 안 죽음', 'Debug: no death'), 16, 30, 6, 'left', 0.85, '#8af0ff');
+    let noteY = 30;
+    { const on = [G.x2 && 'x2', G.magR && 'mag', G.opts && G.opts.hp && 'hp'].filter(Boolean);      // (v60) the start items this run
+      on.forEach((k, i) => { ctx.globalAlpha = 0.75; rrect(14 + i * 15, 25.5, 13, 11, 4); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = 1; itemIcon(k, 20.5 + i * 15, 31, 0.62); });
+      if (on.length) noteY = 42; }
+    if (SET.god) label(TR('디버그: 안 죽음', 'Debug: no death'), 16, noteY, 6, 'left', 0.85, '#8af0ff');
     // pause
     rrect(NW - 20, 4.5, 14, 14, 3); ctx.fillStyle = '#1a0a14'; ctx.fill();
     rrect(NW - 19, 5.5, 12, 12, 2.3); ctx.fillStyle = '#f4e8ee'; ctx.fill();
@@ -4695,6 +4783,7 @@
     const jOn = [...held.values()].includes('jump') || (AUTO && !G.onGround);
     button(SET.swap ? br : bl, by, TR('점프', 'Jump'), jOn);
     button(SET.swap ? bl : br, by, TR('슬라이드', 'Slide'), G.slideHeld);
+    drawTut();
   }
   // eyelids closing over the screen: 0 open .. 1 shut (close fast, hold, open a little slower)
   const BLINK = 0.32;
@@ -4789,7 +4878,11 @@
     document.getElementById('pname').textContent = TR(st[1], st[2]);       // (v47) one language
     document.getElementById('pen').textContent = lap > 0 ? TR(`${lap + 1}바퀴`, `Lap ${lap + 1}`) : '';
   }
-  function show(id, on) { document.getElementById(id).hidden = !on; }
+  // (v60) a panel shown by a tap on the canvas comes up under the finger, and on a phone that same touch's click then
+  // lands on it (a runner picked, the lobby back again): clicks on the panels are let through only 450 ms after one opens
+  let panelT = -1e9;
+  function show(id, on) { const el = document.getElementById(id); if (on && el.hidden) panelT = performance.now(); el.hidden = !on; }
+  document.getElementById('ov').addEventListener('click', (e) => { if (performance.now() - panelT < 450) { e.stopPropagation(); e.preventDefault(); } }, true);
   function pause(box = 'pauseBox') { if (G.mode !== 'play') return; G.mode = 'pause'; held.clear(); G.slideHeld = false; if (G.rh) G.rh.ptr.clear(); if (G.bb) G.bb.drag = null; bbKeys.clear(); if (box === 'setBox') setLabels(); show(box, true); if (SND.ctx) SND.ctx.suspend(); }
   const openSettings = () => pause('setBox');               // the settings, from the gear on the play screen: the game waits
   function resume() { show('pauseBox', false); show('setBox', false); G.mode = 'play'; last = performance.now(); SND.unlock(); SND.play('ui'); }
@@ -4803,25 +4896,28 @@
   }
   function gameOver() {
     G.mode = 'over'; show('overBox', true);
-    keepRun();                                               // (v59) for '나의 기록'
     if (busy()) { for (const g of [G.rh, G.orb, G.bb, G.wm, G.mem, G.pk, G.sl, G.yb, G.tw, G.ar]) bankGame(g); G.rh = null; G.orb = null; G.bb = null; G.wm = null; G.mem = null; G.pk = null; G.sl = null; G.yb = null; G.tw = null; G.ar = null; G.cut = null; SND.stopSong(0.3); SND.stopLoop(0.3); SND.spin(null); }
     SND.ambience(false); SND.play('over');
     // (v49) the end card: the score big, where it came from, how long and how far, the best (kept in this browser)
     const P = scoreParts(), f = (n) => n.toLocaleString('en-US');
-    let best = 0; try { best = +(localStorage.getItem('bodyrun.best') || 0); } catch (e) { /* storage off */ }
-    const isBest = G.score > best; if (isBest) { best = G.score; try { localStorage.setItem('bodyrun.best', String(best)); } catch (e) { /* storage off */ } }
-    document.getElementById('overScore').textContent = f(G.score);
-    document.getElementById('overParts').textContent = TR(`거리 ${f(P.dist)} · 아이템 ${f(P.items)} · 미니게임 ${f(P.games)}`, `Distance ${f(P.dist)} · Items ${f(P.items)} · Mini-games ${f(P.games)}`);
+    const R = settleRun(), best = R.best, isBest = R.isBest;     // (v60) the final score (x2), the coins, the records
+    if (G.tut) tutEnd();
+    document.getElementById('overScore').textContent = f(R.fin);
+    document.getElementById('overParts').textContent = TR(`거리 ${f(P.dist)} · 아이템 ${f(P.items)} · 미니게임 ${f(P.games)}${G.x2 ? ' · 점수 2배!' : ''}`, `Distance ${f(P.dist)} · Items ${f(P.items)} · Mini-games ${f(P.games)}${G.x2 ? ' · Score x2!' : ''}`);
+    document.getElementById('overCoins').textContent = TR(`코인 +${f(R.add)}  ·  보유 ${f(WALLET.coins())}`, `Coins +${f(R.add)}  ·  ${f(WALLET.coins())} in all`);
+    { const b = document.getElementById('bRevive'), ok = canRevive(), own = WALLET.has('rev');     // (v60) getting up again: once a run
+      b.hidden = G.revived || CAPTURE && !qs.has('revive'); b.disabled = !ok;
+      b.textContent = own > 0 ? TR(`부활 (보유 ${own})`, `Revive (${own} kept)`) : TR(`부활 · 코인 ${ITEMS.rev.price}`, `Revive · ${ITEMS.rev.price} coins`); }
     document.getElementById('overMsg').textContent = TR(`${Math.floor(G.t / 60)}분 ${Math.floor(G.t % 60)}초 · ${f(G.distM)}m · ${COURSE[G.station][1]}까지`, `${Math.floor(G.t / 60)}:${String(Math.floor(G.t % 60)).padStart(2, '0')} · ${f(G.distM)}m · reached ${COURSE[G.station][2]}`);
     document.getElementById('overBest').textContent = isBest ? TR('최고 기록!', 'New best!') : TR(`최고 기록 ${f(best)}`, `Best ${f(best)}`);
     document.getElementById('overBest').classList.toggle('new', isBest);
   }
-  function startGame(c) {
+  function startGame(c, opts = {}) {
     try { localStorage.setItem('bodyrun.char', c); } catch (e) { /* storage off */ }
     for (const f of ['title_bg.webp', 'logo_ko.webp', 'logo_en.webp', 'lobby_bg.webp']) if (bmp[f]) release(f);
     show('select', false); show('pauseBox', false); show('setBox', false); show('overBox', false); show('hudText', true);
     if (!CAPTURE) { SND.unlock(); SND.stopSong(0.2); SND.stopLoop(0.2); SND.spin(null); SND.play('ui'); SND.ambience(true); getReady(); }
-    newRun(c); G.station = -1; step(0); last = performance.now();
+    newRun(c, opts); G.station = -1; step(0); last = performance.now();
     try { if (!CAPTURE && document.documentElement.requestFullscreen && matchMedia('(pointer: coarse)').matches) document.documentElement.requestFullscreen().then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {})).catch(() => {}); } catch (e) { /* not allowed here */ }
   }
   function buildSelect() {
@@ -4834,7 +4930,7 @@
       const cc = document.createElement('canvas'); cc.width = s.r[2]; cc.height = s.r[3];
       cc.getContext('2d').drawImage(im, s.r[0], s.r[1], s.r[2], s.r[3], 0, 0, s.r[2], s.r[3]);
       const nm = document.createElement('span'); nm.textContent = CHAR_NAMES[c] || c;
-      b.append(cc, nm); b.onclick = () => { if (selectMode === 'lobby') { try { localStorage.setItem('bodyrun.char', c); } catch (e) { /* storage off */ } SND.play('ui'); goLobby(); } else startGame(c); };     // (v59: from the lobby, back to it)
+      b.append(cc, nm); b.onclick = () => { if (selectMode === 'lobby' || selectMode === 'prep') { try { localStorage.setItem('bodyrun.char', c); } catch (e) { /* storage off */ } SND.play('ui'); const m = selectMode; goLobby(); if (m === 'prep') { LOBBY.page = 'prep'; LOBBY.sel = {}; } } else startGame(c); };     // (v59: from the lobby, back to it)
       grid.append(b);
     }
   }
@@ -4842,6 +4938,7 @@
   document.getElementById('bRestart').onclick = () => startGame(G.char);
   document.getElementById('bChar').onclick = () => { selectMode = 'start'; buildSelect(); G.mode = 'select'; G.rh = null; G.orb = null; G.bb = null; G.cut = null; G.cutTail = null; SND.unlock(); SND.stopSong(0.2); SND.stopLoop(0.2); SND.spin(null); SND.ambience(false); show('pauseBox', false); show('overBox', false); show('hudText', false); show('select', true); };
   document.getElementById('bSetBack').onclick = () => { if (G.mode === 'lobby') { show('setBox', false); SND.play('ui'); } else resume(); };     // (v59: the lobby's settings too)
+  document.getElementById('bRevive').onclick = () => revive();
   for (const id of ['bLobby', 'bLobby2', 'bSelBack']) document.getElementById(id).onclick = () => { if (SND.ctx && SND.ctx.state === 'suspended') SND.unlock(); SND.play('ui'); goLobby(); };     // (v59) to the lobby
   document.getElementById('bSwap').onclick = () => { SET.swap = !SET.swap; try { localStorage.setItem('bodyrun.swap', SET.swap ? '1' : '0'); } catch (e) { /* storage off */ } setLabels(); render(); };
   document.getElementById('bSfx').onclick = () => { SND.setMute('sfx', !SND.muted('sfx')); setLabels(); };
@@ -4909,13 +5006,87 @@
       label(TR('화면을 터치하세요', 'Touch the screen'), NWf / 2, 101.5, 10.5 * s2, 'center', a, '#ffffff'); }     // (v58: the best is not shown here any more)
   }
 
+  // ---------------------------------------------------------------- (v60) coins, the start items, getting up again
+  // A run pays a coin for each 100 points of its final score (paid when it ends; again for the extra after getting up).
+  // Coins buy, in the shop, things kept for later, or, on the getting-ready page before a run, the start items for it:
+  // '점수 2배' (the final score doubled), '자석' (a small magnet the whole run: things within 45 drawn in; the booster's
+  // is 80), '체력 +20' (120 to start, and heals fill to 120). '부활': fallen, once a run, up again with 60 health (one
+  // kept from the shop, or 500 coins there and then). A first visit is given 1,000 coins to try them. (kept in this
+  // browser: bodyrun.coins, bodyrun.inv)
+  const COIN_PER = 100, REVIVE_HP = 60, ITEM_MAG_R = 45;
+  const ITEMS = {
+    x2: { ko: '점수 2배', en: 'Score x2', dko: '이번 판 최종 점수 2배', den: 'Final score doubled', price: 600 },
+    mag: { ko: '자석', en: 'Magnet', dko: '작은 자석을 달고 출발', den: 'Start with a small magnet', price: 400 },
+    hp: { ko: '체력 +20', en: 'Health +20', dko: '체력 120으로 출발', den: 'Start with 120 health', price: 300 },
+    rev: { ko: '부활', en: 'Revive', dko: '쓰러지면 한 번 다시 달리기', den: 'Get up once after falling', price: 500 },
+  };
+  const START_ITEMS = ['x2', 'mag', 'hp'];
+  const WALLET = {
+    coins() { try { const v = localStorage.getItem('bodyrun.coins'); if (v === null) { localStorage.setItem('bodyrun.coins', '1000'); return 1000; } return Math.max(0, +v || 0); } catch (e) { return 0; } },
+    setCoins(n) { try { localStorage.setItem('bodyrun.coins', String(Math.max(0, Math.round(n)))); } catch (e) { /* storage off */ } },
+    inv() { try { return JSON.parse(localStorage.getItem('bodyrun.inv') || '{}') || {}; } catch (e) { return {}; } },
+    has(k) { return this.inv()[k] || 0; },
+    give(k, n) { const v = this.inv(); v[k] = Math.max(0, (v[k] || 0) + n); try { localStorage.setItem('bodyrun.inv', JSON.stringify(v)); } catch (e) { /* storage off */ } },
+    spend(n) { const c = this.coins(); if (c < n) return false; this.setCoins(c - n); return true; },
+  };
+  // a coin, drawn (gold, a rim, a star): no emoji
+  function coinIcon(x, y, r) {
+    ctx.save(); ctx.translate(x, y);
+    ctx.beginPath(); ctx.arc(0, 0, r + 0.7, 0, 6.2832); ctx.fillStyle = '#1a0a14'; ctx.fill();
+    const g = ctx.createLinearGradient(0, -r, 0, r); g.addColorStop(0, '#fff2a0'); g.addColorStop(0.5, '#ffc83a'); g.addColorStop(1, '#c87a10');
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, 6.2832); ctx.fillStyle = g; ctx.fill();
+    ctx.beginPath(); ctx.arc(0, 0, r * 0.72, 0, 6.2832); ctx.lineWidth = r * 0.12; ctx.strokeStyle = 'rgba(160,90,10,0.7)'; ctx.stroke();
+    ctx.beginPath(); for (let k = 0; k < 10; k++) { const a = -Math.PI / 2 + k * Math.PI / 5, q = k % 2 ? r * 0.22 : r * 0.5; ctx.lineTo(Math.cos(a) * q, Math.sin(a) * q); } ctx.closePath(); ctx.fillStyle = '#fff6c8'; ctx.fill();
+    ctx.restore();
+  }
+  // the items' marks: a 'x2', a horseshoe magnet, a heart with a plus, a heart with a circling arrow (drawn)
+  function itemIcon(k, x, y, s) {
+    ctx.save(); ctx.translate(x, y); ctx.scale(s, s); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    if (k === 'x2') { ctx.beginPath(); ctx.arc(0, 0, 6.5, 0, 6.2832); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.beginPath(); ctx.arc(0, 0, 5.6, 0, 6.2832); ctx.fillStyle = '#ffb02a'; ctx.fill(); ctx.restore(); label('x2', x, y + 0.3 * s, 6.4 * s, 'center', 1, '#ffffff'); return; }
+    if (k === 'mag') {
+      ctx.lineWidth = 4.6; ctx.strokeStyle = '#1a0a14'; ctx.beginPath(); ctx.arc(0, -0.5, 4, Math.PI, 0); ctx.lineTo(4, 4.6); ctx.moveTo(-4, -0.5); ctx.lineTo(-4, 4.6); ctx.stroke();
+      ctx.lineWidth = 2.8; ctx.strokeStyle = '#e8344a'; ctx.beginPath(); ctx.arc(0, -0.5, 4, Math.PI, 0); ctx.lineTo(4, 2.2); ctx.moveTo(-4, -0.5); ctx.lineTo(-4, 2.2); ctx.stroke();
+      ctx.strokeStyle = '#e8e8f0'; ctx.beginPath(); ctx.moveTo(4, 2.6); ctx.lineTo(4, 4.4); ctx.moveTo(-4, 2.6); ctx.lineTo(-4, 4.4); ctx.stroke();
+      ctx.restore(); return;
+    }
+    // a heart
+    ctx.beginPath(); ctx.moveTo(0, 5.4); ctx.bezierCurveTo(-7.4, 0.6, -5.4, -6, 0, -2.6); ctx.bezierCurveTo(5.4, -6, 7.4, 0.6, 0, 5.4); ctx.closePath();
+    ctx.lineWidth = 1.6; ctx.strokeStyle = '#1a0a14'; ctx.stroke(); ctx.fillStyle = k === 'rev' ? '#ff8ab0' : '#ff4a6a'; ctx.fill();
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.3; ctx.beginPath();
+    if (k === 'hp') { ctx.moveTo(-2, 0.4); ctx.lineTo(2, 0.4); ctx.moveTo(0, -1.6); ctx.lineTo(0, 2.4); ctx.stroke(); }
+    else { ctx.arc(0, 0.6, 2, -0.3, 4.2); ctx.stroke(); ctx.beginPath(); ctx.moveTo(1.9, -1.2); ctx.lineTo(2.1, 0.5); ctx.lineTo(0.5, 0); ctx.stroke(); }
+    ctx.restore();
+  }
+  // the end of a run (each time it falls: again after getting up): the final score (doubled by '점수 2배'), the coins it
+  // earns (the ones paid already taken off), the best and the records (one entry a run, put right after getting up)
+  function settleRun() {
+    const fin = G.score * (G.x2 ? 2 : 1), earn = Math.floor(fin / COIN_PER), add = Math.max(0, earn - (G.coinsPaid || 0));
+    if (!CAPTURE && !AUTO) WALLET.setCoins(WALLET.coins() + add);
+    G.coinsPaid = earn; G.final = fin; G.coinsAdd = add;
+    let best = 0; try { best = +(localStorage.getItem('bodyrun.best') || 0); } catch (e) { /* storage off */ }
+    const isBest = fin > best && (!CAPTURE && !AUTO); if (isBest) { best = fin; try { localStorage.setItem('bodyrun.best', String(best)); } catch (e) { /* storage off */ } }
+    keepRun(fin);
+    return { fin, earn, add, best, isBest };
+  }
+  function canRevive() { return !G.revived && (WALLET.has('rev') > 0 || WALLET.coins() >= ITEMS.rev.price); }
+  function revive() {
+    if (G.mode !== 'over' || !canRevive()) return;
+    if (WALLET.has('rev') > 0) WALLET.give('rev', -1); else if (!WALLET.spend(ITEMS.rev.price)) return;
+    G.revived = true; G.hp = Math.min(G.hpMax, REVIVE_HP); G.invul = 3; G.slow = 1; G.nudge = 0;
+    G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12 || o.x > G.x + 260);    // the way ahead cleared a little
+    G.pops.push({ x: G.x + 20, y: GY - G.y - 40, s: TR('부활!', 'Up again!'), t: G.t });
+    show('overBox', false); G.mode = 'play'; last = performance.now();
+    if (SND.ctx && SND.ctx.state === 'suspended') SND.unlock();
+    SND.play('heal'); SND.ambience(true);
+  }
+
   // ---------------------------------------------------------------- (v59) the lobby: after the title, before a run
   // The user's picture of a blue tunnel into the body behind (lobby_bg.webp), the name small at the top left with the
   // best under it, the runner you play standing on the water path (a tap on it, or '캐릭터': pick another), the
   // settings' gear at the top right, and down the right: '게임 시작' (big: off you go with that runner; the first time,
   // pick one first), '나의 기록' (the best, the furthest, how many runs, the last few: kept in this browser), '캐릭터',
   // '상점' (not open yet: a page that says so). The records and the shop come up as a card over it, with '뒤로'
-  const LOBBY = { page: 'main', t0: 0, tt: null, press: null, bob: 0 };
+  const LOBBY = { page: 'main', t0: 0, tt: null, press: null, bob: 0, sel: {}, flash: null };
   const ltime = () => (LOBBY.tt !== null ? LOBBY.tt : performance.now() / 1000 - LOBBY.t0);
   let selectMode = 'start';                                  // picking a runner: 'start' (then run) or 'lobby' (then back)
   const savedChar = () => { let c = null; try { c = localStorage.getItem('bodyrun.char'); } catch (e) { /* storage off */ } return c && M.chars.includes(c) ? c : null; };
@@ -4942,15 +5113,17 @@
   function openSelect(mode) { selectMode = mode; G.mode = 'select'; buildSelect(); show('select', true); }
   function lobbyAct(id) {
     SND.play('ui'); buzz(15);
-    if (id === 'start') { const c = savedChar(); if (c) startGame(c); else openSelect('start'); }
+    if (id === 'start') { LOBBY.sel = {}; if (savedChar()) LOBBY.page = 'prep'; else openSelect('prep'); }     // (v60: getting ready first)
     else if (id === 'records' || id === 'shop') LOBBY.page = id;
     else if (id === 'char') openSelect('lobby');
     else if (id === 'gear') { setLabels(); show('setBox', true); }
   }
   function lobbyTap(x, y) {
-    if (LOBBY.page !== 'main') {                              // a card: '뒤로', or a tap off it
+    if (LOBBY.page !== 'main') {                              // a card: '뒤로', or a tap off it; (v60) the shop's and getting ready's own
       const P = lobbyPanel();
-      if ((x > P.x + 6 && x < P.x + 52 && y > P.y + 5 && y < P.y + 23) || x < P.x || x > P.x + P.w || y < P.y || y > P.y + P.h) { SND.play('ui'); LOBBY.page = 'main'; }
+      if ((x > P.x + 6 && x < P.x + 52 && y > P.y + 5 && y < P.y + 23) || x < P.x || x > P.x + P.w || y < P.y || y > P.y + P.h) { SND.play('ui'); LOBBY.page = 'main'; return; }
+      if (LOBBY.page === 'shop') shopTap(x, y);
+      else if (LOBBY.page === 'prep') prepTap(x, y);
       return;
     }
     for (const [id, bx, by, bw, bh] of lobbyButtons()) if (x > bx - 3 && x < bx + bw + 3 && y > by - 3 && y < by + bh + 3) { LOBBY.press = { id, t: ltime() }; lobbyAct(id); return; }
@@ -5041,8 +5214,10 @@
       }
       lobbyButton(id, x, y, w, h, t);
     }
+    if (LOBBY.page === 'main') lobbyCoins(NWf - 26, 11.5, 'right');      // (v60) the coins kept, by the gear
     if (LOBBY.page === 'records') drawRecords();
     else if (LOBBY.page === 'shop') drawShop();
+    else if (LOBBY.page === 'prep') drawPrep();
   }
   // a card over the lobby: dimmed behind, the card, its title, '뒤로' at its top left
   function lobbyCard(title) {
@@ -5084,19 +5259,125 @@
       label(mid, rx + rw * 0.36, y + 6.8, ms, 'left', 1, '#ffffff');
       label(ds, rx + rw, y + 6.8, 6, 'right', 1, '#b8a8d8'); });
   }
+  // (v60) the shop: the four things, each a row: its mark, its name and what it does, how many kept, a buy button
+  const shopRows = (P) => ['x2', 'mag', 'hp', 'rev'].map((k, i) => ({ k, y: P.y + 32 + i * 29.5, h: 26, bx: P.x + P.w - 12 - 62, bw: 62 }));
   function drawShop() {
-    const P = lobbyCard(TR('상점', 'Shop')), cx = P.x + P.w / 2;
-    lobbyIcon('shop', cx, P.y + 66, 4.2);
-    label(TR('준비 중이에요', 'Coming soon'), cx, P.y + 112, 12, 'center', 1, '#ffffff');
+    const P = lobbyCard(TR('상점', 'Shop')), f = (n) => n.toLocaleString('en-US');
+    lobbyCoins(P.x + P.w - 12, P.y + 14, 'right');
+    for (const r of shopRows(P)) {
+      const I = ITEMS[r.k], own = WALLET.has(r.k), can = WALLET.coins() >= I.price, pr = LOBBY.press && LOBBY.press.id === 'buy_' + r.k && ltime() - LOBBY.press.t < 0.14;
+      ctx.globalAlpha = 0.35; rrect(P.x + 10, r.y, P.w - 20, r.h, 7); ctx.fillStyle = '#000000'; ctx.fill(); ctx.globalAlpha = 1;
+      itemIcon(r.k, P.x + 25, r.y + r.h / 2, 1.25);
+      label(TR(I.ko, I.en), P.x + 40, r.y + 8.5, 8.5, 'left', 1, '#ffffff');
+      label(TR(I.dko, I.den), P.x + 40, r.y + 19, 6, 'left', 1, '#c8b8e8');
+      label(TR(`보유 ${own}`, `${own} kept`), r.bx - 8, r.y + r.h / 2 + 0.3, 7, 'right', 1, own ? '#ffe68a' : '#8a7aa8');
+      // the buy button: a coin and the price (dim when there are not enough coins)
+      const yy = r.y + 3 + (pr ? 1 : 0);
+      ctx.globalAlpha = can ? 1 : 0.45;
+      rrect(r.bx - 1, yy - 1, r.bw + 2, r.h - 4, 7); ctx.fillStyle = '#1a0a14'; ctx.fill();
+      const g = ctx.createLinearGradient(0, yy, 0, yy + r.h - 6); g.addColorStop(0, '#fff4b0'); g.addColorStop(0.5, '#ffc02a'); g.addColorStop(1, '#e07400');
+      rrect(r.bx, yy, r.bw, r.h - 6, 6); ctx.fillStyle = g; ctx.fill();
+      coinIcon(r.bx + 11, yy + (r.h - 6) / 2, 4.6);
+      label(f(I.price), r.bx + 19, yy + (r.h - 6) / 2 + 0.3, 8, 'left', can ? 1 : 0.45, '#ffffff');
+      ctx.globalAlpha = 1;
+    }
+    lobbyFlash();
+  }
+  function shopTap(x, y) {
+    const P = lobbyPanel();
+    for (const r of shopRows(P)) if (x > r.bx - 3 && x < r.bx + r.bw + 3 && y > r.y && y < r.y + r.h) {
+      LOBBY.press = { id: 'buy_' + r.k, t: ltime() };
+      if (WALLET.spend(ITEMS[r.k].price)) { WALLET.give(r.k, 1); SND.play('coin'); buzz(15); LOBBY.flash = { s: TR(`${ITEMS[r.k].ko} 구매!`, `${ITEMS[r.k].en} bought!`), t: ltime(), bad: false }; }
+      else { SND.play('miss'); LOBBY.flash = { s: TR('코인이 모자라요', 'Not enough coins'), t: ltime(), bad: true }; }
+      return true;
+    }
+    return false;
+  }
+  // a word over the card for a moment (bought; not enough coins)
+  function lobbyFlash() {
+    const F = LOBBY.flash; if (!F) return; const v = ltime() - F.t; if (v > 1.3 || v < 0) return;
+    const a = Math.min(1, v / 0.12, (1.3 - v) / 0.3);
+    label(F.s, NWf / 2, NH - 12 - v * 6, 10, 'center', a, F.bad ? '#ff9aa8' : '#ffe14a');
+  }
+  // the coins kept: a coin and the number, in a dark pill (right: its right end at x)
+  function lobbyCoins(x, y, align = 'right') {
+    const s = WALLET.coins().toLocaleString('en-US');
+    ctx.font = '900 8px system-ui, -apple-system, "Noto Sans KR", sans-serif'; const w = ctx.measureText(s).width + 22, x0 = align === 'right' ? x - w : x;
+    ctx.globalAlpha = 0.85; rrect(x0, y - 6.5, w, 13, 6.5); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = 1;
+    coinIcon(x0 + 7.5, y, 4.4); label(s, x0 + 14, y + 0.4, 8, 'left', 1, '#ffe68a');
+  }
+  // (v60) getting ready: the runner at the left, the three start items (tap: on or off; one not kept is bought as it
+  // starts, if there are coins enough), what it will cost, '출발!'
+  const prepTiles = (P) => { const x0 = P.x + 96, w = (P.x + P.w - 12 - x0 - 12) / 3; return START_ITEMS.map((k, i) => ({ k, x: x0 + i * (w + 6), y: P.y + 33, w, h: 78 })); };
+  const prepGo = (P) => ({ x: P.x + P.w - 12 - 104, y: P.y + P.h - 34, w: 104, h: 26 });
+  const prepCost = () => START_ITEMS.reduce((c, k) => c + (LOBBY.sel[k] && !WALLET.has(k) ? ITEMS[k].price : 0), 0);
+  function drawPrep() {
+    const P = lobbyCard(TR('출발 준비', 'Get ready')), f = (n) => n.toLocaleString('en-US'), t = ltime();
+    lobbyCoins(P.x + P.w - 12, P.y + 14, 'right');
+    // the runner
+    { const c = savedChar() || 'tardigrade', sp = M.sprites['ch_' + c];
+      ctx.globalAlpha = 0.35; rrect(P.x + 10, P.y + 30, 80, 114, 8); ctx.fillStyle = '#000000'; ctx.fill(); ctx.globalAlpha = 1;
+      if (sp) { const k = Math.min(64 / sp.w, 60 / sp.h), w = sp.w * k, h = sp.h * k, hop = Math.abs(Math.sin(t * 3)) * 2.5; spr('ch_' + c, P.x + 50 - w / 2, P.y + 100 - h - hop, 1, w, h); }
+      label(CHAR_NAMES[c] || c, P.x + 50, P.y + 114, 7.5, 'center', 1, '#ffffff');
+      label(TR('로비에서 바꿀 수 있어요', 'Change it in the lobby'), P.x + 50, P.y + 128, 5.2, 'center', 1, '#a898c8'); }
+    // the items
+    label(TR('시작 아이템 (눌러서 고르기)', 'Start items (tap to pick)'), P.x + 96, P.y + 32, 6.5, 'left', 1, '#c8b8e8');
+    for (const q of prepTiles(P)) {
+      const I = ITEMS[q.k], on = !!LOBBY.sel[q.k], own = WALLET.has(q.k);
+      if (on) { ctx.globalAlpha = 0.5 + 0.25 * Math.sin(t * 5); rrect(q.x - 3, q.y + 3, q.w + 6, q.h + 6 - 6, 10); ctx.lineWidth = 2.2; ctx.strokeStyle = '#ffe14a'; ctx.stroke(); ctx.globalAlpha = 1; }
+      rrect(q.x - 1, q.y + 5, q.w + 2, q.h - 4, 9); ctx.fillStyle = '#1a0a14'; ctx.fill();
+      const g = ctx.createLinearGradient(0, q.y + 6, 0, q.y + q.h); g.addColorStop(0, on ? '#5a3a9a' : '#3a2a62'); g.addColorStop(1, on ? '#3a2470' : '#221844');
+      rrect(q.x, q.y + 6, q.w, q.h - 6, 8); ctx.fillStyle = g; ctx.fill();
+      itemIcon(q.k, q.x + q.w / 2, q.y + 24, 1.7);
+      label(TR(I.ko, I.en), q.x + q.w / 2, q.y + 42, 8, 'center', 1, '#ffffff');
+      label(TR(I.dko, I.den), q.x + q.w / 2, q.y + 52, 5.2, 'center', 1, '#c8b8e8');
+      if (own) label(TR(`보유 ${own}`, `${own} kept`), q.x + q.w / 2, q.y + 66, 7, 'center', 1, '#ffe68a');
+      else { coinIcon(q.x + q.w / 2 - 12, q.y + 66, 3.8); label(f(I.price), q.x + q.w / 2 - 6, q.y + 66.3, 7.5, 'left', 1, '#ffe68a'); }
+      if (on) { ctx.beginPath(); ctx.arc(q.x + q.w - 6, q.y + 11, 5, 0, 6.2832); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.beginPath(); ctx.arc(q.x + q.w - 6, q.y + 11, 4, 0, 6.2832); ctx.fillStyle = '#ffd23a'; ctx.fill();
+        ctx.beginPath(); ctx.moveTo(q.x + q.w - 8.2, q.y + 11); ctx.lineTo(q.x + q.w - 6.5, q.y + 12.8); ctx.lineTo(q.x + q.w - 3.6, q.y + 9.2); ctx.lineWidth = 1.3; ctx.strokeStyle = '#1a0a14'; ctx.stroke(); }
+    }
+    // the cost, '출발!'
+    const cost = prepCost(), G0 = prepGo(P);
+    if (cost > 0) { coinIcon(P.x + 103, G0.y + G0.h / 2, 4.2); label(TR(`${f(cost)} 사용`, `${f(cost)} to spend`), P.x + 110, G0.y + G0.h / 2 + 0.3, 7.5, 'left', 1, '#ffe68a'); }
+    else label(TR('아이템 없이 출발해도 돼요', 'You can go without any too'), P.x + 98, G0.y + G0.h / 2 + 0.3, 6.2, 'left', 1, '#a898c8');
+    { const pr = LOBBY.press && LOBBY.press.id === 'go' && t - LOBBY.press.t < 0.14 ? 1.4 : 0, y = G0.y + pr;
+      ctx.globalAlpha = 0.35 + 0.25 * Math.sin(t * 3); rrect(G0.x - 3, G0.y - 3, G0.w + 6, G0.h + 6, 10); ctx.lineWidth = 2; ctx.strokeStyle = '#fff2a0'; ctx.stroke(); ctx.globalAlpha = 1;
+      rrect(G0.x - 1.2, y - 1.2, G0.w + 2.4, G0.h + 2.4, 9); ctx.fillStyle = '#1a0a14'; ctx.fill();
+      const g = ctx.createLinearGradient(0, y, 0, y + G0.h); g.addColorStop(0, '#fff4b0'); g.addColorStop(0.45, '#ffc02a'); g.addColorStop(1, '#e07400');
+      rrect(G0.x, y, G0.w, G0.h, 8); ctx.fillStyle = g; ctx.fill();
+      ctx.globalAlpha = 0.5; rrect(G0.x + 3, y + 1.4, G0.w - 6, G0.h * 0.34, 6); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.globalAlpha = 1;
+      lobbyIcon('start', G0.x + 16, y + G0.h / 2, 0.95);
+      label(TR('출발!', 'Go!'), G0.x + G0.w / 2 + 8, y + G0.h / 2 + 0.3, 11, 'center', 1, '#ffffff'); }
+    lobbyFlash();
+  }
+  function prepTap(x, y) {
+    const P = lobbyPanel();
+    for (const q of prepTiles(P)) if (x > q.x && x < q.x + q.w && y > q.y + 6 && y < q.y + q.h) {
+      const k = q.k;
+      if (LOBBY.sel[k]) { LOBBY.sel[k] = false; SND.play('ui'); return true; }
+      if (WALLET.has(k) || WALLET.coins() >= prepCost() + ITEMS[k].price) { LOBBY.sel[k] = true; SND.play('ui'); buzz(12); }
+      else { SND.play('miss'); LOBBY.flash = { s: TR('코인이 모자라요', 'Not enough coins'), t: ltime(), bad: true }; }
+      return true;
+    }
+    const G0 = prepGo(P);
+    if (x > G0.x - 3 && x < G0.x + G0.w + 3 && y > G0.y - 3 && y < G0.y + G0.h + 3) {
+      LOBBY.press = { id: 'go', t: ltime() };
+      const opts = {};
+      for (const k of START_ITEMS) if (LOBBY.sel[k]) { if (WALLET.has(k)) { WALLET.give(k, -1); opts[k] = true; } else if (WALLET.spend(ITEMS[k].price)) opts[k] = true; }
+      startGame(savedChar() || 'tardigrade', opts);
+      return true;
+    }
+    return false;
   }
   // a run's end, kept (real runs only): the last 20, and the bests
-  function keepRun() {
+  function keepRun(fin) {
     if (CAPTURE || AUTO) return;
     try {
       const runs = loadJSON('bodyrun.runs', []), S = loadJSON('bodyrun.stats', {}), lap = stationAt(G.x).lap, p = Math.max(0, G.station);
-      runs.unshift({ s: G.score, d: G.distM, t: Math.round(G.t), p, lap, c: G.char, at: Date.now() });
+      const rec = { s: fin, d: G.distM, t: Math.round(G.t), p, lap, c: G.char, at: Date.now() };
+      if (G.recKept && runs.length) runs[0] = rec; else { runs.unshift(rec); S.plays = (S.plays || 0) + 1; }     // (v60: after getting up, the same run)
       localStorage.setItem('bodyrun.runs', JSON.stringify(runs.slice(0, 20)));
-      S.plays = (S.plays || 0) + 1; S.bestD = Math.max(S.bestD || 0, G.distM); S.time = (S.time || 0) + Math.round(G.t);
+      S.bestD = Math.max(S.bestD || 0, G.distM); S.time = (S.time || 0) + Math.round(G.t) - (G.timeKept || 0); G.timeKept = Math.round(G.t); G.recKept = true;
       const far = lap * COURSE.length + p; if (S.far === undefined || far > S.far) S.far = far;
       localStorage.setItem('bodyrun.stats', JSON.stringify(S));
     } catch (e) { /* storage off */ }
@@ -5151,7 +5432,9 @@
     window.__die = () => { G.hp = 0; };
     window.__title = (tt) => { TITLE.tt = tt; renderTitle(); return { mode: G.mode, run: TITLE.run.map((r) => r.c) }; };
     window.__titleTap = () => titleTap();
-    window.__lobby = (tt, page) => { LOBBY.tt = tt; if (page) LOBBY.page = page; renderLobby(); return { mode: G.mode, page: LOBBY.page, buttons: lobbyButtons(), charX: lobbyCharX(), panel: lobbyPanel(), saved: savedChar() }; };
+    window.__lobby = (tt, page) => { LOBBY.tt = tt; if (page) LOBBY.page = page; renderLobby(); return { mode: G.mode, page: LOBBY.page, buttons: lobbyButtons(), charX: lobbyCharX(), panel: lobbyPanel(), saved: savedChar(), prep: prepTiles(lobbyPanel()), go: prepGo(lobbyPanel()), shop: shopRows(lobbyPanel()), sel: { ...LOBBY.sel }, coins: WALLET.coins(), inv: WALLET.inv() }; };
+    window.__tut = () => G.tut && { on: G.tut.on, wait: G.tut.wait, done: { ...G.tut.done }, tips: Object.keys(G.tut.tips) };
+    window.__run2 = (sec) => { const n = Math.round(sec / DT); for (let i = 0; i < n; i++) step(DT); return window.__state(); };
     window.__lobbyTap = (x, y) => { lobbyTap(x, y); return { mode: G.mode, page: LOBBY.page, select: !document.getElementById('select').hidden, set: !document.getElementById('setBox').hidden }; };
     window.__mem = () => { let px = 0; const files = {}; for (const [f, b] of Object.entries(bmp)) { const n = b.width * b.height; px += n; files[f] = +(n * 4 / 1e6).toFixed(1); } return { MB: +(px * 4 / 1e6).toFixed(1), files }; };
     window.__prof = PROF;

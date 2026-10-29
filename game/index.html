@@ -26,6 +26,10 @@
   .row { display: flex; gap: calc(var(--u) * 5); }
   .pb { pointer-events: auto; font: inherit; font-weight: 900; font-size: calc(var(--u) * 6.5); color: #fff; background: #e0506e; border: calc(var(--u) * 1) solid #1a0a14; border-radius: calc(var(--u) * 3); padding: calc(var(--u) * 3) calc(var(--u) * 8); box-shadow: 0 calc(var(--u) * 1.5) 0 #1a0a14; }
   .pb.alt { background: #4a3a58; }
+  .pb.rev { background: linear-gradient(#ffd24a, #f09a10); color: #3a1a00; }
+  .pb[disabled] { opacity: 0.45; }
+  .pb[hidden] { display: none; }
+  #overCoins { color: #ffe68a; }
   .setRow { display: flex; align-items: center; gap: calc(var(--u) * 4); }
   .setLab { font-size: calc(var(--u) * 6.5); width: calc(var(--u) * 40); text-align: right; }
   .pb.tg { background: #2f8a62; min-width: calc(var(--u) * 52); }
@@ -71,7 +75,8 @@
       <p id="overParts"></p>
       <p id="overMsg"></p>
       <p id="overBest" class="txt"></p>
-      <div class="row"><button id="bAgain" class="pb" data-en="Again">다시</button><button id="bChar2" class="pb alt" data-en="Change character">캐릭터 바꾸기</button><button id="bLobby2" class="pb alt" data-en="Lobby">로비</button></div>
+      <p id="overCoins"></p>
+      <div class="row"><button id="bRevive" class="pb rev">부활</button><button id="bAgain" class="pb" data-en="Again">다시</button><button id="bChar2" class="pb alt" data-en="Change character">캐릭터 바꾸기</button><button id="bLobby2" class="pb alt" data-en="Lobby">로비</button></div>
     </div>
   </div>
 </div>

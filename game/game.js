@@ -25,6 +25,10 @@
   const JMAX = (JUMP * JUMP + JUMP2 * JUMP2 + JUMP3 * JUMP3) / (2 * GRAV);    // the triple jump at its best (106.2): the 4th and on stop there
   const V0 = 170, ACC = 0.8, VMAX = Infinity;               // (v47: +0.8/s; v43: +1/s, was 0.6; no top speed, was 900)
   const HP_MAX = 100, DRAIN = 1.0, HIT = 20, HEAL = 25, INVUL = 1.2;     // (v51: a bump costs 20, was 15)
+  // (v57) a heal every 33 s of running (30 to 36; the mini-games don't count), not every so far: by distance they came
+  // quicker the quicker you ran, and outran the drain (+1.5..2.7 a second against 1). Now 25 in 33 s against 33: taking
+  // every one and never hit, the health runs out in about 7 minutes of running
+  const HEAL_EVERY = 33, HEAL_JIT = 3;
   // the player's box: half-width and height running, sliding (the characters are drawn 0.8 of their old size)
   const PW = 5.76, PH = 17.28, SLW = 7.92, SLH = 9.36;     // (v38: 0.9 of v15's 6.4, 19.2, 8.8, 10.4, with the pictures)
   const TOPY = CEIL + 10;                       // a safety stop only: a perfect triple jump tops out at about 104 (head at y 27)
@@ -84,7 +88,8 @@
     ['uv', '소독조', 'UV disinfection', ['uv', 5500]], ['outfall', '방류구', 'Outfall', ['outfall', 5500]]);
   // the course as stretches of one look: id, Korean name, English name, look, length, place number
   const COURSE = [];
-  PLACES.forEach((p, k) => { for (const [look, len] of p.slice(3)) COURSE.push([p[0], p[1], p[2], look, len, k]); });
+  const PLACE_K = 0.8;                              // (v57) every place 20% shorter than the lengths above
+  PLACES.forEach((p, k) => { for (const [look, len] of p.slice(3)) COURSE.push([p[0], p[1], p[2], look, Math.round(len * PLACE_K), k]); });
   const STARTS = []; let LAP = 0;
   for (const s of COURSE) { STARTS.push(LAP); LAP += s[4]; }
   const S2_I = COURSE.findIndex((st) => st[5] === STAGE2), S2_X = STARTS[S2_I];       // where stage 2 starts in the lap
@@ -98,12 +103,17 @@
   const M_UNITS = 10, OB_PTS = { perfect: 50, early: 25, late: 25 };
   // (v49) a mini-game's points go into the score when it ends (until then they are its own, shown on its card)
   const bankGame = (g) => { if (g && g.gain) { G.score = Math.max(0, G.score + g.gain); g.gain = 0; } };
+  // (v57) combos in every mini-game: a game of a few tries (baseball, the shoot-out, the jackpot, memory, the shell
+  // game) pays each success in a row 20% more of its points for each one before it in the row (the 2nd +20%, the 3rd
+  // +40%, ...); a game of many quick hits (the orbit stage, the germ game) multiplies like the rhythm stage (up to 2.6
+  // times at 40 in a row); the poop tower and the bird shoot had theirs already
+  const COMBO_K = 0.2, comboPts = (base, k) => Math.round(base * (1 + COMBO_K * Math.max(0, k - 1)));
   const scoreParts = () => ({ dist: G.distM, items: G.itemPts, games: G.score - G.distM - G.itemPts });
   const mod = (a, n) => ((a % n) + n) % n;
   const PILOT_HUGE = 0.58;
   // the booster: every 100 things eaten (anything but a heal), 5 seconds at three times the speed, untouchable (a second's grace after)
   const BOOST_N = 100, BOOST_T = 5, BOOST_K = 3, BOOST_GRACE = 1.0;
-  const boostNeed = () => BOOST_N + 20 * (G.boosts || 0);      // (v47) 100, then 120, 140, ... (late on the coins come thick)
+  const boostNeed = () => BOOST_N + 50 * (G.boosts || 0);      // (v47) 100, then 120, 140, ... (late on the coins come thick) (v57: 100, 150, 200, ...)
   const MAG_R = 80;                                  // boosting, a magnetic field round the body pulls in what comes this near
   const FIRE_STYLE = Math.max(1, Math.min(5, +(qs.get('fire') || 5)));      // the look of the booster's fire (5: rainbow starlight, chosen)
 
@@ -239,14 +249,15 @@
 
   // ---------------------------------------------------------------- the run
   const G = {};
+  const loadBest = () => { try { return +(localStorage.getItem('bodyrun.best') || 0); } catch (e) { return 0; } };     // (v57) the best so far, for the HUD
   function newRun(charName) {
     Object.assign(G, {
       mode: 'play', t: 0, x: 0, v: V0, slow: 1, hp: HP_MAX, score: 0, eaten: 0, hits: 0, dist: 0, distM: 0, itemPts: 0,
       y: 0, vy: 0, jumps: 0, onGround: true, slide: false, slideHeld: false, fastFall: false,
       invul: 0, nudge: 0, char: charName, obs: [], items: [], pops: [], puffs: [],
-      genX: 520, genStation: undefined, lastGate: -1e9, R: rng(12345), nextHeal: 1800, station: -1, theme: COURSE[0][3], prevTheme: null, fade: 1, banner: 0, lapShown: 0,
+      genX: 520, genStation: undefined, lastGate: -1e9, R: rng(12345), runT: 0, nextHealT: HEAL_EVERY, station: -1, theme: COURSE[0][3], prevTheme: null, fade: 1, banner: 0, lapShown: 0,
       blinkAt: -1, blinkR: rng(4242), vt: 0, rh: null, orb: null, bb: null, wm: null, mem: null, pk: null, sl: null, yb: null, tw: null, ar: null, slLap: -1, cut: null, cutTail: null, bounce: false, pitObj: null,
-      o2n: 0, boost: 0, boostT0: -9, boostHeld: 0, boosts: 0, fire: [], fxR: rng(9191),
+      o2n: 0, boost: 0, boostT0: -9, boostHeld: 0, boosts: 0, fire: [], fxR: rng(9191), best0: loadBest(),
       intro: [[1950, 'spike'], [3650, 'drop'], [5420, 'pit'], [7250, 'shot'], [9130, 'door']],
     });
     pressed.jump = false;
@@ -480,7 +491,7 @@
       const R = G.R;
       if (S2_L.has(theme)) {                                   // stage 2: under water
         const used = spawnSwim(G.genX, theme, fam, coin, special, v, d, d2, R);
-        if (G.genX > G.nextHeal) { addItem(G.genX + used / 2, 50 + R() * 70, 'heal'); G.nextHeal = G.genX + 2200 + R() * 1200; }
+        if (G.runT >= G.nextHealT) { addItem(G.genX + used / 2, 50 + R() * 70, 'heal'); G.nextHealT = G.runT + HEAL_EVERY - HEAL_JIT + R() * 2 * HEAL_JIT; }
         const gap = v * Math.max(gapT, 0.9) * (0.85 + 0.3 * R());     // (swimming up or down takes longer than a jump)
         // (v51) twice the things to eat under water: a run of six coins in the open water between two patterns (in a
         // line or a low arc, at any height one swims at)
@@ -615,7 +626,7 @@
         used = meet - x;
       }
       // a heal now and then, a rare multivitamin
-      if (G.genX > G.nextHeal) { addItem(G.genX + used / 2, GY - 54, 'heal'); G.nextHeal = G.genX + 2200 + R() * 1200; }
+      if (G.runT >= G.nextHealT) { addItem(G.genX + used / 2, GY - 54, 'heal'); G.nextHealT = G.runT + HEAL_EVERY - HEAL_JIT + R() * 2 * HEAL_JIT; }
       else if (R() < 0.03) addItem(G.genX + used / 2, GY - 70, 'multi');
       G.genX += Math.max(used, 60) + v * gapT * (0.85 + 0.3 * R());
     }
@@ -1205,7 +1216,7 @@
     const A = obAnchor(), h = SH('ch_' + G.char) * OB_CS;
     const cam0 = [OB.P[0][0] - (PX - A[0]), OB.P[0][1] - (GY + 1 - G.y - h / 2 - A[1])];    // tile 0 where the runner is
     const audio = !CAPTURE && SND.live();
-    G.orb = { gx0: G.x, cam0, cam: cam0.slice(), gt0: G.t + OB_LEAD, a0: null, wait: audio ? G.t : null, k: 0, st: 'play', stT: G.t,
+    G.orb = { gx0: G.x, cam0, cam: cam0.slice(), gt0: G.t + OB_LEAD, a0: null, wait: audio ? G.t : null, k: 0, st: 'play', stT: G.t, combo: 0, maxCombo: 0,
       res: { perfect: 0, early: 0, late: 0, miss: 0 }, pops: [], landT: -9, inT: G.t, off: 0, next: OB.T[1] };
     G.slideHeld = false; held.clear(); pressed.jump = false;
     if (audio) SND.ambience(false);
@@ -1228,7 +1239,7 @@
   // the song goes back two beats, so the tile and its note come round together again
   function orbMiss(why) {
     const o = G.orb, B = OB.B;
-    o.res.miss++; o.off += 2 * B; o.next += 2 * B;
+    o.res.miss++; o.off += 2 * B; o.next += 2 * B; o.combo = 0;
     o.pops.push({ k: o.k + 1, res: 'miss', s: why === 'early' ? TR('빨라요', 'Early') : TR('놓침', 'Miss'), t: G.t });
     SND.play('miss');
     if (o.a0 !== null) SND.playSong(OB.song, o.a0 + o.off);
@@ -1244,7 +1255,8 @@
   function orbLand(res) {
     const o = G.orb;
     o.k++; o.res[res]++; o.landT = G.t;
-    { const pts = OB_PTS[res] || 0; o.gain = (o.gain || 0) + pts; }       // (v49: it scores like the rest)
+    o.combo++; o.maxCombo = Math.max(o.maxCombo, o.combo);   // (v57) a combo, as in the rhythm stage: up to 2.6 times at 40 in a row
+    { const pts = Math.round((OB_PTS[res] || 0) * (1 + Math.min(o.combo, 40) / 25)); o.gain = (o.gain || 0) + pts; }       // (v49: it scores like the rest)
     o.pops.push({ k: o.k, res, t: G.t });
     SND.play('orbHit');
     if (o.k >= OB.N) { o.st = 'done'; o.stT = G.t; SND.play('orbClear'); }
@@ -1335,6 +1347,7 @@
     }
     ctx.restore();
     ctx.globalAlpha = 1;
+    if (o.combo >= 2 && o.st === 'play') label(TR(`${o.combo} 콤보`, `${o.combo} combo`), 18, NH - 14, 10, 'left', 1, '#fff3c8');     // (v57)
     // words: the title and the song's name until the first tile; a count of three into it
     const B = OB.B;
     if (o.st === 'play' && t < OB.T[1]) {
@@ -1350,7 +1363,7 @@
       label(TR('통과!', 'Clear!'), NWf / 2, 70, 14, 'center', a, '#ffe0a8');
       const r = o.res, all = r.perfect + r.early + r.late + r.miss;
       label(TR(`완벽 ${r.perfect}  ·  빠름 ${r.early}  ·  느림 ${r.late}  ·  놓침 ${r.miss}`, `Perfect ${r.perfect}  ·  Early ${r.early}  ·  Late ${r.late}  ·  Miss ${r.miss}`), NWf / 2, 92, 8.5, 'center', a, '#ffffff');
-      label(`${TR('정확도', 'Accuracy')} ${Math.round(100 * r.perfect / Math.max(1, all))}%  ·  +${PT(o.gain || 0)}`, NWf / 2, 110, 8.5, 'center', a, '#ffe68a');
+      label(`${TR('정확도', 'Accuracy')} ${Math.round(100 * r.perfect / Math.max(1, all))}%  ·  ${TR('최대 콤보', 'Max combo')} ${o.maxCombo}  ·  +${PT(o.gain || 0)}`, NWf / 2, 110, 8.5, 'center', a, '#ffe68a');
     }
   }
   function drawSwirl(x, y, d) {                             // a swirl: the swing turns round here
@@ -1724,9 +1737,9 @@
       b.ball = fly;
     }
     b.msg = { s: { hr: TR('홈런!', 'Home run!'), foul: TR('파울', 'Foul'), whiff: TR('헛스윙', 'Swing and miss'), strike: TR('스트라이크', 'Strike') }[res], t: G.t, res };
-    if (res === 'hr') { b.gain += BB_PTS.hr; b.hr = true; SND.play('bbHR'); buzz([40, 30, 70]); }
-    else if (res === 'foul') { SND.play('bbHit'); buzz(35); }
-    else SND.play('bbMitt');
+    if (res === 'hr') { b.streak = (b.streak || 0) + 1; b.bestRun = Math.max(b.bestRun || 0, b.streak); b.msg.k = b.streak; b.msg.pts = comboPts(BB_PTS.hr, b.streak); b.gain += b.msg.pts; b.hr = true; SND.play('bbHR'); buzz([40, 30, 70]); }
+    else if (res === 'foul') { b.streak = 0; SND.play('bbHit'); buzz(35); }
+    else { b.streak = 0; SND.play('bbMitt'); }
   }
   function stepBaseball(dt) {                                                 // (each check reads the clock afresh: one step can change the state)
     const b = G.bb;
@@ -1982,7 +1995,7 @@
     }
     if (b.msg && b.st !== 'done') {                       // the result: small, just over the zone (under the pitcher), briefly
       const v = G.t - b.msg.t, big = b.msg.res === 'hr', a = Math.min(1, v / 0.08) * Math.max(0, Math.min(1, ((big ? 1.3 : 0.95) - v) / 0.25));
-      const s = big ? `${b.msg.s} +${PT(BB_PTS.hr)}` : b.msg.res === 'whiff' ? `${b.msg.s} · ${b.p.type.name}` : b.msg.s;   // (a miss: what got past you)
+      const s = big ? (b.msg.k > 1 ? TR(`${b.msg.k}연속 홈런! +${PT(b.msg.pts)}`, `${b.msg.k} home runs in a row! +${PT(b.msg.pts)}`) : `${b.msg.s} +${PT(b.msg.pts)}`) : b.msg.res === 'whiff' ? `${b.msg.s} · ${b.p.type.name}` : b.msg.s;   // (a miss: what got past you) (v57: in a row)
       label(s, zx, zy - BB_ZH / 2 - 5, 7, 'center', a, big ? '#ffe68a' : '#ffffff');
     }
     if (b.st === 'done') {
@@ -1991,7 +2004,7 @@
       const n = (q) => b.res.filter((r) => r === q).length;
       label(TR(`홈런 ${n('hr')}개${n('hr') ? '!' : ''}`, `${n('hr')} home run${n('hr') === 1 ? '' : 's'}${n('hr') ? '!' : ''}`), NWf / 2, 70, 14, 'center', a, b.hr ? '#ffe68a' : '#ffd0dc');
       label(TR(`홈런 ${n('hr')} · 파울 ${n('foul')} · 헛스윙 ${n('whiff')} · 스트라이크 ${n('strike')}`, `HR ${n('hr')} · Foul ${n('foul')} · Miss ${n('whiff')} · Strike ${n('strike')}`), NWf / 2, 90, 7.5, 'center', a, '#ffffff');
-      label(`+${PT(b.gain)}`, NWf / 2, 104, 8.5, 'center', a, '#ffe68a');
+      label(`${(b.bestRun || 0) > 1 ? TR(`최고 연속 ${b.bestRun} · `, `Best run ${b.bestRun} · `) : ''}+${PT(b.gain)}`, NWf / 2, 104, 8.5, 'center', a, '#ffe68a');
     }
     ctx.globalAlpha = 1;
   }
@@ -2020,7 +2033,7 @@
     holdBoost();
     G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
     G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
-    G.wm = { st: 'intro', stT: G.t, inT: G.t, t0: 0, next: 0, moles: [], free: WMF.holes.map(() => -9), caught: 0, missed: 0, oops: 0, gain: 0, fx: [], pops: [], music: false };
+    G.wm = { st: 'intro', stT: G.t, inT: G.t, t0: 0, next: 0, moles: [], free: WMF.holes.map(() => -9), caught: 0, missed: 0, oops: 0, gain: 0, fx: [], pops: [], music: false, combo: 0, maxCombo: 0 };
     G.slideHeld = false; held.clear(); pressed.jump = false;
     wmMusic();
   }
@@ -2086,7 +2099,7 @@
       }
       for (const m of w.moles) {
         const gone = m.st === 'hit' ? G.t - m.tH > WM_SQUASH + WM_HITSINK : G.t - m.t0 > WM_RISE + m.stay + WM_SINK;
-        if (gone) { m.gone = true; w.free[m.h] = G.t; if (m.st === 'up' && !m.good) w.missed++; }
+        if (gone) { m.gone = true; w.free[m.h] = G.t; if (m.st === 'up' && !m.good) { w.missed++; w.combo = 0; } }     // (v57: one got away: the combo is broken)
       }
       w.moles = w.moles.filter((m) => !m.gone);
       if (u >= WM_T && !w.moles.length) { w.st = 'done'; w.stT = G.t; SND.play(w.caught ? 'orbClear' : 'bbOut'); }
@@ -2115,13 +2128,15 @@
     const w = G.wm;
     m.qH = wmOut(m); m.st = 'hit'; m.tH = G.t;
     if (m.good) {
-      const lose = Math.min(WM_OOPS, G.score + w.gain); w.gain -= lose; w.oops++;     // (the score never goes below 0)
+      const lose = Math.min(WM_OOPS, G.score + w.gain); w.gain -= lose; w.oops++; w.combo = 0;     // (the score never goes below 0)
       SND.play('wmOops'); buzz([30, 40, 30]);
       w.pops.push({ x, y: y - 6, s: lose ? '-' + lose : TR('앗!', 'Oops!'), t: G.t, bad: true });
     } else {
-      w.gain += WM_PTS; w.caught++;
+      w.combo++; w.maxCombo = Math.max(w.maxCombo, w.combo);     // (v57) a combo, as in the rhythm stage
+      const pts = Math.round(WM_PTS * (1 + Math.min(w.combo, 40) / 25));
+      w.gain += pts; w.caught++;
       SND.play('wmHit'); buzz(BUZZ_TAP);
-      w.pops.push({ x, y: y - 6, s: '+' + WM_PTS, t: G.t });
+      w.pops.push({ x, y: y - 6, s: '+' + pts, t: G.t });
     }
     w.fx.push({ x, y, t: G.t, good: m.good });
   }
@@ -2187,6 +2202,7 @@
       if (left > 0) { rrect(bx, by, Math.max(3.4, bw * left / WM_T), 3.4, 1.7); ctx.fillStyle = left < 5 ? '#ff6a6a' : '#ffd66e'; ctx.fill(); }
       label(`${Math.ceil(left)}${TR('초', 's')}`, bx + bw + 4, by + 1.8, 7, 'left', al, '#ffffff');
       label(`${TR('잡은 세균', 'Germs')} ${w.caught}`, bx - 4, by + 1.8, 7, 'right', al, '#ffe0a8');
+      if (w.combo >= 2 && w.st === 'play') label(TR(`${w.combo} 콤보`, `${w.combo} combo`), 18, NH - 14, 10, 'left', al, '#fff3c8');     // (v57)
       ctx.globalAlpha = al;
     }
     if (w.st === 'intro') {
@@ -2207,7 +2223,7 @@
       ctx.globalAlpha = a * 0.78; rrect(zx - 110, 54, 220, 60, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = 1;
       label(TR(`세균 ${w.caught}마리!`, `${w.caught} germs!`), zx, 70, 14, 'center', a, '#ffe68a');
       label(TR(`잡음 ${w.caught} · 놓침 ${w.missed} · 유산균 누름 ${w.oops}`, `Caught ${w.caught} · Missed ${w.missed} · Good germ tapped ${w.oops}`), zx, 90, 7.5, 'center', a, '#ffffff');
-      label(`${w.gain < 0 ? '-' : '+'}${PT(Math.abs(w.gain))}`, zx, 104, 8.5, 'center', a, w.gain < 0 ? '#ff8a96' : '#ffe68a');
+      label(`${w.maxCombo > 1 ? TR(`최대 콤보 ${w.maxCombo} · `, `Max combo ${w.maxCombo} · `) : ''}${w.gain < 0 ? '-' : '+'}${PT(Math.abs(w.gain))}`, zx, 104, 8.5, 'center', a, w.gain < 0 ? '#ff8a96' : '#ffe68a');
     }
     ctx.globalAlpha = 1;
   }
@@ -2282,7 +2298,7 @@
   function memDone() { const m = G.mem; m.st = 'done'; m.stT = G.t; SND.play(m.res.includes('ok') ? 'orbClear' : 'bbOut'); }
   function memWrong(n, why) {
     const m = G.mem, right = m.seq[m.k];
-    m.res.push('bad'); m.st = 'bad'; m.stT = G.t; m.why = why;
+    m.res.push('bad'); m.st = 'bad'; m.stT = G.t; m.why = why; m.run = 0;
     if (n !== null) m.flash.push({ n, kind: 'wrong', t: G.t, dur: MG_BAD - 0.2 });
     m.flash.push({ n: right, kind: 'right', t: G.t, dur: MG_BAD - 0.2 });
     SND.play('memBad'); buzz([30, 40, 30]);
@@ -2297,7 +2313,8 @@
     memLight(n, 'tap', MG_TAP); buzz(BUZZ_TAP);
     if (m.k > 0) m.pulses.push({ a: m.seq[m.k - 1], b: n, t: G.t - 0.12, dur: 0.16 });
     if (++m.k >= m.seq.length) {
-      const pts = m.seq.length * 100; m.gain += pts; m.res.push('ok');
+      m.run = (m.run || 0) + 1; m.bestRun = Math.max(m.bestRun || 0, m.run);     // (v57) rounds right in a row: +20% each
+      const pts = comboPts(m.seq.length * 100, m.run); m.gain += pts; m.res.push('ok');
       m.st = 'ok'; m.stT = G.t; m.okPts = pts; m.best = Math.max(m.best || 0, m.seq.length);
       SND.play('memOk');
     }
@@ -2359,7 +2376,7 @@
     // in the middle: what to do now, and how far into the order you are
     const L = m.seq.length;
     if (m.st === 'show' || m.st === 'input' || m.st === 'ok' || m.st === 'bad') {
-      const t = m.st === 'show' ? TR('잘 보세요', 'Watch') : m.st === 'input' ? TR('따라 누르세요', 'Your turn') : m.st === 'ok' ? `${TR('좋아요!', 'Nice!')} +${m.okPts}` : m.why;
+      const t = m.st === 'show' ? TR('잘 보세요', 'Watch') : m.st === 'input' ? TR('따라 누르세요', 'Your turn') : m.st === 'ok' ? (m.run > 1 ? TR(`${m.run}연속! +${m.okPts}`, `${m.run} in a row! +${m.okPts}`) : `${TR('좋아요!', 'Nice!')} +${m.okPts}`) : m.why;
       const col = m.st === 'ok' ? '#ffe68a' : m.st === 'bad' ? '#ff9aa4' : '#ffffff';
       label(t, cx, MG_CY - 4, 8.5, 'center', al, col);
       ctx.globalAlpha = al;
@@ -2390,7 +2407,7 @@
       const ok = m.res.filter((r) => r === 'ok').length;
       ctx.globalAlpha = a * 0.82; rrect(cx - 110, 76, 220, 60, 8); ctx.fillStyle = '#120a1e'; ctx.fill(); ctx.globalAlpha = 1;
       label(TR(`${ok}/${MG_ROUNDS} 라운드 성공${ok ? '!' : ''}`, `${ok}/${MG_ROUNDS} rounds cleared${ok ? '!' : ''}`), cx, 92, 14, 'center', a, ok ? '#ffe68a' : '#ffd0dc');
-      label(TR(`가장 길게 맞힌 순서 ${m.best || 0}개`, `Longest sequence: ${m.best || 0}`), cx, 111, 7.5, 'center', a, '#ffffff');
+      label(TR(`가장 길게 맞힌 순서 ${m.best || 0}개${(m.bestRun || 0) > 1 ? ` · 최고 연속 ${m.bestRun}` : ''}`, `Longest sequence: ${m.best || 0}${(m.bestRun || 0) > 1 ? ` · best run ${m.bestRun}` : ''}`), cx, 111, 7.5, 'center', a, '#ffffff');
       label(`+${PT(m.gain)}`, cx, 125, 8.5, 'center', a, '#ffe68a');
     }
     ctx.globalAlpha = 1;
@@ -2412,7 +2429,7 @@
   // dive to the right / left (standing, crouching, leaping, stretched with the glove out, stretched lower, down); each
   // with its middle (c), bottom and leading glove (lead), in units
   const PK_RUN = 0.5;                                        // the run-up, s
-  const PK_SWEEP = [0.8, 0.55];                              // the needle's run end to end, s: the first kick .. the last
+  const PK_SWEEP = [0.8 / 1.5, 0.55 / 1.5];                  // the needle's run end to end, s: the first kick .. the last (v57: half as quick again)
   const PK_WEAK = 0.55, PK_STRONG = 0.8, PK_PERF = [0.635, 0.715];      // the power bar: soft | green (bright middle) | too hard
   const PK_AX = PK_HALF + 16, PK_AH = PK_TALL + 14, PK_AIMV = 100;      // how far the aim goes; how fast (units/s, stick right out)
   const PK_PAD = { r: 19, m: 32, y: 146 };                    // the stick (left) and the button (right): radius, in from the side, height
@@ -2471,10 +2488,11 @@
     const p = G.pk, s = p.shot;
     s.done = true; p.res.push(s.res); p.st = 'after'; p.stT = G.t;
     const at = [pkGX(s.gx), pkGY(s.gh)];
-    if (s.res === 'goal') { p.gain += PK_PTS; SND.play('pkGoal'); buzz([40, 30, 70]); p.fx.push({ kind: 'goal', at, t: G.t }); }
-    else if (s.res === 'save') { SND.play('pkSave'); buzz(30); }
+    if (s.res === 'goal') { p.run = (p.run || 0) + 1; p.bestRun = Math.max(p.bestRun || 0, p.run); p.goalPts = comboPts(PK_PTS, p.run); p.gain += p.goalPts; SND.play('pkGoal'); buzz([40, 30, 70]); p.fx.push({ kind: 'goal', at, t: G.t }); }     // (v57: goals in a row: +20% each)
+    else p.run = 0;
+    if (s.res === 'save') { SND.play('pkSave'); buzz(30); }
     else if (s.res === 'post') { SND.play('pkPost'); buzz(25); p.fx.push({ kind: 'post', at, t: G.t }); }
-    else SND.play('pkMiss');
+    else if (s.res === 'miss') SND.play('pkMiss');
     p.msg = { s: { goal: TR('골!!', 'GOAL!!'), save: s.kind === 'weak' ? TR('잡혔다!', 'Caught!') : TR('막혔다!', 'Saved!'), post: TR('골대!', 'Post!'), miss: s.gh > PK_TALL ? TR('넘어갔다', 'Over the bar') : TR('빗나갔다', 'Wide') }[s.res], t: G.t, res: s.res };
   }
   function stepPK(dt) {
@@ -2706,7 +2724,7 @@
       const v = G.t - p.msg.t, big = p.msg.res === 'goal', a = Math.min(1, v / 0.08) * Math.max(0, Math.min(1, ((big ? 2.0 : 1.5) - v) / 0.3));
       const sc = big ? 1 + 0.25 * Math.max(0, 1 - v / 0.25) : 1;
       label(p.msg.s, zx, 50, (big ? 22 : 13) * sc, 'center', a, big ? '#ffe68a' : p.msg.res === 'save' ? '#ffb0b8' : '#ffffff');
-      if (big) label(`+${PT(PK_PTS)}`, zx, 68, 9, 'center', a, '#ffe68a');
+      if (big) label(p.run > 1 ? TR(`${p.run}연속 골! +${PT(p.goalPts)}`, `${p.run} in a row! +${PT(p.goalPts)}`) : `+${PT(p.goalPts)}`, zx, 68, 9, 'center', a, '#ffe68a');
     }
     if (p.st === 'intro') {
       const v = G.t - p.stT, a = Math.min(1, v / 0.3) * Math.max(0, Math.min(1, (PK_INTRO - v) / 0.3));
@@ -2714,7 +2732,7 @@
       label(TR('승부차기! 5번 차요', 'Penalty Shootout! 5 kicks'), zx, 64, 15, 'center', a, '#ffe0a8');
       label(TR('왼쪽으로 골대 어디에 찰지 조준, 오른쪽 버튼으로 슛', 'Aim with the left side, shoot with the right button'), zx, 82, 7.5, 'center', a, '#ffffff');
       label(TR('세기 바의 초록 칸에서 눌러야 정타 · 약하면 잡히고 너무 세면 넘어가요', 'Press in the green for a clean strike · too soft gets caught, too hard flies over'), zx, 93, 7, 'center', a, '#ffffff');
-      label(TR('골마다 1,000점', '1,000 pts a goal'), zx, 104, 7, 'center', a, '#ffe68a');
+      label(TR('골마다 1,000점 · 연속 골은 더 많이!', '1,000 pts a goal · more for goals in a row!'), zx, 104, 7, 'center', a, '#ffe68a');
     }
     if (p.st === 'done') {
       const v = G.t - p.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (PK_END - v) / 0.35));
@@ -2722,7 +2740,7 @@
       ctx.globalAlpha = a * 0.8; rrect(zx - 110, 54, 220, 60, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = 1;
       label(TR(`골 ${n('goal')}개${n('goal') ? '!' : ''}`, `${n('goal')} goal${n('goal') === 1 ? '' : 's'}${n('goal') ? '!' : ''}`), zx, 70, 14, 'center', a, n('goal') ? '#ffe68a' : '#ffd0dc');
       label(TR(`골 ${n('goal')} · 막힘 ${n('save')} · 골대 ${n('post')} · 빗나감 ${n('miss')}`, `Goals ${n('goal')} · Saved ${n('save')} · Post ${n('post')} · Missed ${n('miss')}`), zx, 90, 7.5, 'center', a, '#ffffff');
-      label(`+${PT(p.gain)}`, zx, 104, 8.5, 'center', a, '#ffe68a');
+      label(`${(p.bestRun || 0) > 1 ? TR(`최고 연속 ${p.bestRun} · `, `Best run ${p.bestRun} · `) : ''}+${PT(p.gain)}`, zx, 104, 8.5, 'center', a, '#ffe68a');
     }
     ctx.globalAlpha = 1;
   }
@@ -2806,9 +2824,10 @@
     let pts = 0, kind = 'none';
     if (w[0] === w[1] && w[1] === w[2]) { pts = SL_PAY[w[0]]; kind = w[0] === 0 ? 'jackpot' : 'three'; s.best3 = true; }
     else if (w[0] === w[1] || w[1] === w[2] || w[0] === w[2]) { pts = SL_PAIR; kind = 'two'; }
+    if (pts > 0) { s.run = (s.run || 0) + 1; s.bestRun = Math.max(s.bestRun || 0, s.run); pts = comboPts(pts, s.run); } else s.run = 0;     // (v57) wins in a row: +20% each
     s.gain += pts; s.res.push(kind);
     s.st = 'after'; s.stT = G.t; s.flash = G.t; s.reach = false;
-    s.msg = { kind, pts, sym: w[0] === w[1] || w[0] === w[2] ? w[0] : w[1], t: G.t, near: w[0] === w[1] && w[2] !== w[0] };
+    s.msg = { kind, pts, k: s.run, sym: w[0] === w[1] || w[0] === w[2] ? w[0] : w[1], t: G.t, near: w[0] === w[1] && w[2] !== w[0] };
     if (kind === 'jackpot') { SND.play('slJackpot'); buzz([60, 40, 60, 40, 120]); for (let i = 0; i < 140; i++) s.coins.push({ x: Math.random() * NWf, y: -10 - Math.random() * 180, vx: (Math.random() * 2 - 1) * 20, vy: 40 + Math.random() * 60, r: Math.random() * 6.28, vr: (Math.random() * 2 - 1) * 10 }); }
     else if (kind === 'three') { SND.play('slWin'); buzz([40, 30, 60]); const w1 = slWin(1); for (let i = 0; i < 40; i++) s.coins.push({ x: slMX() + w1.cx, y: slMY() + w1.cy, vx: (Math.random() * 2 - 1) * 150, vy: -80 - Math.random() * 120, r: 0, vr: (Math.random() * 2 - 1) * 10 }); }
     else if (kind === 'two') SND.play('slSmall');
@@ -2952,7 +2971,7 @@
       else if (m && s.st === 'after') {
         if (m.kind === 'jackpot') label('JACKPOT', qx, qy, fs * 1.1, 'center', al * (Math.floor(G.t * 10) % 2 ? 1 : 0.55), '#ffe68a');
         else if (m.kind === 'three') label(TR('당첨!', 'WIN!'), qx, qy, fs * 1.1, 'center', al * (Math.floor(G.t * 10) % 2 ? 1 : 0.55), '#ffe68a');
-        else if (m.kind === 'two') label(m.near ? `${TR('아깝다!', 'So close!')} +${PT(m.pts)}` : `${TR('두 개 같아요', 'Two alike')} +${PT(m.pts)}`, qx, qy, fs * 0.85, 'center', al, '#ffffff');
+        else if (m.kind === 'two') label(m.k > 1 ? TR(`${m.k}연속! +${PT(m.pts)}`, `${m.k} in a row! +${PT(m.pts)}`) : m.near ? `${TR('아깝다!', 'So close!')} +${PT(m.pts)}` : `${TR('두 개 같아요', 'Two alike')} +${PT(m.pts)}`, qx, qy, fs * 0.85, 'center', al, '#ffffff');
         else label(TR('꽝', 'No luck'), qx, qy, fs, 'center', al, '#ffd8dc');
       }
       else if (s.st === 'ready') label(TR('탭해서 레버 당기기', 'Tap to pull'), qx, qy, fs * 0.85, 'center', al * blink, '#ffffff');
@@ -2967,9 +2986,10 @@
         if (v < 0.5) { ctx.globalAlpha = al * (1 - v / 0.5) * 0.5; ctx.fillStyle = '#fff6c8'; ctx.fillRect(0, 0, NWf, NH); ctx.globalAlpha = al; }
         const sc = 1 + 0.3 * Math.max(0, 1 - v / 0.3) + 0.05 * Math.sin(G.t * 10);
         label('JACKPOT!!', zx, ry - 4, 26 * sc, 'center', al, ['#ffe14a', '#ff7a5a', '#7ae0ff', '#c88aff'][Math.floor(G.t * 8) % 4]);
-        label(`+${PT(m.pts)}`, zx, ry + 16, 12, 'center', al, '#ffe68a');
+        label(m.k > 1 ? TR(`${m.k}연속! +${PT(m.pts)}`, `${m.k} in a row! +${PT(m.pts)}`) : `+${PT(m.pts)}`, zx, ry + 16, 12, 'center', al, '#ffe68a');
       } else if (m.kind === 'three') {
         label(TR(`${SL_NAME[m.sym]} 3개! +${PT(m.pts)}`, `Three ${SL_NAME[m.sym]}! +${PT(m.pts)}`), zx, ry, 13 * (1 + 0.2 * Math.max(0, 1 - v / 0.25)), 'center', al, '#ffe68a');
+        if (m.k > 1) label(TR(`${m.k}연속!`, `${m.k} in a row!`), zx, ry + 14, 9, 'center', al, '#fff3c8');
       }
     }
     // the goes: three coins at the top left
@@ -2987,7 +3007,7 @@
       ctx.globalAlpha = a * 0.85; rrect(zx - 110, 74, 220, 56, 8); ctx.fillStyle = '#10141e'; ctx.fill(); ctx.globalAlpha = 1;
       const hit = s.res.filter((r) => r === 'three' || r === 'jackpot').length;
       label(s.res.includes('jackpot') ? TR('잭팟 터졌다!', 'JACKPOT!') : hit ? TR(`당첨 ${hit}번!`, `${hit} win${hit === 1 ? '' : 's'}!`) : TR('다음에 다시!', 'Better luck next time!'), zx, 90, 14, 'center', a, s.gain ? '#ffe68a' : '#ffd0dc');
-      label(`+${PT(s.gain)}`, zx, 112, 9, 'center', a, '#ffe68a');
+      label(`${(s.bestRun || 0) > 1 ? TR(`최고 연속 ${s.bestRun} · `, `Best run ${s.bestRun} · `) : ''}+${PT(s.gain)}`, zx, 112, 9, 'center', a, '#ffe68a');
     }
     ctx.globalAlpha = 1;
   }
@@ -2997,14 +3017,14 @@
   // (yabawi.py), the golden poop under one. It lifts that lid to show you, then shuffles: two lids swapping (one passing
   // in front, the other behind) and, from the third round, all three going round at once; faster every round. Tap the
   // lid it is under (or the arrows and space, or 1-3). Right: the pot (500, doubled each round) and a choice: one more
-  // round for double, or take it. Wrong: the pot is gone and it ends. Five rounds at most (8,000). No cheating: it is
+  // round for double, or take it. Wrong: the pot is gone and it ends. Five rounds at most (8,000; v57: 14,400 with the combo). No cheating: it is
   // where the moves you saw put it.
   const YB_N = 5, YB_INTRO = 2.8, YB_LIFT = 34, YB_BASE = 500, YB_WAIT = 9, YB_ASKWAIT = 8, YB_END = 2.8, YB_REVEAL = 1.7;
   const YB_MOVES = [[5, 0.36], [7, 0.27], [9, 0.2], [11, 0.15], [13, 0.115]];     // each round: how many moves, how long each (s)
   const YB_SP = 64, YB_FOOT = 124, YB_TOP = 102;            // the lids' spacing; where their feet stand; the table's top edge
   const YB_BTN = { y: 163, w: 118, h: 25, dx: 64 };          // the double-or-take buttons (on the skirt)
   const ybX = (slot) => NWf / 2 + (slot - 1) * YB_SP;
-  const ybPot = (k) => YB_BASE * Math.pow(2, k);              // the pot after the round k (0 ..) is won
+  const ybPot = (k) => comboPts(YB_BASE * Math.pow(2, k), k + 1);     // the pot after the round k (0 ..) is won (v57: and +20% for each won before it in a row)
   function startYB() {
     holdBoost();
     G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
@@ -3189,7 +3209,7 @@
         const [x, , , fy] = pos[p.gold];
         for (let k = 0; k < 6; k++) { const a = k * 1.047 + G.t * 2, r = 20 + 4 * Math.sin(G.t * 9 + k), sx = x + Math.cos(a) * r, sy = fy - 12 + Math.sin(a) * r * 0.6, z = 1.6 + 0.9 * Math.sin(G.t * 12 + k * 2);
           A(1); ctx.beginPath(); ctx.moveTo(sx, sy - z * 2); ctx.lineTo(sx + z * 0.5, sy - z * 0.5); ctx.lineTo(sx + z * 2, sy); ctx.lineTo(sx + z * 0.5, sy + z * 0.5); ctx.lineTo(sx, sy + z * 2); ctx.lineTo(sx - z * 0.5, sy + z * 0.5); ctx.lineTo(sx - z * 2, sy); ctx.lineTo(sx - z * 0.5, sy - z * 0.5); ctx.closePath(); ctx.fillStyle = '#fff6c0'; ctx.fill(); }
-        label(TR('맞혔다!', 'Got it!'), zx, 150, 17 * sc, 'center', al, '#ffe14a');
+        label(p.k ? TR(`${p.k + 1}연속 맞혔다!`, `${p.k + 1} in a row!`) : TR('맞혔다!', 'Got it!'), zx, 150, 17 * sc, 'center', al, '#ffe14a');
         label(TR(`판돈 ${PT(p.pot)}`, `Pot ${PT(p.pot)}`), zx, 167, 9, 'center', al, '#ffffff');
       } else {
         label(TR('꽝!', 'Nope!'), zx, 150, 17 * sc, 'center', al, '#ff9aa8');
@@ -3239,7 +3259,7 @@
       ctx.font = '900 15px system-ui, -apple-system, "Noto Sans KR", sans-serif';
       label(t0, zx, 81, Math.min(15, 15 * (bw - 14) / ctx.measureText(t0).width), 'center', al * a, '#ffe0a8');
       label(TR('쥐가 뚜껑을 섞어요. 황금똥이 든 뚜껑을 탭!', 'The mouse shuffles the lids - tap the one hiding the golden poop'), zx, 100, 7.5, 'center', al * a, '#ffffff');
-      label(TR('맞히면 판돈 2배, 틀리면 다 잃어요 (최대 8,000점)', 'Right: double the pot. Wrong: lose it all (up to 8,000)'), zx, 113, 7.5, 'center', al * a, '#ffe68a');
+      label(TR(`맞히면 판돈 2배+연속 보너스, 틀리면 다 잃어요 (최대 ${ybPot(YB_N - 1).toLocaleString('en-US')}점)`, `Right: double the pot and a bonus. Wrong: lose it all (up to ${ybPot(YB_N - 1).toLocaleString('en-US')})`), zx, 113, 7.5, 'center', al * a, '#ffe68a');
     }
     if (p.st === 'done') {
       const v = G.t - p.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (YB_END - v) / 0.35));
@@ -3604,9 +3624,9 @@
     A(1);
     // the arrows (pointing the way they fly)
     for (const a of p.arrows) { const s = M.sprites.ar_arrow, sc = 0.75; ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(Math.atan2(a.vy, a.vx) + Math.PI / 2); A(1); spr('ar_arrow', -s.w * sc / 2, 0, 1, s.w * sc, s.h * sc); ctx.restore(); }
-    // where the arrow will go: a short dotted line (it drops a little)
+    // where the arrow will go: a short dotted line (it drops a little) (v56: red dots)
     if (p.st === 'play') { const [bx, by] = arBow(), vx = Math.cos(p.aim) * AR_V, vy = -Math.sin(p.aim) * AR_V;
-      for (let i = 2; i < 13; i++) { const t = i * 0.022, x = bx + vx * t, y = by + vy * t + 0.5 * AR_GA * t * t; A(0.85 * (1 - i / 14)); ctx.beginPath(); ctx.arc(x, y, 1.1, 0, 6.2832); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.lineWidth = 0.4; ctx.strokeStyle = '#1a0a14'; ctx.stroke(); } A(1); }
+      for (let i = 2; i < 13; i++) { const t = i * 0.022, x = bx + vx * t, y = by + vy * t + 0.5 * AR_GA * t * t; A(1 - i / 22); ctx.beginPath(); ctx.arc(x, y, 1.6, 0, 6.2832); ctx.fillStyle = '#ff2626'; ctx.fill(); ctx.lineWidth = 0.5; ctx.strokeStyle = '#3a0008'; ctx.stroke(); } A(1); }
     // the runner at the bottom left, face on (turned right), the bow in front of it at the angle, the string drawn
     // back and let go, an arrow on it when it is ready
     { const nm = `bt_${G.char}_45`, s = M.sprites[nm], sc = 0.62, [bx, by] = arBow(), since = G.t - p.fireT;
@@ -3834,7 +3854,7 @@
     if (G.slide && !wasSlide) SND.play('slide');
     }
     // health
-    if (!busy()) G.hp = Math.max(0, G.hp - DRAIN * dt);
+    if (!busy()) { G.hp = Math.max(0, G.hp - DRAIN * dt); G.runT += dt; }     // (v57: the running time, for the heals)
     G.invul = Math.max(0, G.invul - dt);
     // hits
     const b = playerBox();
@@ -4603,7 +4623,18 @@
       label(s, NW / 2, y, SC, 'center');
       ctx.font = `900 ${SC}px system-ui, -apple-system, "Noto Sans KR", sans-serif`;
       const tw = ctx.measureText(s).width;
-      label(`${G.distM.toLocaleString('en-US')}m`, NW / 2 + tw / 2 + 4, y + 0.6, 6, 'left', 1, '#d8e8ff');
+      const ds = `${G.distM.toLocaleString('en-US')}m`;
+      label(ds, NW / 2 + tw / 2 + 4, y + 0.6, 6, 'left', 1, '#d8e8ff');
+      // (v57) the best (this browser's), small at its left (or, where that would run into the booster's count, at the
+      // right after the distance); past it, this run is the best: it shows this run's, brighter
+      const bs = Math.max(G.best0 || 0, G.score), nb = G.score > (G.best0 || 0) && G.score > 0;
+      if (bs > 0) {
+        const bt = `${TR('최고', 'Best')} ${bs.toLocaleString('en-US')}`;
+        ctx.font = `900 6px system-ui, -apple-system, "Noto Sans KR", sans-serif`;
+        const bw = ctx.measureText(bt).width, dw = ctx.measureText(ds).width, gR = x0 + 62 + 3 + ctx.measureText(`${G.o2n}/${boostNeed()}`).width;
+        if (NW / 2 - tw / 2 - 4 - bw > gR + 4) label(bt, NW / 2 - tw / 2 - 4, y + 0.6, 6, 'right', 1, nb ? '#ffe14a' : '#ffe68a');
+        else label(bt, NW / 2 + tw / 2 + 4 + dw + 5, y + 0.6, 6, 'left', 1, nb ? '#ffe14a' : '#ffe68a');
+      }
     }
     if (SET.god) label(TR('디버그: 안 죽음', 'Debug: no death'), 16, 30, 6, 'left', 0.85, '#8af0ff');
     // pause

@@ -170,6 +170,7 @@
     const files = new Set(['common.webp']);
     for (const t of want) for (const f of themeFiles(t)) files.add(f);
     if (G.boost > 0 || G.boostHeld > 0 || G.o2n >= boostNeed() - 25) files.add('fx_fire.webp');
+    if (G.magR || G.boost > 0 || G.boostHeld > 0 || G.o2n >= boostNeed() - 25) files.add('fx_mag.webp');       // (v61) the magnet's whirl
     const jx = STARTS[COURSE.findIndex((st) => st[5] === JEJ)], dj = ((jx - s.lx) % LAP + LAP) % LAP;
     const nearBB = G.bb || dj < Math.max(2500, G.v * 8);
     if (nearBB) { files.add('bb_field.webp'); files.add('bb.webp'); files.add(`bat_${G.char}.webp`); }
@@ -189,7 +190,7 @@
       if (on) { SND.fetchSong(STAGES[k]).catch(() => {}); if (SND.ctx) SND.prepare(STAGES[k]).catch(() => {}); } else SND.release(STAGES[k]);
     }
     for (const f of files) decode(f).catch(() => {});
-    if (!PRELOAD) for (const f of Object.keys(bmp)) if (!files.has(f) && /^(th_|fx_fire|bb|bat_|cut_|wm|mem|pk|sl)/.test(f)) release(f);
+    if (!PRELOAD) for (const f of Object.keys(bmp)) if (!files.has(f) && /^(th_|fx_fire|fx_mag|bb|bat_|cut_|wm|mem|pk|sl)/.test(f)) release(f);
     manageSongs();
   }
 
@@ -3879,6 +3880,7 @@
     if (G.tut && G.tut.on && tutStep(dt)) return;             // (v60) the first run's lessons: stopped till the button is pressed
     if (AUTO && !busy() && !(G.boost > 0) && !window.__noPilot) pilot();      // (__noPilot: tests, run into everything)
     G.t += dt;
+    G.magA = ((G.magA || 0) + dt * (G.boost > 0 ? 3.4 : 1.8)) % 6.2832;      // (v61) the magnet's whirl turning
     if (!busy()) G.vt += dt;                                // the speed does not climb during the rhythm and orbit stages
     G.v = Math.min(VMAX, V0 + ACC * G.vt);
     G.slow = Math.min(1, G.slow + dt / 0.6);                 // after a hit, back to full speed in 0.6 s (v43; was 0.8)
@@ -4188,58 +4190,22 @@
     }
     draw(rbFrame(since), hx, cy, fade, tilt);
   }
-  // the magnetic field while boosting: a clear, nearly invisible bubble round the body that sparkles: a thin bright
-  // rim, glossy highlights, little stars twinkling round it and a glint running along the rim
-  function drawField(sx, feet, w, h) {
-    if (!(G.boost > 0) && G.magR && !busy()) {                // (v60) the start item's small magnet: a faint dashed ring of its reach, turning
-      const cy = feet - h * 0.5; ctx.save(); ctx.globalAlpha = 0.28 + 0.08 * Math.sin(G.t * 4);
-      ctx.setLineDash([3, 4]); ctx.lineDashOffset = -G.t * 12; ctx.lineWidth = 0.9; ctx.strokeStyle = '#ff8aa0';
-      ctx.beginPath(); ctx.arc(sx, cy, G.magR, 0, 6.29); ctx.stroke(); ctx.restore();
-    }
-    if (!(G.boost > 0)) return;
-    const k = Math.min(1, (G.t - G.boostT0) / 0.2) * Math.min(1, G.boost / 0.35);
-    const cy = feet - h * 0.5, R = Math.max(w, h) * 0.62 + 0.4 * Math.sin(G.t * 6);
-    const g = ctx.createRadialGradient(sx, cy, R * 0.3, sx, cy, R);
-    g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.8, `rgba(255,255,255,${0.05 * k})`); g.addColorStop(1, `rgba(255,255,255,${0.16 * k})`);
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(sx, cy, R, 0, 6.29); ctx.fill();
-    ctx.lineWidth = 3.0; ctx.strokeStyle = `rgba(255,255,255,${0.2 * k})`; ctx.stroke();
-    ctx.beginPath(); ctx.arc(sx, cy, R + 0.95, 0, 6.29); ctx.lineWidth = 0.6; ctx.strokeStyle = `rgba(26,10,20,${0.3 * k})`; ctx.stroke();
-    ctx.beginPath(); ctx.arc(sx, cy, R, 0, 6.29); ctx.lineWidth = 1.25; ctx.strokeStyle = `rgba(255,255,255,${0.95 * k})`; ctx.stroke();
-    ctx.lineCap = 'round';
-    ctx.lineWidth = 1.2; ctx.strokeStyle = `rgba(255,255,255,${0.75 * k})`;          // gloss, upper left and a dot lower right
-    ctx.beginPath(); ctx.arc(sx, cy, R * 0.78, Math.PI * 1.1, Math.PI * 1.4); ctx.stroke();
-    ctx.fillStyle = `rgba(255,255,255,${0.6 * k})`; ctx.beginPath(); ctx.arc(sx + R * 0.5, cy + R * 0.5, 0.8, 0, 6.29); ctx.fill();
-    // the pull: dashed rings of force closing in from the reach of the magnet onto the bubble
-    ctx.setLineDash([3.2, 2.6]);
-    for (let i = 0; i < 3; i++) {
-      const u = (G.t * 1.6 + i / 3) % 1, rr = R + (MAG_R * 0.85 - R) * (1 - u) * (1 - u);
-      const a = Math.sin(u * Math.PI) * 0.55 * k;
-      ctx.lineDashOffset = -G.t * 30 * (i % 2 ? 1 : -1);
-      ctx.lineWidth = 0.9 + 0.8 * u; ctx.strokeStyle = `rgba(255,255,255,${a})`;
-      ctx.beginPath(); ctx.arc(sx, cy, rr, 0, 6.29); ctx.stroke();
-    }
-    ctx.setLineDash([]); ctx.lineDashOffset = 0;
-    // specks of light drawn in along curling paths
-    for (let i = 0; i < 14; i++) {
-      const u = (G.t * (0.9 + 0.25 * hash(i, 2)) + hash(i, 1)) % 1, ease = u * u;
-      const ang = hash(i, 3) * 6.283 + ease * 2.2, rr = R + (MAG_R * 0.9 - R) * (1 - ease);
-      const x = sx + Math.cos(ang) * rr, y = cy + Math.sin(ang) * rr * 0.92;
-      const tx = sx + Math.cos(ang - 0.25) * (rr + 7), ty = cy + Math.sin(ang - 0.25) * (rr + 7) * 0.92;
-      ctx.strokeStyle = `rgba(255,255,255,${0.7 * u * k})`; ctx.lineWidth = 0.9;
-      ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(x, y); ctx.stroke();
-      ctx.fillStyle = `rgba(255,255,255,${0.95 * u * k})`; ctx.beginPath(); ctx.arc(x, y, 0.55 + 0.5 * u, 0, 6.29); ctx.fill();
-    }
-    // a glint running round the rim
-    const ga = G.t * 2.4;
-    glowAt(sx + Math.cos(ga) * R, cy + Math.sin(ga) * R, 3.2, '255,255,255', 0.8 * k);
-    ctx.fillStyle = `rgba(255,255,255,${k})`; star4(sx + Math.cos(ga) * R, cy + Math.sin(ga) * R, 2.4, G.t * 4); ctx.fill();
-    // stars twinkling on the rim, each in its own time
-    for (let i = 0; i < 6; i++) {
-      const tw = Math.max(0, Math.sin(G.t * (5 + i * 0.7) + i * 1.9)), a = i * 1.05 + G.t * 0.5;
-      if (tw < 0.15) continue;
-      const x = sx + Math.cos(a) * R * 1.02, y = cy + Math.sin(a) * R * 1.02, r = (1.1 + 1.7 * tw) * k;
-      ctx.fillStyle = `rgba(255,255,255,${0.95 * tw * k})`; star4(x, y, r, a); ctx.fill();
-    }
+  // (v61) the magnet's look: the user's golden whirl (fx_mag.webp, hdart/magnet_user.py) turning clockwise round the
+  // runner, for the start item's magnet (as wide as its reach, 45) and, bigger and quicker, the booster's (its reach is
+  // 80; the whirl is drawn at 58, or it would fill the screen). Drawn behind the obstacles and the things to pick up, so
+  // it never hides one. (It was a dashed ring for the item and a clear sparkling bubble for the booster)
+  const MAG_FX_ITEM = 45, MAG_FX_BOOST = 58;
+  function drawField(cam) {
+    const n = 'ch_' + G.char, h0 = SH(n), h = G.slide ? slideH(h0) : h0;
+    const sx = PX - G.nudge + cutDX() + cutShake(), cy = GY + 1 - G.y - h * 0.5;
+    const kb = G.boost > 0 ? Math.min(1, (G.t - G.boostT0) / 0.2) * Math.min(1, G.boost / 0.35) : 0;
+    const ki = G.magR && !busy() ? 1 : 0;
+    if (kb <= 0 && ki <= 0) return;
+    const r0 = ki ? MAG_FX_ITEM : MAG_FX_BOOST * 0.7, R = (r0 + (MAG_FX_BOOST - r0) * kb) * (1 + 0.025 * Math.sin(G.t * 5));
+    const D = R * 2 * 1.04;                                   // (the picture has a little room round the whirl)
+    ctx.save(); ctx.translate(sx, cy); ctx.rotate(G.magA || 0);
+    spr('fx_mag', -D / 2, -D / 2, Math.max(ki * 0.85, kb), D, D);
+    ctx.restore();
   }
   function drawFire(sx, feet, w, h) {
     const on = G.boost > 0, k = on ? Math.min(1, (G.t - G.boostT0) / 0.15) * Math.min(1, G.boost / 0.35) : 0;
@@ -4384,6 +4350,7 @@
     if (pits.length) ctx.restore();
     world();
     for (const o of pits) drawPit(o, o.x - cam);
+    if ((G.cut && G.cut.swap) ? G.cut.landed : (!G.orb || (G.orb.st === 'done' && G.t - G.orb.stT > OB_DONE - 0.35))) drawField(cam);   // (v61) the magnet's whirl, behind the obstacles
     ctx.fillStyle = 'rgba(0,0,0,0.26)';
     for (const o of G.obs) if (o.kind === 'low' || o.kind === 'tall' || o.kind === 'huge') { const sx = o.x - cam; if (sx < NWf && sx + o.w > 0) { ctx.beginPath(); ctx.ellipse(sx + o.w / 2, GY + 0.6, o.w * 0.46, 1.9, 0, 0, 6.29); ctx.fill(); } }
     for (const o of G.obs) {
@@ -4457,7 +4424,6 @@
       ctx.fillStyle = 'rgba(235,252,252,0.55)'; ctx.fill(); ctx.lineWidth = 0.4; ctx.strokeStyle = '#2a5a62'; ctx.stroke(); ctx.globalAlpha = 1;
     }
     if (inPit) ctx.restore();
-    drawField(sx, GY + 1 - G.y, w, G.slide ? slideH(h) : h);
   }
   // a hole: the floor turns down at its edges (a lip of the floor's own colour), dark below
   function drawPit(o, x0) {

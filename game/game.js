@@ -4191,17 +4191,17 @@
     draw(rbFrame(since), hx, cy, fade, tilt);
   }
   // (v61) the magnet's look: the user's golden whirl (fx_mag.webp, hdart/magnet_user.py) turning clockwise round the
-  // runner, for the start item's magnet (as wide as its reach, 45) and, bigger and quicker, the booster's (its reach is
-  // 80; the whirl is drawn at 58, or it would fill the screen). Drawn behind the obstacles and the things to pick up, so
-  // it never hides one. (It was a dashed ring for the item and a clear sparkling bubble for the booster)
-  const MAG_FX_ITEM = 45, MAG_FX_BOOST = 58;
+  // runner, for the start item's magnet and (quicker, fully bright) the booster's. Drawn behind the obstacles and the
+  // things to pick up, so it never hides one. (v62) sized to the runner, not to the reach (45, 80: unchanged): its outer
+  // edge MAG_FX_K times the runner's longer side from the middle, so the hole in it (about half) sits round the body
+  const MAG_FX_K = 0.8;
   function drawField(cam) {
     const n = 'ch_' + G.char, h0 = SH(n), h = G.slide ? slideH(h0) : h0;
     const sx = PX - G.nudge + cutDX() + cutShake(), cy = GY + 1 - G.y - h * 0.5;
     const kb = G.boost > 0 ? Math.min(1, (G.t - G.boostT0) / 0.2) * Math.min(1, G.boost / 0.35) : 0;
     const ki = G.magR && !busy() ? 1 : 0;
     if (kb <= 0 && ki <= 0) return;
-    const r0 = ki ? MAG_FX_ITEM : MAG_FX_BOOST * 0.7, R = (r0 + (MAG_FX_BOOST - r0) * kb) * (1 + 0.025 * Math.sin(G.t * 5));
+    const R = Math.max(SW(n), h0) * MAG_FX_K * (ki ? 1 : 0.7 + 0.3 * kb) * (1 + 0.025 * Math.sin(G.t * 5));
     const D = R * 2 * 1.04;                                   // (the picture has a little room round the whirl)
     ctx.save(); ctx.translate(sx, cy); ctx.rotate(G.magA || 0);
     spr('fx_mag', -D / 2, -D / 2, Math.max(ki * 0.85, kb), D, D);

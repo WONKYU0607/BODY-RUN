@@ -5356,7 +5356,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
 
   // ---------------------------------------------------------------- (v47) the title: the user's picture of the body
   // behind, the name (장기런 / Body Run, by the device's language) bobbing at the top, four of the runners (picked at
-  // random) running about the bottom of it, hopping (now and then a big jump with a turn), '화면을 눌러 시작'. A tap: on
+  // random) running about the bottom of it, hopping (now and then a big jump with a turn), '화면을 터치하세요' (v58). A tap: on
   // to picking a runner
   const TITLE = { run: [], t0: 0, tt: null };
   const ttime = () => (TITLE.tt !== null ? TITLE.tt : performance.now() / 1000 - TITLE.t0);
@@ -5410,8 +5410,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     }
     { const a = 0.78 + 0.22 * Math.sin(t * 3.4), s2 = 1 + 0.04 * Math.sin(t * 3.4);
       ctx.globalAlpha = 0.45 * a; rrect(NWf / 2 - 52, 93, 104, 17, 8.5); ctx.fillStyle = '#1a0610'; ctx.fill(); ctx.globalAlpha = 1;
-      label(TR('화면을 눌러 시작', 'Tap to start'), NWf / 2, 101.5, 10.5 * s2, 'center', a, '#ffffff');
-      if (TITLE.best > 0) label(`${TR('최고 기록', 'Best')} ${TITLE.best.toLocaleString('en-US')}`, NWf / 2, 116, 7.5, 'center', 0.95, '#ffe68a'); }
+      label(TR('화면을 터치하세요', 'Touch the screen'), NWf / 2, 101.5, 10.5 * s2, 'center', a, '#ffffff'); }     // (v58: the best is not shown here any more)
   }
 
   // ---------------------------------------------------------------- loop

@@ -216,7 +216,7 @@
     document.documentElement.style.setProperty('--u', `${CSS}px`);     // one unit in CSS pixels (for the labels)
     wrap.style.transform = `translate(-50%, -50%)${rot ? ' rotate(90deg)' : ''}`;
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-    if (G.mode === 'title') renderTitle(); else if (M && G.mode && G.mode !== 'select') render();
+    if (G.mode === 'title') renderTitle(); else if (G.mode === 'lobby') renderLobby(); else if (M && G.mode && G.mode !== 'select') render();
   }
   addEventListener('resize', resize);
   // transforms: world units, or the landscape picture's own pixels (for seamless strips)
@@ -716,6 +716,7 @@
   cv.addEventListener('pointerdown', (e) => {
     SND.unlock();
     if (G.mode === 'title') { titleTap(); e.preventDefault(); return; }
+    if (G.mode === 'lobby') { const [lx, ly] = toWorld(e); lobbyTap(lx, ly); e.preventDefault(); return; }
     if (G.mode !== 'play') return;
     const [nx, ny] = toWorld(e);
     if (nx > NW - 26 && ny < 26) { pause(); return; }
@@ -745,6 +746,10 @@
   addEventListener('keydown', (e) => {
     if (e.repeat) return;
     if (G.mode === 'title' && ['Space', 'Enter'].includes(e.code)) { SND.unlock(); titleTap(); e.preventDefault(); return; }
+    if (G.mode === 'lobby' && document.getElementById('setBox').hidden) {          // (v59) the lobby: space or enter plays, escape goes back from a card
+      if (LOBBY.page !== 'main' && ['Escape', 'Backspace'].includes(e.code)) { LOBBY.page = 'main'; SND.play('ui'); e.preventDefault(); return; }
+      if (LOBBY.page === 'main' && ['Space', 'Enter'].includes(e.code)) { SND.unlock(); lobbyAct('start'); e.preventDefault(); return; }
+    }
     if (G.bb && G.mode === 'play') {                         // baseball: the arrows move the bat's ring, space (or enter) swings
       if (BB_KEY[e.code]) { bbKeys.add(BB_KEY[e.code]); e.preventDefault(); return; }
       if (['Space', 'Enter', 'KeyJ', 'KeyF'].includes(e.code)) { bbSwing(); e.preventDefault(); return; }
@@ -1041,7 +1046,6 @@
       if (p.res !== 'miss') { ctx.beginPath(); ctx.arc(p.x, p.y, RH_R * (1 + u * 0.9), 0, 6.29); ctx.lineWidth = 2.2 * (1 - u); ctx.strokeStyle = p.res === 'perfect' ? `rgba(255,236,150,${1 - u})` : `rgba(160,220,255,${1 - u})`; ctx.stroke(); }
       label(p.s, p.x, p.y - RH_R - 4 - u * 8, p.small ? 7 : 9, 'center', 1 - u * u, p.res === 'perfect' ? '#ffe68a' : p.res === 'good' ? '#a8e0ff' : '#ff8a8a');
     }
-    if (r.combo >= 2 && !r.done) label(TR(`${r.combo} 콤보`, `${r.combo} combo`), 18, NH - 14, 10, 'left', 1, '#fff3c8');
     if (r.done) {
       const a = Math.min(1, (G.t - r.doneT) / 0.25) * Math.min(1, (RH_DONE - (G.t - r.doneT)) / 0.3);
       ctx.globalAlpha = a * 0.78; rrect(NWf / 2 - 110, 54, 220, 74, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = 1;
@@ -1347,7 +1351,6 @@
     }
     ctx.restore();
     ctx.globalAlpha = 1;
-    if (o.combo >= 2 && o.st === 'play') label(TR(`${o.combo} 콤보`, `${o.combo} combo`), 18, NH - 14, 10, 'left', 1, '#fff3c8');     // (v57)
     // words: the title and the song's name until the first tile; a count of three into it
     const B = OB.B;
     if (o.st === 'play' && t < OB.T[1]) {
@@ -2202,7 +2205,6 @@
       if (left > 0) { rrect(bx, by, Math.max(3.4, bw * left / WM_T), 3.4, 1.7); ctx.fillStyle = left < 5 ? '#ff6a6a' : '#ffd66e'; ctx.fill(); }
       label(`${Math.ceil(left)}${TR('초', 's')}`, bx + bw + 4, by + 1.8, 7, 'left', al, '#ffffff');
       label(`${TR('잡은 세균', 'Germs')} ${w.caught}`, bx - 4, by + 1.8, 7, 'right', al, '#ffe0a8');
-      if (w.combo >= 2 && w.st === 'play') label(TR(`${w.combo} 콤보`, `${w.combo} combo`), 18, NH - 14, 10, 'left', al, '#fff3c8');     // (v57)
       ctx.globalAlpha = al;
     }
     if (w.st === 'intro') {
@@ -3505,6 +3507,7 @@
     p.stage++;
     const s = p.stage, y0 = 56 + Math.random() * 44, y1 = Math.max(52, Math.min(104, y0 + (Math.random() - 0.5) * 36));
     p.bird = { s, t0: G.t, x0: NWf + 24, y0, y1, vx: -arBirdV(s), fr: 2.3 + 1.4 * (s - 1) / (AR_STAGES - 1), st: 'fly', x: NWf + 24, y: y0 };
+    p.loaded = true; p.loadT = G.t;                           // (v59) one arrow a bird: it goes on the bow now
   }
   // where the bird is at the time t (it keeps to its line: the test pilot leads it by this)
   function arBirdAt(b, t) {
@@ -3512,11 +3515,12 @@
     return [x, b.y0 + (b.y1 - b.y0) * pr - 1.8 * Math.sin(ph * 6.2832)];
   }
   const arBirdR = () => { const s = M.sprites.ar_bird0; return (s ? s.rb : 8.6) + 1.2; };     // its body (round), hit by an arrow's tip
+  const arReady = (p) => p.loaded && G.t - p.loadT >= AR_COOL && p.bird && p.bird.st === 'fly';
   function arShoot() {
-    const p = G.ar; if (!p || p.st !== 'play' || G.t - p.fireT < AR_COOL) return;
+    const p = G.ar; if (!p || p.st !== 'play' || !arReady(p)) return;       // (v59: one arrow a bird)
     const [bx, by] = arBow(), dx = Math.cos(p.aim), dy = -Math.sin(p.aim);
-    p.arrows.push({ x: bx + dx * 5, y: by + dy * 5, vx: dx * AR_V, vy: dy * AR_V, t: G.t });
-    p.fireT = G.t; p.pressT = G.t; p.shots++;
+    p.arrows.push({ x: bx + dx * 5, y: by + dy * 5, vx: dx * AR_V, vy: dy * AR_V, t: G.t, s: p.bird.s });
+    p.fireT = G.t; p.pressT = G.t; p.shots++; p.loaded = false;
     SND.play('arBow');
   }
   function arHit(p, a, b) {
@@ -3546,6 +3550,11 @@
     for (const c of p.clouds) { c[0] += dt * (0.004 + 0.003 * c[2]); if (c[0] > 1.15) c[0] = -0.15; }
     const b = p.bird;
     if (b && b.st === 'fly') { [b.x, b.y] = arBirdAt(b, G.t); if (b.x < -30) { b.st = 'gone'; p.streak = 0; p.res.push(0); p.pops.push({ x: NWf / 2, y: 104, s: TR('놓쳤다', 'Missed'), t: G.t, miss: true }); SND.play('arMiss'); p.bird = null; p.next = G.t + AR_GAP; } }
+    if (b && b.st === 'fly' && !p.loaded && !p.arrows.some((a) => a.s === b.s)) {     // (v59) its one arrow gone by: missed; it flies off fast
+      b.st = 'flee'; b.fleeT = G.t; b.vx2 = b.vx * 2.6; b.vy2 = -45; p.streak = 0; p.res.push(0);
+      p.pops.push({ x: NWf / 2, y: 104, s: TR('빗나갔다', 'Missed'), t: G.t, miss: true }); SND.play('arMiss');
+    }
+    if (b && b.st === 'flee') { b.x += b.vx2 * dt; b.y += b.vy2 * dt; if (b.x < -30 || b.y < -30) { p.bird = null; p.next = G.t + AR_GAP; } }
     if (b && b.st === 'hit') {                                  // hit: it tumbles down into the river
       b.vy2 += 320 * dt; b.x += b.vx2 * dt; b.y += b.vy2 * dt; b.r += b.vr * dt;
       if (b.y > AR_RIVER + 4) { p.rings.push({ x: b.x, y: AR_RIVER + 2, t: G.t }); SND.play('arSplash'); p.bird = null; p.next = G.t + AR_GAP * 0.6; }
@@ -3553,7 +3562,7 @@
     for (const a of p.arrows) {
       const steps = 3; for (let k = 0; k < steps; k++) {        // (in small steps: quick arrows)
         a.vy += AR_GA * dt / steps; a.x += a.vx * dt / steps; a.y += a.vy * dt / steps;
-        const q = p.bird; if (q && q.st === 'fly' && !a.dead && Math.hypot(q.x - a.x, q.y - a.y) < arBirdR()) arHit(p, a, q);
+        const q = p.bird; if (q && q.st === 'fly' && a.s === q.s && !a.dead && Math.hypot(q.x - a.x, q.y - a.y) < arBirdR()) arHit(p, a, q);
       }
     }
     for (const f of p.feathers) { f.vx *= Math.exp(-2.2 * dt); f.vy = f.vy * Math.exp(-2.2 * dt) + 60 * dt; f.x += (f.vx + Math.sin((G.t - f.t) * 7 + f.r) * 10) * dt; f.y += f.vy * dt; f.r += f.vr * dt; }
@@ -3572,10 +3581,10 @@
       if (AUTO && !window.__noAuto && q && q.st === 'fly') {    // the test pilot: the angle that meets the bird soonest, turning to it at the stick's speed (leading it by the turn)
         if (p.want === null || p.want === undefined || G.t - p.wantT > 0.2) {
           p.want = null; p.wantT = G.t; let best = null; const R = arBirdR() * 0.6;
-          for (let a = AR_A0; a <= AR_A1; a += 0.01) { const w = Math.max(Math.abs(a - p.aim) / AR_AV, AR_COOL - (G.t - p.fireT), 0), [d, t] = arTry(q, a, w); if (d < R && (!best || w + t < best.c)) best = { a, c: w + t }; }
+          for (let a = AR_A0; a <= AR_A1; a += 0.01) { const w = Math.max(Math.abs(a - p.aim) / AR_AV, AR_COOL - (G.t - p.loadT), 0), [d, t] = arTry(q, a, w); if (d < R && (!best || w + t < best.c)) best = { a, c: w + t }; }
           if (best) p.want = best.a;
         }
-        if (p.want !== null && p.want !== undefined) { const d = p.want - p.aim; p.aim += Math.sign(d) * Math.min(Math.abs(d), AR_AV * dt); if (Math.abs(d) < 0.01 && G.t - p.fireT >= AR_COOL) { arShoot(); p.want = null; } }
+        if (p.want !== null && p.want !== undefined) { const d = p.want - p.aim; p.aim += Math.sign(d) * Math.min(Math.abs(d), AR_AV * dt); if (Math.abs(d) < 0.01 && arReady(p)) { arShoot(); p.want = null; } }
       }
       return;
     }
@@ -3592,7 +3601,7 @@
     label(TR('각도', 'Angle'), sx, by + R + 6.5, 6.5, 'center', al * (live ? 1 : 0.45), '#ffffff');
     label(TR('위', 'up'), sx - R - 2, by - R + 2, 5.5, 'center', al * (live ? 0.9 : 0.4), '#ffffff');
     label(TR('아래', 'down'), sx + R + 3, by - R + 2, 5.5, 'center', al * (live ? 0.9 : 0.4), '#ffffff');
-    const pr = G.t - p.pressT < 0.15, ready = G.t - p.fireT >= AR_COOL;
+    const pr = G.t - p.pressT < 0.15, ready = arReady(p);
     ctx.globalAlpha = al * (live ? 1 : 0.45);
     ctx.beginPath(); ctx.arc(bxr, by + (pr ? 1 : 0), R, 0, 6.2832);
     const g = ctx.createRadialGradient(bxr - 5, by - 6, 2, bxr, by, R); g.addColorStop(0, pr ? '#ffd0a0' : '#ffb070'); g.addColorStop(0.55, pr ? '#e85020' : '#ff6a2a'); g.addColorStop(1, '#a82a10');
@@ -3631,12 +3640,12 @@
     // back and let go, an arrow on it when it is ready
     { const nm = `bt_${G.char}_45`, s = M.sprites[nm], sc = 0.62, [bx, by] = arBow(), since = G.t - p.fireT;
       if (s) { A(1); spr(nm, AR_CX - s.foot[0] * sc - (since < 0.08 ? 1 : 0), 181 - s.foot[1] * sc, 1, s.w * sc, s.h * sc); }
-      const bw = M.sprites.ar_bow, k = 0.62, pull = p.st === 'play' ? Math.min(1, since / AR_COOL) : 0.3;
+      const bw = M.sprites.ar_bow, k = 0.62, pull = p.st === 'play' && p.loaded ? Math.min(1, (G.t - p.loadT) / AR_COOL) : 0;     // (v59: drawn back only with its one arrow on)
       ctx.save(); ctx.translate(bx, by); ctx.rotate(Math.PI / 2 - p.aim);
       const tipY = (bw.tips[0][1] - bw.grip[1]) * k, tipX = (bw.tips[1][0] - bw.grip[0]) * k, nock = tipY + 3 + 5 * pull;
       A(1); ctx.strokeStyle = '#f4f0e8'; ctx.lineWidth = 0.7; ctx.beginPath(); ctx.moveTo(-tipX, tipY); ctx.lineTo(0, nock); ctx.lineTo(tipX, tipY); ctx.stroke();
       spr('ar_bow', -bw.grip[0] * k, -bw.grip[1] * k, 1, bw.w * k, bw.h * k);
-      if (pull > 0.95 && p.st === 'play') { const s2 = M.sprites.ar_arrow, sc2 = 0.75; A(1); spr('ar_arrow', -s2.w * sc2 / 2, nock - s2.h * sc2 + 1, 1, s2.w * sc2, s2.h * sc2); }
+      if (pull > 0.95 && p.st === 'play' && p.loaded) { const s2 = M.sprites.ar_arrow, sc2 = 0.75; A(1); spr('ar_arrow', -s2.w * sc2 / 2, nock - s2.h * sc2 + 1, 1, s2.w * sc2, s2.h * sc2); }
       ctx.restore(); A(1); }
     if (p.st !== 'intro') drawARControls(p, al);
     // the points; the stage, the score, the ten (hit, missed, to come)
@@ -3649,13 +3658,12 @@
         if (r === 1) { ctx.fillStyle = '#ffd84a'; ctx.fill(); } else if (r === 0) { ctx.fillStyle = 'rgba(40,20,30,0.75)'; ctx.fill(); }
         ctx.lineWidth = 0.7; ctx.strokeStyle = i === p.res.length && p.bird ? `rgba(255,255,255,${0.6 + 0.4 * Math.sin(G.t * 8)})` : 'rgba(255,255,255,0.8)'; ctx.stroke(); }
       A(1);
-      if (p.streak > 1) label(TR(`${p.streak}연속`, `${p.streak} in a row`), 16, 76, 7, 'left', al, '#ffe14a');
     }
     if (p.st === 'intro') {
       const v = G.t - p.stT, a = Math.min(1, v / 0.3) * Math.max(0, Math.min(1, (AR_INTRO - v) / 0.3)), bw = Math.min(262, NWf - 16);
       A(a * 0.86); rrect(zx - bw / 2, 66, bw, 60, 8); ctx.fillStyle = '#10141e'; ctx.fill(); A(1);
       label(TR('새 사격! 10단계', 'Bird shoot! 10 stages'), zx, 81, 15, 'center', al * a, '#ffe0a8');
-      label(TR('왼쪽을 좌우로 밀어 활 각도, 오른쪽 버튼으로 발사!', 'Push the left side sideways to aim, right button: shoot!'), zx, 99, 7.5, 'center', al * a, '#ffffff');
+      label(TR('왼쪽을 좌우로 밀어 활 각도, 오른쪽 버튼으로 발사! (새마다 한 발)', 'Push the left side sideways to aim, right button: shoot! (one arrow a bird)'), zx, 99, 7.5, 'center', al * a, '#ffffff');
       label(TR('단계마다 빨라져요. 연속으로 맞히면 보너스!', 'Quicker every stage. Hit them in a row for a bonus!'), zx, 112, 7.5, 'center', al * a, '#ffe68a');
     }
     if (p.st === 'done') {
@@ -4735,12 +4743,45 @@
       drawYB();
       drawTW();
       drawAR();
+      drawGameCombo();
       if (G.cut || G.cutTail) drawCut();
       drawHud();
     }
     // the place's name grows in for a moment when you arrive
     const u = (G.t - G.banner);
     document.getElementById('place').classList.toggle('big', u < 1.6);
+  }
+
+  // ---------------------------------------------------------------- (v59) the run in a row of the mini-game on now
+  // ('3combo'), at the left side while it plays (the rhythm stage: at the bottom left, where its notes are not), from 1;
+  // it pops a little bigger as it goes up, and is gone when the run is broken
+  const COMBO_FX = { k: null, n: 0, t: -9 };
+  function gameCombo() {
+    const live = (g, off) => g && !off.includes(g.st);
+    if (G.rh) return G.rh.done ? null : ['rh', G.rh.combo, 18, NH - 16];
+    if (G.orb) return live(G.orb, ['done']) ? ['orb', G.orb.combo] : null;
+    if (G.bb) return live(G.bb, ['intro', 'done']) ? ['bb', G.bb.streak || 0] : null;
+    if (G.wm) return live(G.wm, ['intro', 'done']) ? ['wm', G.wm.combo] : null;
+    if (G.mem) return live(G.mem, ['intro', 'done']) ? ['mem', G.mem.run || 0] : null;
+    if (G.pk) return live(G.pk, ['intro', 'done']) ? ['pk', G.pk.run || 0] : null;
+    if (G.sl) return live(G.sl, ['intro', 'done']) ? ['sl', G.sl.run || 0] : null;
+    if (G.yb) return live(G.yb, ['intro', 'done']) ? ['yb', G.yb.res.includes('lose') ? 0 : G.yb.res.filter((r) => r === 'win').length] : null;
+    if (G.tw) return live(G.tw, ['intro', 'done']) ? ['tw', G.tw.streak] : null;
+    if (G.ar) return live(G.ar, ['intro', 'done']) ? ['ar', G.ar.streak] : null;
+    return null;
+  }
+  function drawGameCombo() {
+    const c = gameCombo(); if (!c) { COMBO_FX.k = null; COMBO_FX.n = 0; return; }
+    const [k, n, x = 16, y = 92] = c;
+    if (k === COMBO_FX.k && n > COMBO_FX.n) COMBO_FX.t = G.t;
+    COMBO_FX.k = k; COMBO_FX.n = n;
+    if (n < 1) return;
+    world();
+    const sz = 13 * (1 + 0.45 * Math.max(0, 1 - (G.t - COMBO_FX.t) / 0.22)), ns = String(n);
+    ctx.font = `900 ${sz}px system-ui, -apple-system, "Noto Sans KR", sans-serif`;
+    const w = ctx.measureText(ns).width;
+    label(ns, x, y, sz, 'left', 1, '#ffe14a');
+    label('combo', x + w + 1.2, y + 2.4, 7, 'left', 1, '#fff3c8');
   }
 
   // ---------------------------------------------------------------- labels, overlays
@@ -4762,6 +4803,7 @@
   }
   function gameOver() {
     G.mode = 'over'; show('overBox', true);
+    keepRun();                                               // (v59) for '나의 기록'
     if (busy()) { for (const g of [G.rh, G.orb, G.bb, G.wm, G.mem, G.pk, G.sl, G.yb, G.tw, G.ar]) bankGame(g); G.rh = null; G.orb = null; G.bb = null; G.wm = null; G.mem = null; G.pk = null; G.sl = null; G.yb = null; G.tw = null; G.ar = null; G.cut = null; SND.stopSong(0.3); SND.stopLoop(0.3); SND.spin(null); }
     SND.ambience(false); SND.play('over');
     // (v49) the end card: the score big, where it came from, how long and how far, the best (kept in this browser)
@@ -4776,7 +4818,7 @@
   }
   function startGame(c) {
     try { localStorage.setItem('bodyrun.char', c); } catch (e) { /* storage off */ }
-    for (const f of ['title_bg.webp', 'logo_ko.webp', 'logo_en.webp']) if (bmp[f]) release(f);
+    for (const f of ['title_bg.webp', 'logo_ko.webp', 'logo_en.webp', 'lobby_bg.webp']) if (bmp[f]) release(f);
     show('select', false); show('pauseBox', false); show('setBox', false); show('overBox', false); show('hudText', true);
     if (!CAPTURE) { SND.unlock(); SND.stopSong(0.2); SND.stopLoop(0.2); SND.spin(null); SND.play('ui'); SND.ambience(true); getReady(); }
     newRun(c); G.station = -1; step(0); last = performance.now();
@@ -4792,20 +4834,21 @@
       const cc = document.createElement('canvas'); cc.width = s.r[2]; cc.height = s.r[3];
       cc.getContext('2d').drawImage(im, s.r[0], s.r[1], s.r[2], s.r[3], 0, 0, s.r[2], s.r[3]);
       const nm = document.createElement('span'); nm.textContent = CHAR_NAMES[c] || c;
-      b.append(cc, nm); b.onclick = () => startGame(c);
+      b.append(cc, nm); b.onclick = () => { if (selectMode === 'lobby') { try { localStorage.setItem('bodyrun.char', c); } catch (e) { /* storage off */ } SND.play('ui'); goLobby(); } else startGame(c); };     // (v59: from the lobby, back to it)
       grid.append(b);
     }
   }
   document.getElementById('bResume').onclick = resume;
   document.getElementById('bRestart').onclick = () => startGame(G.char);
-  document.getElementById('bChar').onclick = () => { G.mode = 'select'; G.rh = null; G.orb = null; G.bb = null; G.cut = null; G.cutTail = null; SND.unlock(); SND.stopSong(0.2); SND.stopLoop(0.2); SND.spin(null); SND.ambience(false); show('pauseBox', false); show('overBox', false); show('hudText', false); show('select', true); };
-  document.getElementById('bSetBack').onclick = resume;
+  document.getElementById('bChar').onclick = () => { selectMode = 'start'; buildSelect(); G.mode = 'select'; G.rh = null; G.orb = null; G.bb = null; G.cut = null; G.cutTail = null; SND.unlock(); SND.stopSong(0.2); SND.stopLoop(0.2); SND.spin(null); SND.ambience(false); show('pauseBox', false); show('overBox', false); show('hudText', false); show('select', true); };
+  document.getElementById('bSetBack').onclick = () => { if (G.mode === 'lobby') { show('setBox', false); SND.play('ui'); } else resume(); };     // (v59: the lobby's settings too)
+  for (const id of ['bLobby', 'bLobby2', 'bSelBack']) document.getElementById(id).onclick = () => { if (SND.ctx && SND.ctx.state === 'suspended') SND.unlock(); SND.play('ui'); goLobby(); };     // (v59) to the lobby
   document.getElementById('bSwap').onclick = () => { SET.swap = !SET.swap; try { localStorage.setItem('bodyrun.swap', SET.swap ? '1' : '0'); } catch (e) { /* storage off */ } setLabels(); render(); };
   document.getElementById('bSfx').onclick = () => { SND.setMute('sfx', !SND.muted('sfx')); setLabels(); };
   document.getElementById('bGod').onclick = () => { SET.god = !SET.god; try { localStorage.setItem('bodyrun.god', SET.god ? '1' : '0'); } catch (e) { /* storage off */ } setLabels(); render(); };
   document.getElementById('bMus').onclick = () => { SND.setMute('music', !SND.muted('music')); setLabels(); };
   document.getElementById('bAgain').onclick = () => startGame(G.char);
-  document.getElementById('bChar2').onclick = () => { G.mode = 'select'; SND.ambience(false); show('overBox', false); show('hudText', false); show('select', true); };
+  document.getElementById('bChar2').onclick = () => { selectMode = 'start'; buildSelect(); G.mode = 'select'; SND.ambience(false); show('overBox', false); show('hudText', false); show('select', true); };
 
   // ---------------------------------------------------------------- (v47) the title: the user's picture of the body
   // behind, the name (장기런 / Body Run, by the device's language) bobbing at the top, four of the runners (picked at
@@ -4826,7 +4869,7 @@
   }
   function titleTap() {
     if (ttime() < 0.35) return;                             // (a tap that was meant for something before)
-    SND.play('ui'); G.mode = 'select'; show('select', true);
+    SND.play('ui'); goLobby();                               // (v59: on to the lobby)
   }
   function renderTitle() {
     device(); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, GW, GH);
@@ -4866,6 +4909,199 @@
       label(TR('화면을 터치하세요', 'Touch the screen'), NWf / 2, 101.5, 10.5 * s2, 'center', a, '#ffffff'); }     // (v58: the best is not shown here any more)
   }
 
+  // ---------------------------------------------------------------- (v59) the lobby: after the title, before a run
+  // The user's picture of a blue tunnel into the body behind (lobby_bg.webp), the name small at the top left with the
+  // best under it, the runner you play standing on the water path (a tap on it, or '캐릭터': pick another), the
+  // settings' gear at the top right, and down the right: '게임 시작' (big: off you go with that runner; the first time,
+  // pick one first), '나의 기록' (the best, the furthest, how many runs, the last few: kept in this browser), '캐릭터',
+  // '상점' (not open yet: a page that says so). The records and the shop come up as a card over it, with '뒤로'
+  const LOBBY = { page: 'main', t0: 0, tt: null, press: null, bob: 0 };
+  const ltime = () => (LOBBY.tt !== null ? LOBBY.tt : performance.now() / 1000 - LOBBY.t0);
+  let selectMode = 'start';                                  // picking a runner: 'start' (then run) or 'lobby' (then back)
+  const savedChar = () => { let c = null; try { c = localStorage.getItem('bodyrun.char'); } catch (e) { /* storage off */ } return c && M.chars.includes(c) ? c : null; };
+  const loadJSON = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k) || 'null'); return v === null ? d : v; } catch (e) { return d; } };
+  // the buttons (world units): [id, x, y, w, h]; down the right
+  function lobbyButtons() {
+    const w = Math.min(118, NWf * 0.3), x = NWf - 14 - w;
+    return [['start', x, 54, w, 36], ['records', x, 98, w, 22], ['char', x, 124, w, 22], ['shop', x, 150, w, 22], ['gear', NWf - 20, 4.5, 14, 14]];
+  }
+  const LB_LOOK = {
+    start: { ko: '게임 시작', en: 'Play', c: ['#fff4b0', '#ffc02a', '#e07400'], ink: '#4a1c00' },
+    records: { ko: '나의 기록', en: 'My records', c: ['#e2ccff', '#9a6ae8', '#5a2ab0'], ink: '#ffffff' },
+    char: { ko: '캐릭터', en: 'Characters', c: ['#c8fff0', '#3ac8a0', '#13806a'], ink: '#ffffff' },
+    shop: { ko: '상점', en: 'Shop', c: ['#ffd6e6', '#ff6a9a', '#c02a5a'], ink: '#ffffff' },
+  };
+  function goLobby() {
+    G.mode = 'lobby'; LOBBY.page = 'main'; LOBBY.press = null; LOBBY.t0 = performance.now() / 1000;
+    for (const k of ['rh', 'orb', 'bb', 'wm', 'mem', 'pk', 'sl', 'yb', 'tw', 'ar', 'cut', 'cutTail']) G[k] = null;
+    SND.stopSong(0.2); SND.stopLoop(0.2); SND.spin(null); SND.ambience(false);
+    for (const id of ['select', 'pauseBox', 'setBox', 'overBox', 'hudText']) show(id, false);
+    for (const f of ['lobby_bg.webp', `logo_${LANG}.webp`]) if (!bmp[f]) decode(f).catch(() => {});
+    LOBBY.best = +(loadJSON('bodyrun.best', 0)) || 0;
+  }
+  function openSelect(mode) { selectMode = mode; G.mode = 'select'; buildSelect(); show('select', true); }
+  function lobbyAct(id) {
+    SND.play('ui'); buzz(15);
+    if (id === 'start') { const c = savedChar(); if (c) startGame(c); else openSelect('start'); }
+    else if (id === 'records' || id === 'shop') LOBBY.page = id;
+    else if (id === 'char') openSelect('lobby');
+    else if (id === 'gear') { setLabels(); show('setBox', true); }
+  }
+  function lobbyTap(x, y) {
+    if (LOBBY.page !== 'main') {                              // a card: '뒤로', or a tap off it
+      const P = lobbyPanel();
+      if ((x > P.x + 6 && x < P.x + 52 && y > P.y + 5 && y < P.y + 23) || x < P.x || x > P.x + P.w || y < P.y || y > P.y + P.h) { SND.play('ui'); LOBBY.page = 'main'; }
+      return;
+    }
+    for (const [id, bx, by, bw, bh] of lobbyButtons()) if (x > bx - 3 && x < bx + bw + 3 && y > by - 3 && y < by + bh + 3) { LOBBY.press = { id, t: ltime() }; lobbyAct(id); return; }
+    const cx = lobbyCharX();                                  // the runner itself: pick another
+    if (Math.abs(x - cx) < 26 && y > 96 && y < 170) { SND.play('ui'); openSelect('lobby'); }
+  }
+  const lobbyCharX = () => Math.min(NWf * 0.36, NWf - 14 - Math.min(118, NWf * 0.3) - 60);
+  const lobbyPanel = () => { const w = Math.min(NWf - 24, 344); return { x: NWf / 2 - w / 2, y: 14, w, h: 154 }; };
+  // a glossy button: a dark rim, the colour top to bottom, a shine along the top, pressed in for a moment
+  function lobbyButton(id, x, y, w, h, t) {
+    const L = LB_LOOK[id], pr = LOBBY.press && LOBBY.press.id === id && t - LOBBY.press.t < 0.14 ? 1.6 : 0, r = Math.min(10, h / 2.6);
+    rrect(x, y + 2.4, w, h, r); ctx.fillStyle = 'rgba(16,6,14,0.55)'; ctx.fill();          // its shadow
+    y += pr;
+    rrect(x - 1.3, y - 1.3, w + 2.6, h + 2.6, r + 1.3); ctx.fillStyle = '#1a0a14'; ctx.fill();
+    const g = ctx.createLinearGradient(0, y, 0, y + h); g.addColorStop(0, L.c[0]); g.addColorStop(0.45, L.c[1]); g.addColorStop(1, L.c[2]);
+    rrect(x, y, w, h, r); ctx.fillStyle = g; ctx.fill();
+    ctx.globalAlpha = 0.55; rrect(x + 3, y + 1.6, w - 6, h * 0.36, r * 0.7); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.globalAlpha = 1;
+    // its mark at the left, its name
+    const ix = x + (id === 'start' ? 17 : 13), iy = y + h / 2, s = id === 'start' ? 1.25 : 0.85;
+    lobbyIcon(id, ix, iy, s);
+    const big = id === 'start', name = TR(L.ko, L.en), room = w - (big ? 40 : 32);      // (the name fits right of the mark)
+    ctx.font = `900 ${big ? 13 : 8.5}px system-ui, -apple-system, "Noto Sans KR", sans-serif`;
+    const fs = (big ? 13 : 8.5) * Math.min(1, room / ctx.measureText(name).width);
+    if (big) label(name, x + 32 + (w - 36) / 2, iy + 0.4, fs, 'center', 1, '#ffffff');
+    else label(name, x + 26, iy + 0.3, fs, 'left', 1, '#ffffff');
+  }
+  // the marks: a play triangle, a trophy, a face, a shopping bag (drawn: no emoji)
+  function lobbyIcon(id, x, y, s) {
+    ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+    ctx.lineJoin = 'round'; ctx.lineWidth = 1.6; ctx.strokeStyle = '#1a0a14'; ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    if (id === 'start') { ctx.moveTo(-3.6, -5.4); ctx.lineTo(5.6, 0); ctx.lineTo(-3.6, 5.4); ctx.closePath(); }
+    else if (id === 'records') { ctx.moveTo(-4.4, -4.6); ctx.lineTo(4.4, -4.6); ctx.lineTo(3.6, -0.4); ctx.quadraticCurveTo(2.6, 2.2, 0.9, 2.4); ctx.lineTo(0.9, 3.6); ctx.lineTo(2.8, 3.6); ctx.lineTo(2.8, 5); ctx.lineTo(-2.8, 5); ctx.lineTo(-2.8, 3.6); ctx.lineTo(-0.9, 3.6); ctx.lineTo(-0.9, 2.4); ctx.quadraticCurveTo(-2.6, 2.2, -3.6, -0.4); ctx.closePath(); }
+    else if (id === 'char') { ctx.arc(0, 0, 4.9, 0, 6.2832); }
+    else if (id === 'shop') { ctx.moveTo(-4.6, -1.8); ctx.lineTo(4.6, -1.8); ctx.lineTo(3.8, 5); ctx.lineTo(-3.8, 5); ctx.closePath(); }
+    ctx.stroke(); ctx.fill();
+    if (id === 'char') { ctx.fillStyle = '#1a0a14'; for (const sx of [-1.7, 1.7]) { ctx.beginPath(); ctx.arc(sx, -0.8, 0.85, 0, 6.2832); ctx.fill(); } ctx.beginPath(); ctx.arc(0, 1.3, 1.6, 0.15 * Math.PI, 0.85 * Math.PI); ctx.lineWidth = 0.9; ctx.stroke(); }
+    if (id === 'shop') { ctx.beginPath(); ctx.arc(0, -1.8, 2.3, Math.PI, 0); ctx.lineWidth = 1.2; ctx.stroke(); }
+    if (id === 'records') { ctx.fillStyle = '#ffd23a'; ctx.beginPath(); ctx.arc(0, -1.5, 1.3, 0, 6.2832); ctx.fill(); }
+    ctx.restore();
+  }
+  function renderLobby() {
+    device(); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, GW, GH);
+    world();
+    const t = ltime(), bg = M.sprites.lobby_bg;
+    // the picture, filling the screen (breathing in and out a little)
+    if (bg && bmp[bg.f]) {
+      const z = 1.03 + 0.02 * Math.sin(t * 0.3), sc = Math.max(NWf / bg.w, NH / bg.h) * z, w = bg.w * sc, h = bg.h * sc;
+      spr('lobby_bg', (NWf - w) / 2, (NH - h) / 2 + Math.sin(t * 0.23) * 1.5, 1, w, h);
+    } else { const g = ctx.createLinearGradient(0, 0, 0, NH); g.addColorStop(0, '#1a3a8a'); g.addColorStop(1, '#0a1640'); ctx.fillStyle = g; ctx.fillRect(0, 0, NWf, NH); }
+    // a shade down the right (the buttons) and along the top left (the name, the best)
+    { const g = ctx.createLinearGradient(NWf * 0.55, 0, NWf, 0); g.addColorStop(0, 'rgba(10,6,30,0)'); g.addColorStop(1, 'rgba(10,6,30,0.42)'); ctx.fillStyle = g; ctx.fillRect(0, 0, NWf, NH);
+      const r = ctx.createRadialGradient(40, 18, 4, 40, 18, 120); r.addColorStop(0, 'rgba(10,6,30,0.38)'); r.addColorStop(1, 'rgba(10,6,30,0)'); ctx.fillStyle = r; ctx.fillRect(0, 0, NWf, NH); }
+    // the name, small, at the top left; the best under it
+    const lg = M.sprites['logo_' + LANG];
+    let ly = 46;
+    if (lg && bmp[lg.f]) { const W = Math.min(104, NWf * 0.27), H = W * lg.h / lg.w; spr('logo_' + LANG, 10, 6 + Math.sin(t * 1.6) * 0.8, 1, W, H); ly = 8 + H + 4; }
+    if (LOBBY.best > 0) {
+      const s = `${TR('최고 기록', 'Best')} ${LOBBY.best.toLocaleString('en-US')}`;
+      ctx.font = '900 7px system-ui, -apple-system, "Noto Sans KR", sans-serif'; const w = ctx.measureText(s).width + 12;
+      ctx.globalAlpha = 0.8; rrect(12, ly, w, 12, 6); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = 1;
+      label(s, 18, ly + 6.2, 7, 'left', 1, '#ffe68a');
+    }
+    // the runner: standing on the path, breathing, a hop now and then; its shadow; its name under it
+    { const c = savedChar() || 'tardigrade', sp = M.sprites['ch_' + c];
+      if (sp) {
+        const x = lobbyCharX(), feet = 160, k = 2.0, ph = t % 3.2, hop = ph < 0.42 ? Math.sin(Math.PI * ph / 0.42) * 9 : 0;
+        const br = Math.sin(t * 3.1), w = sp.w * k * (1 - 0.02 * br), h = sp.h * k * (1 + 0.03 * br);
+        ctx.globalAlpha = 0.35 * (1 - hop / 20); ctx.fillStyle = '#000'; ctx.beginPath(); ctx.ellipse(x, feet + 0.5, w * 0.36, 3.2, 0, 0, 6.2832); ctx.fill(); ctx.globalAlpha = 1;
+        spr('ch_' + c, x - w / 2, feet - hop - h, 1, w, h);
+        const nm = CHAR_NAMES[c] || c; ctx.font = '900 7.5px system-ui, -apple-system, "Noto Sans KR", sans-serif'; const nw = ctx.measureText(nm).width + 14;
+        ctx.globalAlpha = 0.72; rrect(x - nw / 2, feet + 4, nw, 12, 6); ctx.fillStyle = '#1a0a14'; ctx.fill(); ctx.globalAlpha = 1;
+        label(nm, x, feet + 10.2, 7.5, 'center', 1, '#ffffff');
+      } }
+    // the buttons; the gear
+    for (const [id, x, y, w, h] of lobbyButtons()) {
+      if (id === 'gear') {
+        rrect(x, y, w, h, 3); ctx.fillStyle = '#1a0a14'; ctx.fill(); rrect(x + 1, y + 1, w - 2, h - 2, 2.3); ctx.fillStyle = '#f4e8ee'; ctx.fill();
+        const gx = x + 7, gy = y + 7; ctx.fillStyle = '#1a0a14'; ctx.beginPath();
+        for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4, c = Math.cos(a), sn = Math.sin(a);
+          const P = [[-1.15, -4.7], [1.15, -4.7], [1.15, -2.6], [-1.15, -2.6]].map(([px, py]) => [gx + px * c - py * sn, gy + px * sn + py * c]);
+          ctx.moveTo(P[0][0], P[0][1]); for (const q of P.slice(1)) ctx.lineTo(q[0], q[1]); ctx.closePath(); }
+        ctx.fill(); ctx.beginPath(); ctx.arc(gx, gy, 3.5, 0, 6.29); ctx.fill(); ctx.beginPath(); ctx.arc(gx, gy, 1.35, 0, 6.29); ctx.fillStyle = '#f4e8ee'; ctx.fill();
+        continue;
+      }
+      if (id === 'start') {                                    // a glow round the big one, breathing
+        const a = 0.35 + 0.25 * Math.sin(t * 3); ctx.globalAlpha = a; rrect(x - 4, y - 4, w + 8, h + 8, 14); ctx.lineWidth = 2.4; ctx.strokeStyle = '#fff2a0'; ctx.stroke(); ctx.globalAlpha = 1;
+      }
+      lobbyButton(id, x, y, w, h, t);
+    }
+    if (LOBBY.page === 'records') drawRecords();
+    else if (LOBBY.page === 'shop') drawShop();
+  }
+  // a card over the lobby: dimmed behind, the card, its title, '뒤로' at its top left
+  function lobbyCard(title) {
+    ctx.globalAlpha = 0.55; ctx.fillStyle = '#05030c'; ctx.fillRect(0, 0, NWf, NH); ctx.globalAlpha = 1;
+    const P = lobbyPanel();
+    rrect(P.x - 1.5, P.y - 1.5, P.w + 3, P.h + 3, 10); ctx.fillStyle = '#1a0a14'; ctx.fill();
+    const g = ctx.createLinearGradient(0, P.y, 0, P.y + P.h); g.addColorStop(0, '#2c2050'); g.addColorStop(1, '#160e2c'); rrect(P.x, P.y, P.w, P.h, 9); ctx.fillStyle = g; ctx.fill();
+    ctx.globalAlpha = 0.18; rrect(P.x + 3, P.y + 2, P.w - 6, 22, 7); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.globalAlpha = 1;
+    label(title, P.x + P.w / 2, P.y + 14, 11, 'center', 1, '#ffe0a8');
+    // '뒤로': a pill with a chevron
+    rrect(P.x + 7, P.y + 6, 44, 16, 8); ctx.fillStyle = '#1a0a14'; ctx.fill(); rrect(P.x + 8, P.y + 7, 42, 14, 7); ctx.fillStyle = '#4a3a78'; ctx.fill();
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.lineJoin = 'round'; ctx.beginPath(); ctx.moveTo(P.x + 17, P.y + 10.5); ctx.lineTo(P.x + 13.5, P.y + 14); ctx.lineTo(P.x + 17, P.y + 17.5); ctx.stroke();
+    label(TR('뒤로', 'Back'), P.x + 21, P.y + 14.2, 7, 'left', 1, '#ffffff');
+    return P;
+  }
+  const placeName = (i) => { const st = COURSE[mod(i, COURSE.length)]; return TR(st[1], st[2]); };
+  function drawRecords() {
+    const P = lobbyCard(TR('나의 기록', 'My records')), S = loadJSON('bodyrun.stats', {}), R = loadJSON('bodyrun.runs', []), f = (n) => (n || 0).toLocaleString('en-US');
+    // the bests, down the left
+    const lx = P.x + 16, cw = Math.min(118, P.w * 0.36);
+    const rows = [[TR('최고 점수', 'Best score'), f(LOBBY.best), '#ffe14a'], [TR('최고 거리', 'Furthest run'), `${f(S.bestD)}m`, '#bfe8ff'],
+      [TR('플레이', 'Runs'), TR(`${f(S.plays)}판`, f(S.plays)), '#ffffff'], [TR('가장 멀리 간 곳', 'Furthest place'), S.far !== undefined ? (S.far >= COURSE.length ? TR(`${Math.floor(S.far / COURSE.length) + 1}바퀴 `, `Lap ${Math.floor(S.far / COURSE.length) + 1} · `) : '') + placeName(S.far) : '-', '#ffd0e8']];
+    rows.forEach(([k, v, c], i) => { const y = P.y + 36 + i * 29;
+      ctx.globalAlpha = 0.35; rrect(lx - 6, y - 4, cw, 25, 6); ctx.fillStyle = '#000000'; ctx.fill(); ctx.globalAlpha = 1;
+      label(k, lx, y + 3, 6.2, 'left', 1, '#c8b8e8'); label(v, lx, y + 13.5, i === 0 ? 11 : 9, 'left', 1, c); });
+    // the last runs, at the right
+    const rx = lx + cw + 8, rw = P.x + P.w - 12 - rx;
+    label(TR('최근 기록', 'Recent runs'), rx, P.y + 37, 7.5, 'left', 1, '#ffe0a8');
+    if (!R.length) label(TR('아직 기록이 없어요. 한 판 달려 봐요!', 'No runs yet. Go for a run!'), rx + rw / 2, P.y + 90, 7.5, 'center', 1, '#d8cce8');
+    R.slice(0, 6).forEach((r, i) => { const y = P.y + 48 + i * 17.5, d = new Date(r.at || 0);
+      ctx.globalAlpha = i % 2 ? 0.18 : 0.32; rrect(rx - 3, y - 1, rw + 6, 15.5, 5); ctx.fillStyle = '#000000'; ctx.fill(); ctx.globalAlpha = 1;
+      label(`${f(r.s)}${TR('점', '')}`, rx + 2, y + 6.8, 8, 'left', 1, '#ffe68a');
+      const ds = `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      ctx.font = '900 6px system-ui, -apple-system, "Noto Sans KR", sans-serif'; const dw = ctx.measureText(ds).width;
+      // the distance and the place, made smaller (then cut short) to fit before the date
+      let mid = `${f(r.d)}m · ${r.p !== undefined ? placeName(r.p) : ''}`, ms = 6.4; const room = rw * 0.64 - dw - 5;
+      ctx.font = `900 ${ms}px system-ui, -apple-system, "Noto Sans KR", sans-serif`;
+      if (ctx.measureText(mid).width > room) { ms = Math.max(5, ms * room / ctx.measureText(mid).width); ctx.font = `900 ${ms}px system-ui, -apple-system, "Noto Sans KR", sans-serif`; while (mid.length > 4 && ctx.measureText(mid).width > room) mid = mid.slice(0, -2) + '…'; }
+      label(mid, rx + rw * 0.36, y + 6.8, ms, 'left', 1, '#ffffff');
+      label(ds, rx + rw, y + 6.8, 6, 'right', 1, '#b8a8d8'); });
+  }
+  function drawShop() {
+    const P = lobbyCard(TR('상점', 'Shop')), cx = P.x + P.w / 2;
+    lobbyIcon('shop', cx, P.y + 66, 4.2);
+    label(TR('준비 중이에요', 'Coming soon'), cx, P.y + 112, 12, 'center', 1, '#ffffff');
+  }
+  // a run's end, kept (real runs only): the last 20, and the bests
+  function keepRun() {
+    if (CAPTURE || AUTO) return;
+    try {
+      const runs = loadJSON('bodyrun.runs', []), S = loadJSON('bodyrun.stats', {}), lap = stationAt(G.x).lap, p = Math.max(0, G.station);
+      runs.unshift({ s: G.score, d: G.distM, t: Math.round(G.t), p, lap, c: G.char, at: Date.now() });
+      localStorage.setItem('bodyrun.runs', JSON.stringify(runs.slice(0, 20)));
+      S.plays = (S.plays || 0) + 1; S.bestD = Math.max(S.bestD || 0, G.distM); S.time = (S.time || 0) + Math.round(G.t);
+      const far = lap * COURSE.length + p; if (S.far === undefined || far > S.far) S.far = far;
+      localStorage.setItem('bodyrun.stats', JSON.stringify(S));
+    } catch (e) { /* storage off */ }
+  }
+
   // ---------------------------------------------------------------- loop
   let last = 0, acc = 0;
   const DT = 1 / 120;
@@ -4875,6 +5111,7 @@
     if (G.mode === 'play') { acc += el; while (acc >= DT) { step(DT); acc -= DT; } }
     if (G.mode === 'play' || G.mode === 'pause' || G.mode === 'over') render();
     else if (G.mode === 'title') renderTitle();
+    else if (G.mode === 'lobby') renderLobby();
   }
 
   // ---------------------------------------------------------------- start
@@ -4883,7 +5120,7 @@
     const at = qs.has('at') ? COURSE.findIndex((s) => s[0] === qs.get('at')) : -1;
     try {
       const first = [decode('common.webp')];
-      if (!CAPTURE || qs.has('title')) first.push(decode('title_bg.webp'), decode(`logo_${LANG}.webp`));     // (v47) the title's
+      if (!CAPTURE || qs.has('title') || qs.has('lobby')) first.push(decode('title_bg.webp'), decode(`logo_${LANG}.webp`), decode('lobby_bg.webp'));     // (v47) the title's (v59: and the lobby's)
       for (let k = -1; k <= 2; k++) for (const f of themeFiles(COURSE[mod(Math.max(at, 0) + k, COURSE.length)][3])) first.push(decode(f));
       if (PRELOAD) for (const t of Object.keys(M.themes)) for (const f of themeFiles(t)) first.push(decode(f));
       await Promise.all(first);
@@ -4897,6 +5134,7 @@
     document.getElementById('loading').hidden = true;
     const auto = qs.get('char');
     if (qs.has('title')) startTitle();
+    else if (qs.has('lobby')) goLobby();
     else if (CAPTURE || AUTO || auto) startGame(auto && M.chars.includes(auto) ? auto : 'tardigrade');
     else startTitle();
     if (at >= 0) { G.x = STARTS[at] + 10; G.genX = G.x + 300; G.station = -1; step(0); }
@@ -4904,7 +5142,7 @@
     // test hooks
     window.__ready = true;
     window.__run = (sec) => { const n = Math.round(sec / DT); for (let i = 0; i < n; i++) step(DT); render(); return window.__state(); };
-    window.__settle = async () => { while (Object.keys(pending).length) await Promise.all(Object.values(pending)).catch(() => {}); render(); return Object.keys(bmp).length; };
+    window.__settle = async () => { while (Object.keys(pending).length) await Promise.all(Object.values(pending)).catch(() => {}); if (G.mode === 'lobby') renderLobby(); else if (G.mode === 'title') renderTitle(); else render(); return Object.keys(bmp).length; };
     window.__state = () => ({ mode: G.mode, t: +G.t.toFixed(2), x: Math.round(G.x), v: +G.v.toFixed(1), hp: +G.hp.toFixed(1), score: G.score, eaten: G.eaten, hits: G.hits,
       station: COURSE[Math.max(0, G.station)][0], seg: G.station, theme: G.theme, lid: +lidAmount().toFixed(2), lastHit: G.lastHit, rot, lap: stationAt(G.x).lap, y: +G.y.toFixed(1), slide: G.slide, obs: G.obs.length, items: G.items.length,
       NW, RS: +RS.toFixed(3), GW, GH, rhSong: G.rh ? G.rh.song.id : null, orbSong: G.orb ? OB.song.id : null, rotation: { ...ROT }, o2n: G.o2n, boost: +G.boost.toFixed(2), boostHeld: +G.boostHeld.toFixed(2), boosts: G.boosts, decoded: Object.keys(bmp).length, atp: G.atp || 0, orbits: G.orbits || 0, orb: G.orb ? G.orb.st : null, bb: G.bb ? G.bb.st : null, wm: G.wm ? G.wm.st : null, mem: G.mem ? G.mem.st : null, pk: G.pk ? G.pk.st : null, sl: G.sl ? G.sl.st : null, yb: G.yb ? G.yb.st : null, tw: G.tw ? G.tw.st : null, ar: G.ar ? G.ar.st : null, games: G.games || 0, huge: G.obs.filter((o) => o.kind === 'huge').length });
@@ -4913,6 +5151,8 @@
     window.__die = () => { G.hp = 0; };
     window.__title = (tt) => { TITLE.tt = tt; renderTitle(); return { mode: G.mode, run: TITLE.run.map((r) => r.c) }; };
     window.__titleTap = () => titleTap();
+    window.__lobby = (tt, page) => { LOBBY.tt = tt; if (page) LOBBY.page = page; renderLobby(); return { mode: G.mode, page: LOBBY.page, buttons: lobbyButtons(), charX: lobbyCharX(), panel: lobbyPanel(), saved: savedChar() }; };
+    window.__lobbyTap = (x, y) => { lobbyTap(x, y); return { mode: G.mode, page: LOBBY.page, select: !document.getElementById('select').hidden, set: !document.getElementById('setBox').hidden }; };
     window.__mem = () => { let px = 0; const files = {}; for (const [f, b] of Object.entries(bmp)) { const n = b.width * b.height; px += n; files[f] = +(n * 4 / 1e6).toFixed(1); } return { MB: +(px * 4 / 1e6).toFixed(1), files }; };
     window.__prof = PROF;
     window.__orb = () => { const o = G.orb; if (!o) return null; const t = otime();
@@ -4933,7 +5173,7 @@
     window.__pk = () => { const p = G.pk; if (!p) return null; return { st: p.st, k: p.k, res: p.res.slice(), gain: p.gain, shot: p.shot ? { ...p.shot } : null, aim: p.aim.slice(), power: p.power, kind: p.kind, needle: pkNeedle(p), pad: p.pad && { ...p.pad } }; };
     window.__pkForce = (gx, gh, power) => { const p = G.pk; if (!p || p.st !== 'aim') return; p.aim = [gx, gh]; pkShoot(); p.power = power; p.kind = pkZone(power); };
     window.__tw = () => { const p = G.tw; if (!p) return null; return { st: p.st, n: p.blocks.length, xs: p.blocks.map((b) => +b.x.toFixed(1)), misses: p.misses, perf: p.perf, best: p.best, gain: p.gain, why: p.why, swing: p.cur ? +twSwing(p).toFixed(1) : null, top: +twTopX(p).toFixed(1), falling: p.fall.length, modes: p.fall.map((f) => f.mode), cam: +p.camS.toFixed(1), k: +p.kS.toFixed(3) }; };
-    window.__ar = () => { const p = G.ar; if (!p) return null; const b = p.bird; return { st: p.st, stage: p.stage, res: [...p.res], hits: p.hits, shots: p.shots, streak: p.streak, best: p.best, gain: p.gain, aim: +p.aim.toFixed(3), bird: b ? { st: b.st, s: b.s, x: +b.x.toFixed(1), y: +b.y.toFixed(1), vx: b.vx } : null, arrows: p.arrows.length, bow: arBow(), pad: { ...AR_PAD, bx: NWf - AR_PAD.m }, ready: G.t - p.fireT >= AR_COOL }; };
+    window.__ar = () => { const p = G.ar; if (!p) return null; const b = p.bird; return { st: p.st, stage: p.stage, res: [...p.res], hits: p.hits, shots: p.shots, streak: p.streak, best: p.best, gain: p.gain, aim: +p.aim.toFixed(3), bird: b ? { st: b.st, s: b.s, x: +b.x.toFixed(1), y: +b.y.toFixed(1), vx: b.vx } : null, arrows: p.arrows.length, bow: arBow(), pad: { ...AR_PAD, bx: NWf - AR_PAD.m }, ready: arReady(p), loaded: !!p.loaded }; };
     window.__yb = () => { const p = G.yb; if (!p) return null; return { st: p.st, k: p.k, res: p.res.slice(), gain: p.gain, pot: p.pot, gold: p.gold, slot: p.slot.slice(), goldSlot: p.slot[p.gold], pick: p.pick, ok: p.ok, moved: p.moved, mv: !!p.mv, lift: p.lift.map((v) => +v.toFixed(1)), cur: p.cur, ask: p.ask, x: [0, 1, 2].map(ybX), foot: YB_FOOT, btn: { ...YB_BTN, cx: NWf / 2 } }; };
     window.__sl = () => { const s = G.sl; if (!s) return null; return { st: s.st, k: s.k, res: s.res.slice(), gain: s.gain, want: s.want && s.want.slice(), reach: !!s.reach, reels: s.reels.map((r) => ({ pos: +r.pos.toFixed(2), spin: r.spin, stop: !!r.stop })), mx: slMX(), btns: SLF.btns.map(([x, y]) => [slMX() + x, slMY() + y]) }; };
     window.__pkKick = (gx, gh) => pkKick(gx, gh, 0.5, 'good');

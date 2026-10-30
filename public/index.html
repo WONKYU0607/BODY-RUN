@@ -5472,7 +5472,19 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     show('select', false); show('pauseBox', false); show('setBox', false); show('overBox', false); show('hudText', true);
     if (!CAPTURE) { SND.unlock(); SND.stopSong(0.2); SND.stopLoop(0.2); SND.spin(null); SND.play('ui'); SND.ambience(true); getReady(); }
     newRun(c, opts); G.station = -1; step(0); last = performance.now();
-    try { if (!CAPTURE && document.documentElement.requestFullscreen && matchMedia('(pointer: coarse)').matches) document.documentElement.requestFullscreen().then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {})).catch(() => {}); } catch (e) { /* not allowed here */ }
+    // (v66) lock the side the player already sees the picture on: a bare 'landscape' let the phone pick a side, and with
+    // auto-rotate off it took the other one (the game turned 180 degrees as it started)
+    try { if (!CAPTURE && document.documentElement.requestFullscreen && matchMedia('(pointer: coarse)').matches) { const want = landSide(); document.documentElement.requestFullscreen().then(() => { if (want) screen.orientation.lock(want).catch(() => {}); }).catch(() => {}); } } catch (e) { /* not allowed here */ }
+  }
+  // the landscape that shows the picture the way it is on the screen now: already landscape → this one; held upright
+  // with the picture turned a quarter clockwise (rot) → the one whose angle is 90 more (Android's angle is the drawn
+  // picture's clockwise turn). The names for an angle follow the screen's natural shape (phones tall, some tablets wide)
+  function landSide() {
+    const so = screen.orientation; if (!so || !so.lock) return null;
+    const ang = ((so.angle || 0) % 360 + 360) % 360, type = so.type || '';
+    if (!rot) return /^landscape-/.test(type) ? type : null;
+    const tall = /^portrait/.test(type) === (ang % 180 === 0), a = (ang + 90) % 360;
+    return tall ? (a === 90 ? 'landscape-primary' : a === 270 ? 'landscape-secondary' : null) : (a === 0 ? 'landscape-primary' : a === 180 ? 'landscape-secondary' : null);
   }
   function buildSelect() {
     const grid = document.getElementById('grid'); grid.innerHTML = '';

@@ -1258,7 +1258,10 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   }
   // the settings: the jump and slide buttons' sides swapped (kept in this browser); the sound switches are in sound.js
   const SET = { swap: false, god: false };
-  try { SET.swap = localStorage.getItem('bodyrun.swap') === '1'; SET.god = localStorage.getItem('bodyrun.god') === '1'; } catch (e) { /* storage off */ }
+  // (v65) the sides by default now: slide on the left, jump on the right (SET.swap true; kept under a new key, so the
+  // old one's choice, made for the old default, does not undo it)
+  SET.swap = true;
+  try { const sw = localStorage.getItem('bodyrun.swap2'); if (sw !== null) SET.swap = sw === '1'; SET.god = localStorage.getItem('bodyrun.god') === '1'; } catch (e) { /* storage off */ }
   // debugging too: a mini-game's mark on the progress bar, tapped, takes you to the start of its place (ahead in this
   // lap, or in the next) and it begins; a mini-game on ends first
   function barMarkAt(nx, ny) {
@@ -3672,20 +3675,22 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   // '야바위': the user's mouse deals at a velvet-skirted table under a string of lights: three domed manhole lids
   // (yabawi.py), the golden poop under one. It lifts that lid to show you, then shuffles: two lids swapping (one passing
   // in front, the other behind) and, from the third round, all three going round at once; faster every round. Tap the
-  // lid it is under (or the arrows and space, or 1-3). Right: the pot (500, doubled each round) and a choice: one more
-  // round for double, or take it. Wrong: the pot is gone and it ends. Five rounds at most (8,000; v57: 14,400 with the combo). No cheating: it is
-  // where the moves you saw put it.
+  // lid it is under (or the arrows and space, or 1-3). (v65) Always all five rounds, right or wrong: a round right
+  // scores 500, doubled for each right in a row before it (500, 1,000, 2,000, 4,000, 8,000: 15,500 for all five); a
+  // round wrong scores nothing and the doubling starts again from 500. (It was double-or-take, a wrong one ending it.)
+  // No cheating: it is where the moves you saw put it.
   const YB_N = 5, YB_INTRO = 2.8, YB_LIFT = 34, YB_BASE = 500, YB_WAIT = 9, YB_ASKWAIT = 8, YB_END = 2.8, YB_REVEAL = 1.7;
   const YB_MOVES = [[5, 0.36], [7, 0.27], [9, 0.2], [11, 0.15], [13, 0.115]];     // each round: how many moves, how long each (s)
   const YB_SP = 64, YB_FOOT = 124, YB_TOP = 102;            // the lids' spacing; where their feet stand; the table's top edge
   const YB_BTN = { y: 163, w: 118, h: 25, dx: 64 };          // the double-or-take buttons (on the skirt)
   const ybX = (slot) => NWf / 2 + (slot - 1) * YB_SP;
-  const ybPot = (k) => comboPts(YB_BASE * Math.pow(2, k), k + 1);     // the pot after the round k (0 ..) is won (v57: and +20% for each won before it in a row)
+  const ybPot = (k) => comboPts(YB_BASE * Math.pow(2, k), k + 1);     // (the old pot: no longer used)
+  const ybPts = (streak) => YB_BASE * Math.pow(2, streak);   // (v65) a round right, after this many right in a row
   function startYB() {
     holdBoost();
     G.obs = G.obs.filter((o) => o.x + o.w < G.x - 12);
     G.items = G.items.filter((i) => i.x < G.x - 12 || i.taken);
-    G.yb = { st: 'intro', stT: G.t, inT: G.t, k: 0, res: [], gain: 0, pot: 0, slot: [0, 1, 2], gold: Math.floor(Math.random() * 3),
+    G.yb = { st: 'intro', stT: G.t, inT: G.t, k: 0, res: [], gain: 0, pot: 0, streak: 0, lastPts: 0, lostRun: 0, slot: [0, 1, 2], gold: Math.floor(Math.random() * 3),
       lift: [0, 0, 0], liftTo: [0, 0, 0], mv: null, moved: 0, cur: 1, ask: 0, pick: -1, ok: null, coins: [], say: null, lean: 0, flash: -9, pressT: -9 };
     G.slideHeld = false; held.clear(); pressed.jump = false;
   }
@@ -3788,13 +3793,13 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     if (p.st === 'reveal') {
       if (p.ok === null && u >= 0.38) {
         p.ok = p.slot[p.gold] === p.pick; p.flash = G.t;
-        if (p.ok) { p.pot = ybPot(p.k); p.res.push('win'); SND.play('ybWin'); buzz([30, 30, 60]); ybCoins(p, ybX(p.pick), YB_FOOT - 14, 10 + p.k * 4); ybSay(p, '헉! 맞혔네...', 'What?! You got it...'); }
-        else { p.res.push('lose'); SND.play('ybLose'); buzz(60); ybSay(p, '히히, 꽝~', 'Hee hee, nope~'); }
+        if (p.ok) { p.lastPts = ybPts(p.streak); p.gain += p.lastPts; p.streak++; p.pot = p.gain; p.res.push('win'); SND.play('ybWin'); buzz([30, 30, 60]); ybCoins(p, ybX(p.pick), YB_FOOT - 14, 10 + p.k * 4); ybSay(p, '헉! 맞혔네...', 'What?! You got it...'); }
+        else { p.lostRun = p.streak; p.streak = 0; p.res.push('lose'); SND.play('ybLose'); buzz(60); ybSay(p, '히히, 꽝~', 'Hee hee, nope~'); }
       }
       if (p.ok === false && u >= 0.8 && p.liftTo[p.gold] === 0) p.liftTo[p.gold] = YB_LIFT;      // where it was
       if (u >= YB_REVEAL) {
-        if (p.ok && p.k < YB_N - 1) { p.st = 'ask'; p.stT = G.t; p.ask = 0; ybSay(p, '한 판 더?', 'Double or nothing?'); }
-        else { p.gain = p.ok ? p.pot : 0; if (!p.ok) p.pot = 0; p.st = 'done'; p.stT = G.t; if (p.ok) { SND.play('slJackpot'); ybCoins(p, NWf / 2, YB_FOOT - 30, 40); } }
+        if (p.k < YB_N - 1) { p.k++; ybRound(p); }               // (v65) on to the next round, right or wrong
+        else { p.st = 'done'; p.stT = G.t; if (p.gain) { SND.play('slJackpot'); ybCoins(p, NWf / 2, YB_FOOT - 30, 40); } }
       }
       return;
     }
@@ -3865,11 +3870,11 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
         const [x, , , fy] = pos[p.gold];
         for (let k = 0; k < 6; k++) { const a = k * 1.047 + G.t * 2, r = 20 + 4 * Math.sin(G.t * 9 + k), sx = x + Math.cos(a) * r, sy = fy - 12 + Math.sin(a) * r * 0.6, z = 1.6 + 0.9 * Math.sin(G.t * 12 + k * 2);
           A(1); ctx.beginPath(); ctx.moveTo(sx, sy - z * 2); ctx.lineTo(sx + z * 0.5, sy - z * 0.5); ctx.lineTo(sx + z * 2, sy); ctx.lineTo(sx + z * 0.5, sy + z * 0.5); ctx.lineTo(sx, sy + z * 2); ctx.lineTo(sx - z * 0.5, sy + z * 0.5); ctx.lineTo(sx - z * 2, sy); ctx.lineTo(sx - z * 0.5, sy - z * 0.5); ctx.closePath(); ctx.fillStyle = '#fff6c0'; ctx.fill(); }
-        label(p.k ? TR(`${p.k + 1}연속 맞혔다!`, `${p.k + 1} in a row!`) : TR('맞혔다!', 'Got it!'), zx, 150, 17 * sc, 'center', al, '#ffe14a');
-        label(TR(`판돈 ${PT(p.pot)}`, `Pot ${PT(p.pot)}`), zx, 167, 9, 'center', al, '#ffffff');
+        label(p.streak > 1 ? TR(`${p.streak}연속 맞혔다!`, `${p.streak} in a row!`) : TR('맞혔다!', 'Got it!'), zx, 150, 17 * sc, 'center', al, '#ffe14a');
+        label(TR(`+${PT(p.lastPts)}  ·  합계 ${PT(p.gain)}`, `+${PT(p.lastPts)}  ·  ${PT(p.gain)} in all`), zx, 167, 9, 'center', al, '#ffffff');
       } else {
         label(TR('꽝!', 'Nope!'), zx, 150, 17 * sc, 'center', al, '#ff9aa8');
-        label(p.k ? TR(`판돈 ${PT(p.pot || ybPot(p.k - 1))} 다 날렸다...`, `The pot (${PT(p.pot || ybPot(p.k - 1))}) is gone...`) : TR('여기 있었지롱~', 'It was here~'), zx, 167, 9, 'center', al, '#ffffff');
+        label(p.lostRun > 1 ? TR(`${p.lostRun}연속 끊겼다... 다음 판은 ${PT(YB_BASE)}부터`, `${p.lostRun} in a row broken... next round from ${PT(YB_BASE)}`) : TR('여기 있었지롱~', 'It was here~'), zx, 167, 9, 'center', al, '#ffffff');
       }
     }
     // double or take: two buttons on the skirt, the pot over them
@@ -3915,13 +3920,13 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
       ctx.font = '900 15px system-ui, -apple-system, "Noto Sans KR", sans-serif';
       label(t0, zx, 81, Math.min(15, 15 * (bw - 14) / ctx.measureText(t0).width), 'center', al * a, '#ffe0a8');
       label(TR('쥐가 뚜껑을 섞어요. 황금똥이 든 뚜껑을 탭!', 'The mouse shuffles the lids - tap the one hiding the golden poop'), zx, 100, 7.5, 'center', al * a, '#ffffff');
-      label(TR(`맞히면 판돈 2배+연속 보너스, 틀리면 다 잃어요 (최대 ${ybPot(YB_N - 1).toLocaleString('en-US')}점)`, `Right: double the pot and a bonus. Wrong: lose it all (up to ${ybPot(YB_N - 1).toLocaleString('en-US')})`), zx, 113, 7.5, 'center', al * a, '#ffe68a');
+      label(TR(`5판 모두! 맞히면 점수, 연속으로 맞히면 2배씩 (최대 ${(YB_BASE * 31).toLocaleString('en-US')}점)`, `All 5 rounds! Right: points, doubled for each in a row (up to ${(YB_BASE * 31).toLocaleString('en-US')})`), zx, 113, 7.5, 'center', al * a, '#ffe68a');
     }
     if (p.st === 'done') {
       const v = G.t - p.stT, a = Math.min(1, v / 0.25) * Math.max(0, Math.min(1, (YB_END - v) / 0.35));
       const sweep = p.res.length === YB_N && p.res.every((r) => r === 'win');
       A(a * 0.86); rrect(zx - 112, 66, 224, 56, 8); ctx.fillStyle = '#10141e'; ctx.fill(); A(1);
-      label(sweep ? TR('싹쓸이!', 'Clean sweep!') : p.gain ? TR('챙겼다!', 'Banked it!') : TR('다 털렸다...', 'Lost it all...'), zx, 82, 15, 'center', a, p.gain ? '#ffe68a' : '#ffd0dc');
+      label(sweep ? TR('싹쓸이!', 'Clean sweep!') : p.gain ? TR('챙겼다!', 'Banked it!') : TR('하나도 못 맞혔다...', 'Not a single one...'), zx, 82, 15, 'center', a, p.gain ? '#ffe68a' : '#ffd0dc');
       label(`+${PT(p.gain)}`, zx, 104, 10, 'center', a, '#ffe68a');
     }
     ctx.globalAlpha = 1;
@@ -5098,7 +5103,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   }
   function rrect(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, w, h, r) : ctx.rect(x, y, w, h); }
   // the jump and slide buttons: a circle with its name in it (1.2 times the old arrow buttons)
-  const BTN_R = 19.2, BTN_M = 8.5;                        // radius, the gap to the screen's edges
+  const BTN_R = 23.04, BTN_M = 8.5;                       // radius (v65: 20% bigger, was 19.2), the gap to the screen's edges
   function button(cx, cy, text, on) {
     const r = BTN_R;
     ctx.beginPath(); ctx.arc(cx, cy, r + 0.8, 0, 6.29); ctx.fillStyle = 'rgba(26,10,20,0.55)'; ctx.fill();
@@ -5402,7 +5407,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     if (G.mem) return live(G.mem, ['intro', 'done']) ? ['mem', G.mem.run || 0] : null;
     if (G.pk) return live(G.pk, ['intro', 'done']) ? ['pk', G.pk.run || 0] : null;
     if (G.sl) return live(G.sl, ['intro', 'done']) ? ['sl', G.sl.run || 0] : null;
-    if (G.yb) return live(G.yb, ['intro', 'done']) ? ['yb', G.yb.res.includes('lose') ? 0 : G.yb.res.filter((r) => r === 'win').length] : null;
+    if (G.yb) return live(G.yb, ['intro', 'done']) ? ['yb', G.yb.streak || 0] : null;     // (v65: the run of rights now, every round played)
     if (G.tw) return live(G.tw, ['intro', 'done']) ? ['tw', G.tw.streak] : null;
     if (G.ar) return live(G.ar, ['intro', 'done']) ? ['ar', G.ar.streak] : null;
     return null;
@@ -5489,10 +5494,13 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
   document.getElementById('bSetBack').onclick = () => { if (G.mode === 'lobby') { show('setBox', false); SND.play('ui'); } else resume(); };     // (v59: the lobby's settings too)
   document.getElementById('bRevive').onclick = () => revive();
   for (const id of ['bLobby', 'bLobby2', 'bSelBack']) document.getElementById(id).onclick = () => { if (SND.ctx && SND.ctx.state === 'suspended') SND.unlock(); SND.play('ui'); goLobby(); };     // (v59) to the lobby
-  document.getElementById('bSwap').onclick = () => { SET.swap = !SET.swap; try { localStorage.setItem('bodyrun.swap', SET.swap ? '1' : '0'); } catch (e) { /* storage off */ } setLabels(); render(); };
+  // (v65) drawn again for the screen it is on: from the lobby (or the title) the run's scene is not there to draw (the
+  // switches in the settings opened from the lobby's gear drew it and failed)
+  const redraw = () => { if (G.mode === 'lobby') renderLobby(); else if (G.mode === 'title') renderTitle(); else if (G.mode !== 'select') render(); };
+  document.getElementById('bSwap').onclick = () => { SET.swap = !SET.swap; try { localStorage.setItem('bodyrun.swap2', SET.swap ? '1' : '0'); } catch (e) { /* storage off */ } setLabels(); redraw(); };
   document.getElementById('bSfx').onclick = () => { SND.setMute('sfx', !SND.muted('sfx')); setLabels(); };
   document.getElementById('bAcct').onclick = () => { if (NET.user) NET.logout(); else NET.login(); };     // (v64)
-  document.getElementById('bGod').onclick = () => { SET.god = !SET.god; try { localStorage.setItem('bodyrun.god', SET.god ? '1' : '0'); } catch (e) { /* storage off */ } setLabels(); render(); };
+  document.getElementById('bGod').onclick = () => { SET.god = !SET.god; try { localStorage.setItem('bodyrun.god', SET.god ? '1' : '0'); } catch (e) { /* storage off */ } setLabels(); redraw(); };
   document.getElementById('bMus').onclick = () => { SND.setMute('music', !SND.muted('music')); setLabels(); };
   document.getElementById('bAgain').onclick = () => startGame(G.char);
   document.getElementById('bChar2').onclick = () => { selectMode = 'start'; buildSelect(); G.mode = 'select'; SND.ambience(false); show('overBox', false); show('hudText', false); show('select', true); };
@@ -5603,7 +5611,7 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     },
   };
   const mgKey = (g) => MG_KEYS.find((k) => G[k] === g);
-  const mgCur = (k) => { const g = G[k]; if (!g) return 0; return Math.max(0, k === 'yb' ? (g.gain || g.pot || 0) : (g.gain || 0)); };
+  const mgCur = (k) => { const g = G[k]; if (!g) return 0; return Math.max(0, g.gain || 0); };     // (v65: the shell game adds up as it goes too)
   // (from bankGame, as a game ends, before its score goes into the run's)
   function netGameEnd(g) {
     const k = mgKey(g); if (!k) return;

@@ -5472,19 +5472,17 @@ window.__MANIFEST={"themes":{"eso":{"coin":"vitC","special":"fiber","obs":{"low"
     show('select', false); show('pauseBox', false); show('setBox', false); show('overBox', false); show('hudText', true);
     if (!CAPTURE) { SND.unlock(); SND.stopSong(0.2); SND.stopLoop(0.2); SND.spin(null); SND.play('ui'); SND.ambience(true); getReady(); }
     newRun(c, opts); G.station = -1; step(0); last = performance.now();
-    // (v66) lock the side the player already sees the picture on: a bare 'landscape' let the phone pick a side, and with
-    // auto-rotate off it took the other one (the game turned 180 degrees as it started)
-    try { if (!CAPTURE && document.documentElement.requestFullscreen && matchMedia('(pointer: coarse)').matches) { const want = landSide(); document.documentElement.requestFullscreen().then(() => { if (want) screen.orientation.lock(want).catch(() => {}); }).catch(() => {}); } } catch (e) { /* not allowed here */ }
+    // (v67) the screen must not turn as the game starts. v65 locked a bare 'landscape', v66 the named side it worked out —
+    // on the user's Galaxy (auto-rotate off) both turned the game 180 degrees, so no guess about which name is which side:
+    // - the page still upright with the picture turned by us (rot): no lock at all — the phone's own lock keeps it, nothing turns
+    // - already landscape: lock the side it is on, and if the phone turned anyway (its names the other way round), lock
+    //   the other name to come back; still not back → let go
+    try { if (!CAPTURE && document.documentElement.requestFullscreen && matchMedia('(pointer: coarse)').matches) { const keep = rot ? null : holdSide(); document.documentElement.requestFullscreen().then(() => { if (keep) keep(); }).catch(() => {}); } } catch (e) { /* not allowed here */ }
   }
-  // the landscape that shows the picture the way it is on the screen now: already landscape → this one; held upright
-  // with the picture turned a quarter clockwise (rot) → the one whose angle is 90 more (Android's angle is the drawn
-  // picture's clockwise turn). The names for an angle follow the screen's natural shape (phones tall, some tablets wide)
-  function landSide() {
-    const so = screen.orientation; if (!so || !so.lock) return null;
-    const ang = ((so.angle || 0) % 360 + 360) % 360, type = so.type || '';
-    if (!rot) return /^landscape-/.test(type) ? type : null;
-    const tall = /^portrait/.test(type) === (ang % 180 === 0), a = (ang + 90) % 360;
-    return tall ? (a === 90 ? 'landscape-primary' : a === 270 ? 'landscape-secondary' : null) : (a === 0 ? 'landscape-primary' : a === 180 ? 'landscape-secondary' : null);
+  function holdSide() {
+    const so = screen.orientation; if (!so || !so.lock || !/^landscape-(primary|secondary)$/.test(so.type || '')) return null;
+    const a0 = so.angle, t0 = so.type, t1 = t0 === 'landscape-primary' ? 'landscape-secondary' : 'landscape-primary';
+    return () => so.lock(t0).then(() => { if (so.angle !== a0) return so.lock(t1).then(() => { if (so.angle !== a0) so.unlock(); }); }).catch(() => {});
   }
   function buildSelect() {
     const grid = document.getElementById('grid'); grid.innerHTML = '';

@@ -116,7 +116,12 @@
   // + the mini-games (each its own points). The parts are kept for the end card
   const M_UNITS = 10, OB_PTS = { perfect: 50, early: 25, late: 25 };
   // (v49) a mini-game's points go into the score when it ends (until then they are its own, shown on its card)
-  const bankGame = (g) => { if (g) netGameEnd(g); if (g && g.gain) { G.score = Math.max(0, G.score + g.gain); g.gain = 0; } };
+  // (v68) and is seen going in: its points come up in the middle and fly into the score at the top (drawScoreFly); the
+  // score shown holds them back till they land, then counts them up. Not as a run ends (gameOver: fly false)
+  const bankGame = (g, fly = true) => {
+    if (g) netGameEnd(g);
+    if (g && g.gain) { const s0 = G.score; G.score = Math.max(0, G.score + g.gain); g.gain = 0; const n = G.score - s0; if (fly && n && G.fly) G.fly.push({ n, t0: G.t }); }
+  };
   // (v57) combos in every mini-game: a game of a few tries (baseball, the shoot-out, the jackpot, memory, the shell
   // game) pays each success in a row 20% more of its points for each one before it in the row (the 2nd +20%, the 3rd
   // +40%, ...); a game of many quick hits (the orbit stage, the germ game) multiplies like the rhythm stage (up to 2.6
@@ -272,7 +277,7 @@
       invul: 0, nudge: 0, char: charName, obs: [], items: [], pops: [], puffs: [],
       genX: 520, genStation: undefined, lastGate: -1e9, R: rng(12345), runT: 0, nextHealT: HEAL_EVERY, station: -1, theme: COURSE[0][3], prevTheme: null, fade: 1, banner: 0, lapShown: 0,
       blinkAt: -1, blinkR: rng(4242), vt: 0, rh: null, orb: null, bb: null, wm: null, mem: null, pk: null, sl: null, yb: null, tw: null, ar: null, slLap: -1, cut: null, cutTail: null, bounce: false, pitObj: null,
-      o2n: 0, boost: 0, boostT0: -9, boostHeld: 0, boosts: 0, fire: [], fxR: rng(9191), best0: loadBest(),
+      o2n: 0, boost: 0, boostT0: -9, boostHeld: 0, boosts: 0, fire: [], fxR: rng(9191), best0: loadBest(), fly: [],
       intro: [[1950, 'spike'], [3650, 'drop'], [5420, 'pit'], [7250, 'shot'], [9130, 'door']],
     });
     // (v60) the start items; getting up again; the coins paid; the first run's lessons
@@ -2204,7 +2209,7 @@
       }
       for (const m of w.moles) {
         const gone = m.st === 'hit' ? G.t - m.tH > WM_SQUASH + WM_HITSINK : G.t - m.t0 > WM_RISE + m.stay + WM_SINK;
-        if (gone) { m.gone = true; w.free[m.h] = G.t; if (m.st === 'up' && !m.good) { w.missed++; w.combo = 0; } }     // (v57: one got away: the combo is broken)
+        if (gone) { m.gone = true; w.free[m.h] = G.t; if (m.st === 'up' && !m.good) w.missed++; }     // (v68: one got away: the combo goes on — only tapping a good one breaks it; v57 broke it here)
       }
       w.moles = w.moles.filter((m) => !m.gone);
       if (u >= WM_T && !w.moles.length) { w.st = 'done'; w.stT = G.t; SND.play(w.caught ? 'orbClear' : 'bbOut'); }
@@ -4707,20 +4712,32 @@
     // (v50) the score: in the middle, over the progress bar (between the place's name and the bar's marks), as points
     // with no coin by it (a coin there read as the coins you collect); how far, small, at its right
     {
-      const s = PT(G.score), SC = 9.5, y = SCORE_Y;
-      label(s, NW / 2, y, SC, 'center');
+      // (v68) a mini-game's points flying in are held back till they land, then counted up, the score bigger and gold
+      // for a moment (the things at its sides make room as it grows)
+      const sh = scoreShown(), pop = scorePop(), SC0 = 9.5, SC = SC0 * (1 + 0.3 * pop.k), y = SCORE_Y;
+      const s = PT(sh);
+      if (pop.k > 0.01) {
+        ctx.font = `900 ${SC}px system-ui, -apple-system, "Noto Sans KR", sans-serif`;
+        const gw = ctx.measureText(s).width * 0.62 + 10, gl = ctx.createRadialGradient(NW / 2, y, 0, NW / 2, y, gw);
+        const gc = pop.neg ? '255,110,140' : '255,214,80';
+        gl.addColorStop(0, `rgba(${gc},${0.55 * pop.k})`); gl.addColorStop(1, `rgba(${gc},0)`);
+        ctx.fillStyle = gl; ctx.fillRect(NW / 2 - gw, y - gw, gw * 2, gw * 2);
+      }
+      label(s, NW / 2, y, SC, 'center', 1, pop.on ? (pop.neg ? '#ff8aa0' : '#ffe14a') : '#fff3c8');
       ctx.font = `900 ${SC}px system-ui, -apple-system, "Noto Sans KR", sans-serif`;
       const tw = ctx.measureText(s).width;
+      ctx.font = `900 ${SC0 * 1.3}px system-ui, -apple-system, "Noto Sans KR", sans-serif`;
+      const twMax = ctx.measureText(s).width;                // (which side the best goes is chosen for the score at its biggest: it stays put)
       const ds = `${G.distM.toLocaleString('en-US')}m`;
       label(ds, NW / 2 + tw / 2 + 4, y + 0.6, 6, 'left', 1, '#d8e8ff');
       // (v57) the best (this browser's), small at its left (or, where that would run into the booster's count, at the
       // right after the distance); past it, this run is the best: it shows this run's, brighter
-      const bs = Math.max(G.best0 || 0, G.score), nb = G.score > (G.best0 || 0) && G.score > 0;
+      const bs = Math.max(G.best0 || 0, sh), nb = sh > (G.best0 || 0) && sh > 0;
       if (bs > 0) {
         const bt = `${TR('최고', 'Best')} ${bs.toLocaleString('en-US')}`;
         ctx.font = `900 6px system-ui, -apple-system, "Noto Sans KR", sans-serif`;
         const bw = ctx.measureText(bt).width, dw = ctx.measureText(ds).width, gR = x0 + 62 + 3 + ctx.measureText(`${G.o2n}/${boostNeed()}`).width;
-        if (NW / 2 - tw / 2 - 4 - bw > gR + 4) label(bt, NW / 2 - tw / 2 - 4, y + 0.6, 6, 'right', 1, nb ? '#ffe14a' : '#ffe68a');
+        if (NW / 2 - twMax / 2 - 4 - bw > gR + 4) label(bt, NW / 2 - tw / 2 - 4, y + 0.6, 6, 'right', 1, nb ? '#ffe14a' : '#ffe68a');
         else label(bt, NW / 2 + tw / 2 + 4 + dw + 5, y + 0.6, 6, 'left', 1, nb ? '#ffe14a' : '#ffe68a');
       }
     }
@@ -4831,7 +4848,9 @@
       drawGameCombo();
       drawGameBest();                                        // (v64) the best of all players in the game on now
       if (G.cut || G.cutTail) drawCut();
+      drawScoreBurst();                                      // (v68) a mini-game's points landing in the score (under it)
       drawHud();
+      drawScoreFly();                                        // (v68) and flying into it
       drawNetToast(false);
     }
     // the place's name grows in for a moment when you arrive
@@ -4871,6 +4890,92 @@
     label('combo', x + w + 1.2, y + 2.4, 7, 'left', 1, '#fff3c8');
   }
 
+  // ---------------------------------------------------------------- (v68) a mini-game's points going into the score
+  // As a game ends (bankGame) its points come up big in the middle (a pop), wait a moment, then are sucked up into the
+  // score at the top, faster as they go and smaller, a gold streak behind them; where they land, a burst, and the score
+  // counts them up (scoreShown, scorePop: in the HUD). On the game's own clock (it stops with the pause)
+  const FLY_POP = 0.3, FLY_HOLD = 0.35, FLY_GO = 0.45, FLY_IN = FLY_POP + FLY_HOLD + FLY_GO, FLY_COUNT = 0.55, FLY_BURST = 0.45;
+  const FLY_END = FLY_IN + Math.max(FLY_COUNT + 0.15, FLY_BURST), FLY_Y = 82;
+  const easeOut3 = (v) => { v = Math.max(0, Math.min(1, v)); return 1 - (1 - v) ** 3; };
+  const backOut = (v) => { const c = 1.70158, q = Math.max(0, Math.min(1, v)) - 1; return 1 + (c + 1) * q * q * q + c * q * q; };
+  // the score as shown: what is still flying held back, what has landed counted up
+  function scoreShown() {
+    let back = 0;
+    for (const f of G.fly || []) {
+      const u = G.t - f.t0;
+      if (u < FLY_IN) back += f.n; else if (u < FLY_IN + FLY_COUNT) back += Math.round(f.n * (1 - easeOut3((u - FLY_IN) / FLY_COUNT)));
+    }
+    return Math.max(0, G.score - back);
+  }
+  // the score's pop as points land: k 1 -> 0 (bigger, a glow), on: gold while it counts
+  function scorePop() {
+    let k = 0, on = false, neg = false;
+    for (const f of G.fly || []) {
+      const u = G.t - f.t0 - FLY_IN; if (u < 0) continue;
+      k = Math.max(k, 1 - easeOut3(u / 0.42)); if (u < FLY_COUNT + 0.15) { on = true; neg = f.n < 0; }
+    }
+    return { k, on, neg };
+  }
+  // where a flying number is u s after it came up: x, y, its size (1 = full), how clear; k: how far along the flight
+  function flyAt(u) {
+    const sx = NW / 2, sy = FLY_Y, tx = NW / 2, ty = SCORE_Y;
+    if (u < FLY_POP) { const k = u / FLY_POP; return { x: sx, y: sy, s: Math.max(0.05, backOut(k)), a: Math.min(1, k * 4), k: 0 }; }
+    if (u < FLY_POP + FLY_HOLD) return { x: sx, y: sy - 1.5 * Math.sin(((u - FLY_POP) / FLY_HOLD) * Math.PI), s: 1, a: 1, k: 0 };
+    const k = Math.max(0, Math.min(1, (u - FLY_POP - FLY_HOLD) / FLY_GO)), e = k * k;      // sucked in: slow, then faster and faster
+    const cx = sx + 26, cy = (sy + ty) / 2 + 6;                                              // on a curve, out to the right and in
+    const a = 1 - Math.max(0, Math.min(1, (k - 0.78) / 0.22));                               // (it melts into the score as it gets there)
+    return { x: (1 - e) * (1 - e) * sx + 2 * (1 - e) * e * cx + e * e * tx, y: (1 - e) * (1 - e) * sy + 2 * (1 - e) * e * cy + e * e * ty, s: 1 - 0.68 * e, a, k };
+  }
+  function drawScoreFly() {
+    if (!G.fly || !G.fly.length) return;
+    G.fly = G.fly.filter((f) => G.t - f.t0 < FLY_END);
+    const A = hudAlpha(); if (A <= 0) return;
+    world();
+    for (const f of G.fly) {
+      const u = G.t - f.t0, good = f.n > 0, col = good ? '#ffe14a' : '#ff8aa0', glow = good ? '255,214,80' : '255,110,140';
+      if (u < FLY_IN) {
+        const p = flyAt(u);
+        if (p.k > 0) {                                           // the streak behind it, along the way it came (longer as it speeds up)
+          const N = 16;
+          for (let i = N; i >= 1; i--) {
+            const kq = p.k - i * 0.03; if (kq < 0) continue;
+            const q = flyAt(FLY_POP + FLY_HOLD + kq * FLY_GO), w = 1 - i / (N + 1);
+            ctx.globalAlpha = A * 0.6 * w; ctx.beginPath(); ctx.arc(q.x, q.y, Math.max(0.3, 6 * q.s * w), 0, 6.2832); ctx.fillStyle = `rgb(${glow})`; ctx.fill();
+            ctx.globalAlpha = A * 0.8 * w; ctx.beginPath(); ctx.arc(q.x, q.y, Math.max(0.2, 2.4 * q.s * w), 0, 6.2832); ctx.fillStyle = '#fffbe8'; ctx.fill();
+            if (i % 3 === 0) {                                   // sparks left behind, drifting off it
+              const sd = Math.sin(i * 12.9898 + f.t0 * 78.233) * 43758.5453, side = (sd - Math.floor(sd)) * 2 - 1, drift = 3 + 7 * (i / N);
+              ctx.globalAlpha = A * 0.9 * w; ctx.beginPath(); ctx.arc(q.x + side * drift, q.y + drift * 0.4, 0.9 * w + 0.3, 0, 6.2832); ctx.fillStyle = '#ffffff'; ctx.fill();
+            }
+          }
+        }
+        const r = 30 * p.s, gl = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+        gl.addColorStop(0, `rgba(${glow},${0.42 * p.a})`); gl.addColorStop(1, `rgba(${glow},0)`);
+        ctx.globalAlpha = A; ctx.fillStyle = gl; ctx.fillRect(p.x - r, p.y - r, r * 2, r * 2);
+        label((good ? '+' : '') + PT(f.n), p.x, p.y, 21 * p.s, 'center', A * p.a, col);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+  // where it lands: a ring and sparks out from the score — drawn before the HUD, so they go out from under the score and
+  // never cover its digits
+  function drawScoreBurst() {
+    if (!G.fly || !G.fly.length) return;
+    const A = hudAlpha(); if (A <= 0) return;
+    world();
+    for (const f of G.fly) {
+      const b = G.t - f.t0 - FLY_IN; if (b < 0 || b >= FLY_BURST) continue;
+      const col = f.n > 0 ? '#ffe14a' : '#ff8aa0', v = b / FLY_BURST, d = easeOut3(v), x = NW / 2, y = SCORE_Y;
+      ctx.globalAlpha = A * (1 - v); ctx.lineWidth = 1.6 * (1 - v) + 0.2;      // (flat, along the score's row: off the name and the bar)
+      ctx.beginPath(); ctx.ellipse(x, y, 10 + 34 * d, 4 + 9 * d, 0, 0, 6.2832); ctx.strokeStyle = col; ctx.stroke();
+      for (let j = 0; j < 12; j++) {
+        const ang = j * 0.5236 + 0.26, rr = 6 + (j % 2 ? 16 : 22) * d;
+        ctx.beginPath(); ctx.arc(x + Math.cos(ang) * rr * 1.7, y + Math.sin(ang) * rr * 0.5, 1.5 * (1 - v) + 0.3, 0, 6.2832);
+        ctx.fillStyle = j % 2 ? '#ffffff' : col; ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
   // ---------------------------------------------------------------- labels, overlays
   function setLabel(st, lap) {
     document.getElementById('pname').textContent = TR(st[1], st[2]);       // (v47) one language
@@ -4895,7 +5000,8 @@
   }
   function gameOver() {
     G.mode = 'over'; show('overBox', true);
-    if (busy()) { for (const g of [G.rh, G.orb, G.bb, G.wm, G.mem, G.pk, G.sl, G.yb, G.tw, G.ar]) bankGame(g); G.rh = null; G.orb = null; G.bb = null; G.wm = null; G.mem = null; G.pk = null; G.sl = null; G.yb = null; G.tw = null; G.ar = null; G.cut = null; SND.stopSong(0.3); SND.stopLoop(0.3); SND.spin(null); }
+    G.fly = [];                                              // (v68) the score card shows it all: nothing still flying
+    if (busy()) { for (const g of [G.rh, G.orb, G.bb, G.wm, G.mem, G.pk, G.sl, G.yb, G.tw, G.ar]) bankGame(g, false); G.rh = null; G.orb = null; G.bb = null; G.wm = null; G.mem = null; G.pk = null; G.sl = null; G.yb = null; G.tw = null; G.ar = null; G.cut = null; SND.stopSong(0.3); SND.stopLoop(0.3); SND.spin(null); }
     SND.ambience(false); SND.play('over');
     // (v49) the end card: the score big, where it came from, how long and how far, the best (kept in this browser)
     const P = scoreParts(), f = (n) => n.toLocaleString('en-US');
@@ -5590,6 +5696,8 @@
     window.__bbSwing = () => bbSwing();
     window.__wm = () => { const w = G.wm; if (!w) return null; return { st: w.st, u: w.st === 'play' ? +(G.t - w.t0).toFixed(2) : null, caught: w.caught, missed: w.missed, oops: w.oops, gain: w.gain,
       moles: w.moles.map((m) => { const p = wmPlace(m), s = M.sprites[wmName(m)]; return { h: m.h, kind: m.kind, good: m.good, st: m.st, q: +p.q.toFixed(2), x: +p.x.toFixed(1), y: +(p.y - s.foot[1] * p.k * 0.55).toFixed(1) }; }) }; };
+    window.__fly = () => ({ t: G.t, score: G.score, shown: scoreShown(), pop: scorePop(), fly: (G.fly || []).map((f) => ({ n: f.n, u: +(G.t - f.t0).toFixed(3) })) });     // (v68)
+    window.__wmCombo = () => G.wm && G.wm.combo;
     window.__pk = () => { const p = G.pk; if (!p) return null; return { st: p.st, k: p.k, res: p.res.slice(), gain: p.gain, shot: p.shot ? { ...p.shot } : null, aim: p.aim.slice(), power: p.power, kind: p.kind, needle: pkNeedle(p), pad: p.pad && { ...p.pad } }; };
     window.__pkForce = (gx, gh, power) => { const p = G.pk; if (!p || p.st !== 'aim') return; p.aim = [gx, gh]; pkShoot(); p.power = power; p.kind = pkZone(power); };
     window.__tw = () => { const p = G.tw; if (!p) return null; return { st: p.st, n: p.blocks.length, xs: p.blocks.map((b) => +b.x.toFixed(1)), misses: p.misses, perf: p.perf, best: p.best, gain: p.gain, why: p.why, swing: p.cur ? +twSwing(p).toFixed(1) : null, top: +twTopX(p).toFixed(1), falling: p.fall.length, modes: p.fall.map((f) => f.mode), cam: +p.camS.toFixed(1), k: +p.kS.toFixed(3) }; };
